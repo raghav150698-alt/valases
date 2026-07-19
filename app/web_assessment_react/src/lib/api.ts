@@ -8,7 +8,9 @@ export const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const token = useSessionStore.getState().token;
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  // Issued-candidate requests provide their own short-lived bearer token.
+  // Never replace it with a recruiter token retained for this domain.
+  if (token && !config.headers.Authorization) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
@@ -16,7 +18,11 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401) {
-      useSessionStore.getState().clear();
+      const recruiterToken = useSessionStore.getState().token;
+      const requestAuthorization = String(error?.config?.headers?.Authorization || "");
+      if (recruiterToken && requestAuthorization === `Bearer ${recruiterToken}`) {
+        useSessionStore.getState().clear();
+      }
     }
     return Promise.reject(error);
   },
