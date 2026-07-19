@@ -166,6 +166,16 @@ def on_startup() -> None:
     try:
         init_db()
     except Exception as exc:
+        if settings.is_vercel and "already exists" in str(exc).lower():
+            # Concurrent Vercel cold starts can race during the first schema
+            # bootstrap. The winning instance creates the table; retry after
+            # it commits so this instance can continue normally.
+            time.sleep(0.25)
+            try:
+                init_db()
+                return
+            except Exception as retry_exc:
+                exc = retry_exc
         database_startup_failed = True
         database_startup_error = f"{type(exc).__name__}: {str(exc)}"
         for secret in (settings.database_url, settings.supabase_secret_key, settings.jwt_secret_key):
