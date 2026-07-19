@@ -21,6 +21,7 @@ from app.live_ws import register_live_websocket
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
 request_logger = logging.getLogger("certora.request")
+database_startup_failed = False
 WEB_DIR = Path(__file__).resolve().parent / "web"
 ASSETS_DIR = WEB_DIR / "assets"
 ASSESSMENT_WEB_DIST_DIR = Path(__file__).resolve().parent / "web_assessment_react" / "dist"
@@ -160,12 +161,25 @@ async def enforce_basic_rate_limits(request: Request, call_next):
 
 @app.on_event("startup")
 def on_startup() -> None:
-    init_db()
+    global database_startup_failed
+    try:
+        init_db()
+    except Exception:
+        database_startup_failed = True
+        request_logger.exception("database_initialization_failed")
+        # Vercel should still be able to serve the assessment shell while a
+        # database configuration problem is being diagnosed. Local startup
+        # remains strict so development failures are visible immediately.
+        if not settings.is_vercel:
+            raise
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "degraded" if database_startup_failed else "ok",
+        "database": "unavailable" if database_startup_failed else "ready",
+    }
 
 
 @app.get("/favicon.ico")
