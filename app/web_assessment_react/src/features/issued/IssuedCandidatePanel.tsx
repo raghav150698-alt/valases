@@ -47,6 +47,7 @@ export function IssuedCandidatePanel() {
   const [proctorEvents, setProctorEvents] = useState<Array<Record<string, unknown>>>([]);
   const [policyWarning, setPolicyWarning] = useState<{ reason: string; count: number } | null>(null);
   const [consentAccepted, setConsentAccepted] = useState(false);
+  const [completion, setCompletion] = useState<{ title: string; message: string } | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -88,6 +89,7 @@ export function IssuedCandidatePanel() {
     setProctorEvents([]);
     setPolicyWarning(null);
     setConsentAccepted(false);
+    setCompletion(null);
     setStatus("");
   };
 
@@ -116,7 +118,7 @@ export function IssuedCandidatePanel() {
   const current = useMemo(() => (paper ? paper.questions[index] : null), [paper, index]);
   const isMcqAssessment = paper?.assessment_type === "mcq";
 
-  const submit = async (endedByExit = false) => {
+  const submit = async (endReason: "fullscreen" | "policy" | "manual" | null = null) => {
     if (!paper) return;
     const submittedData = paper.assessment_type === "spreadsheet"
       ? (excelSubmission || { final_sheet_json: {}, formulas_json: {}, calculated_values_json: {}, activity_log: [] })
@@ -125,18 +127,37 @@ export function IssuedCandidatePanel() {
         : paper.assessment_type === "tax_simulator"
           ? { entered_form_values: taxValues, identified_red_flags: identifiedFlags.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean), notes: taskResponse, attachment_url: taskFileLink }
           : { response_text: taskResponse, attachment_url: taskFileLink };
-    const response = await issuedApi<{ passed: boolean; score_pct: number; status: string }>("POST", "/exams/issued/submit", {
-      answers: Object.fromEntries(Object.entries(answers).map(([qid, selected]) => [qid, selected])),
-      submitted_data: submittedData,
-      proctoring_events: proctorEvents,
-      time_taken_seconds: 0,
-    });
-    setPaper(null);
-    setStatus(
-      endedByExit
-        ? `Assessment ended. Score ${Number(response.score_pct || 0).toFixed(2)}% | ${response.status}`
-        : `${response.passed ? "PASS" : "FAIL"} | score ${Number(response.score_pct || 0).toFixed(2)}% | ${response.status}`,
-    );
+    try {
+      const response = await issuedApi<{ passed: boolean; score_pct: number; status: string }>("POST", "/exams/issued/submit", {
+        answers: Object.fromEntries(Object.entries(answers).map(([qid, selected]) => [qid, selected])),
+        submitted_data: submittedData,
+        proctoring_events: proctorEvents,
+        time_taken_seconds: 0,
+      });
+      setPaper(null);
+      setCompletion({
+        title: endReason ? "Assessment ended" : "Assessment submitted",
+        message: endReason === "fullscreen"
+          ? "Your session ended because fullscreen was exited. Your work and integrity events were sent for review."
+          : endReason === "policy"
+            ? "Your session ended after the assessment integrity warning limit was reached. Your work was sent for review."
+            : endReason === "manual"
+              ? "You ended this assessment. Your completed work was submitted for review."
+          : `Thank you. Your assessment was submitted successfully with status: ${response.status}.`,
+      });
+    } catch {
+      if (endReason) {
+        setPaper(null);
+        setCompletion({
+          title: "Assessment ended",
+          message: endReason === "fullscreen"
+            ? "Fullscreen was exited and this session is now closed. The recorded activity will be reviewed."
+            : "This session is now closed. Your recorded work and integrity activity will be reviewed.",
+        });
+      } else {
+        setStatus("Submission failed. Check your connection and try again.");
+      }
+    }
   };
 
   const recordProctorEvent = async (reason: string, severity = "warning") => {
@@ -157,15 +178,15 @@ export function IssuedCandidatePanel() {
     }
   };
 
-  const { confirmExit, fullscreenRequired, requestFullscreen, warningCount } = useAssessmentSession({
+  const { confirmExit, fullscreenRequired, requestFullscreen, warningCount, escapeWarningVisible, keepAssessmentOpen, endAssessmentFromEscape } = useAssessmentSession({
     active: Boolean(paper && consentAccepted),
     exitWarning: "Exiting now will end this assessment. Do you want to continue?",
     onExitConfirmed: () => {
-      if (isMcqAssessment) {
-        void submit(true);
-        return;
-      }
-      window.location.replace("about:blank");
+      void submit("manual");
+    },
+    onFullscreenExited: () => {
+      setPolicyWarning({ reason: "Fullscreen was exited. The assessment is ending", count: 5 });
+      void recordProctorEvent("Fullscreen was exited", "critical").finally(() => submit("fullscreen"));
     },
     onPolicyWarning: (reason, count) => {
       setPolicyWarning({ reason, count });
@@ -174,7 +195,7 @@ export function IssuedCandidatePanel() {
     onPolicyTerminated: async (reason) => {
       setPolicyWarning({ reason: `Assessment closed: ${reason}`, count: 5 });
       await recordProctorEvent(reason, "critical");
-      await submit(true);
+      await submit("policy");
     },
   });
 
@@ -183,7 +204,7 @@ export function IssuedCandidatePanel() {
     durationMinutes: Number(paper?.duration_minutes || 30),
     timePerQuestionSeconds: Number(paper?.time_per_question_seconds || 30),
     questionIndex: index,
-    enabled: Boolean(paper && consentAccepted),
+    enabled: Boolean(paper && consentAccepted && !policyWarning && !escapeWarningVisible),
     onAssessmentTimeUp: () => { void submit(); },
     onQuestionTimeUp: () => {
       if (!paper) return;
@@ -192,8 +213,21 @@ export function IssuedCandidatePanel() {
     },
   });
 
+  if (completion) {
+    return (
+      <section className="assessment-thank-you" role="status">
+        <div className="assessment-thank-you-mark" aria-hidden="true">C</div>
+        <span className="launch-section-label">Certora Assessments</span>
+        <h1>{completion.title}</h1>
+        <p>{completion.message}</p>
+        <strong>Thank you for your time.</strong>
+        <small>You may now close this browser tab.</small>
+      </section>
+    );
+  }
+
   return (
-    <section className="card issued-access-card">
+    <section className={`card issued-access-card${paper && consentAccepted ? " active-session" : ""}`}>
       <div className="workspace-section-head">
         <div>
           <span className="launch-section-label">Issued assessment access</span>
@@ -247,12 +281,26 @@ export function IssuedCandidatePanel() {
             </div>
           )}
           {policyWarning && (
-            <div className={`assessment-policy-banner${warningCount >= 5 ? " critical" : ""}`} role="alert">
-              <div>
-                <strong>{warningCount >= 5 ? "Assessment closed" : "Security warning"}</strong>
-                <span>{policyWarning.reason}. Warning {policyWarning.count} of 5.</span>
+            <div className="assessment-blocking-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="policy-warning-title">
+              <div className={`assessment-warning-dialog${warningCount >= 5 ? " critical" : ""}`}>
+                <span className="launch-section-label">Integrity check</span>
+                <h2 id="policy-warning-title">{warningCount >= 5 ? "Assessment closed" : "Please return your attention to the assessment"}</h2>
+                <p>{policyWarning.reason}. Warning {policyWarning.count} of 5.</p>
+                {warningCount < 5 && <button type="button" onClick={() => setPolicyWarning(null)}>Continue Assessment</button>}
               </div>
-              {warningCount < 5 && <button type="button" onClick={() => setPolicyWarning(null)}>Dismiss</button>}
+            </div>
+          )}
+          {escapeWarningVisible && (
+            <div className="assessment-blocking-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="escape-warning-title">
+              <div className="assessment-warning-dialog critical">
+                <span className="launch-section-label">Fullscreen protection</span>
+                <h2 id="escape-warning-title">Leaving fullscreen will end this assessment</h2>
+                <p>Your current work will be submitted and the session will close if fullscreen is exited.</p>
+                <div className="assessment-dialog-actions">
+                  <button type="button" className="secondary-btn" onClick={keepAssessmentOpen}>Keep Assessment Open</button>
+                  <button type="button" className="assessment-exit-btn" onClick={endAssessmentFromEscape}>End Assessment</button>
+                </div>
+              </div>
             </div>
           )}
           <div className="assessment-runtime-header">
@@ -285,7 +333,10 @@ export function IssuedCandidatePanel() {
                   time_taken_seconds: 0,
                 });
                 setPaper(null);
-                setStatus(`${response.passed ? "PASS" : "FAIL"} | score ${Number(response.score_pct || 0).toFixed(2)}% | ${response.status}`);
+                setCompletion({
+                  title: "Assessment submitted",
+                  message: `Thank you. Your assessment was submitted successfully with status: ${response.status}.`,
+                });
               }}
             />
           )}

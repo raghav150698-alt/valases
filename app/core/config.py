@@ -1,6 +1,7 @@
 import os
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -138,6 +139,12 @@ class Settings(BaseSettings):
             raw = "postgresql+psycopg://" + raw[len("postgres://"):]
         elif raw.startswith("postgresql://"):
             raw = "postgresql+psycopg://" + raw[len("postgresql://"):]
+        if raw.startswith("postgresql+psycopg://"):
+            # Supabase's dashboard may append pgbouncer=true, but psycopg
+            # does not recognize that as a libpq connection option.
+            parsed = urlsplit(raw)
+            query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key.lower() != "pgbouncer"]
+            raw = urlunsplit(parsed._replace(query=urlencode(query)))
         if not self.is_vercel:
             return raw
         if raw.startswith("sqlite"):

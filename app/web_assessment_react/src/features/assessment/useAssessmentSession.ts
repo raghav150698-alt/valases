@@ -5,14 +5,16 @@ type AssessmentSessionOptions = {
   active: boolean;
   exitWarning: string;
   onExitConfirmed: () => void;
+  onFullscreenExited?: () => void;
   onPolicyWarning?: (reason: string, warningCount: number) => void;
   onPolicyTerminated?: (reason: string, warningCount: number) => void;
 };
 
 const MAX_WARNINGS = 5;
 
-export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onPolicyWarning, onPolicyTerminated }: AssessmentSessionOptions) {
+export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onFullscreenExited, onPolicyWarning, onPolicyTerminated }: AssessmentSessionOptions) {
   const [fullscreenRequired, setFullscreenRequired] = useState(false);
+  const [escapeWarningVisible, setEscapeWarningVisible] = useState(false);
   const [warningCount, setWarningCount] = useState(0);
   const [lastWarning, setLastWarning] = useState<string | null>(null);
   const warningCountRef = useRef(0);
@@ -20,8 +22,12 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onP
   const recentReasonsRef = useRef<Record<string, number>>({});
   const warningCallbackRef = useRef(onPolicyWarning);
   const terminatedCallbackRef = useRef(onPolicyTerminated);
+  const fullscreenExitedCallbackRef = useRef(onFullscreenExited);
+  const exitConfirmedCallbackRef = useRef(onExitConfirmed);
   warningCallbackRef.current = onPolicyWarning;
   terminatedCallbackRef.current = onPolicyTerminated;
+  fullscreenExitedCallbackRef.current = onFullscreenExited;
+  exitConfirmedCallbackRef.current = onExitConfirmed;
 
   const requestFullscreen = useCallback(async () => {
     if (typeof document === "undefined") return;
@@ -43,11 +49,23 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onP
     onExitConfirmed();
   }, [exitWarning, onExitConfirmed]);
 
+  const keepAssessmentOpen = useCallback(() => {
+    setEscapeWarningVisible(false);
+    void requestFullscreen();
+  }, [requestFullscreen]);
+
+  const endAssessmentFromEscape = useCallback(() => {
+    terminatedRef.current = true;
+    setEscapeWarningVisible(false);
+    exitConfirmedCallbackRef.current();
+  }, []);
+
   useEffect(() => {
     if (!active) {
       setFullscreenRequired(false);
       setWarningCount(0);
       setLastWarning(null);
+      setEscapeWarningVisible(false);
       warningCountRef.current = 0;
       terminatedRef.current = false;
       return;
@@ -79,7 +97,15 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onP
     const handleFullscreenChange = () => {
       const missing = !document.fullscreenElement;
       setFullscreenRequired(missing);
-      if (missing) recordViolation("Fullscreen was exited", true);
+      if (missing && !terminatedRef.current) {
+        setEscapeWarningVisible(false);
+        if (fullscreenExitedCallbackRef.current) {
+          terminatedRef.current = true;
+          fullscreenExitedCallbackRef.current();
+        } else {
+          recordViolation("Fullscreen was exited", true);
+        }
+      }
     };
 
     const handleVisibilityChange = () => {
@@ -95,6 +121,13 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onP
       recordViolation(`Clipboard ${event.type} was blocked`);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && document.fullscreenElement) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (fullscreenExitedCallbackRef.current) setEscapeWarningVisible(true);
+        else confirmExit();
+        return;
+      }
       const blocked = event.key === "F12" ||
         (event.ctrlKey && event.shiftKey && ["I", "J", "C"].includes(event.key.toUpperCase())) ||
         (event.ctrlKey && ["U", "P"].includes(event.key.toUpperCase()));
@@ -102,6 +135,21 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onP
         event.preventDefault();
         recordViolation("A restricted browser shortcut was used");
       }
+    };
+
+    const handleProctorSignal = (event: Event) => {
+      const detail = (event as CustomEvent<{ event_type?: string; duration_ms?: number }>).detail || {};
+      const eventType = String(detail.event_type || "").toLowerCase();
+      const durationMs = Number(detail.duration_ms || 0);
+      const isSustainedGazeAway = ["look_away_over_2s", "gaze_away_over_3s", "gaze_pattern_review_flag"].includes(eventType);
+      if (isSustainedGazeAway && durationMs >= 2000) {
+        recordViolation("Sustained gaze away was detected");
+      }
+    };
+    const handleProctorMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const detail = event.data?.type === "certora:proctor-signal" ? event.data.detail : null;
+      if (detail) handleProctorSignal(new CustomEvent("certora:proctor-signal", { detail }));
     };
 
     const handlePopState = () => {
@@ -121,6 +169,8 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onP
     document.addEventListener("paste", handleClipboard);
     document.addEventListener("keydown", handleKeyDown);
     window.addEventListener("popstate", handlePopState);
+    window.addEventListener("certora:proctor-signal", handleProctorSignal);
+    window.addEventListener("message", handleProctorMessage);
 
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
@@ -133,6 +183,8 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onP
       document.removeEventListener("paste", handleClipboard);
       document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("popstate", handlePopState);
+      window.removeEventListener("certora:proctor-signal", handleProctorSignal);
+      window.removeEventListener("message", handleProctorMessage);
     };
   }, [active, confirmExit, exitWarning, requestFullscreen]);
 
@@ -140,6 +192,9 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onP
     confirmExit,
     fullscreenRequired,
     requestFullscreen,
+    escapeWarningVisible,
+    keepAssessmentOpen,
+    endAssessmentFromEscape,
     warningCount,
     lastWarning,
   };

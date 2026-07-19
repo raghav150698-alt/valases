@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { AuthPanel } from "../features/auth/AuthPanel";
 import { useAssessmentSession } from "../features/assessment/useAssessmentSession";
@@ -12,13 +12,23 @@ import { useSessionStore } from "../lib/sessionStore";
 
 type View = "provider";
 
-function exitServerTool() {
-  try {
-    window.close();
-  } catch {
-    // Browser may block closing a tab it did not open.
-  }
-  window.location.replace("about:blank");
+function AssessmentThankYou({ reason = "submitted" }: { reason?: "submitted" | "fullscreen" | "policy" }) {
+  const ended = reason !== "submitted";
+  const message = reason === "fullscreen"
+    ? "The session ended because fullscreen was exited. Your work and integrity events were sent for review."
+    : reason === "policy"
+      ? "The session ended after the assessment integrity warning limit was reached. Your work was sent for review."
+      : "Your work was submitted successfully.";
+  return (
+    <main className="assessment-thank-you" role="status">
+      <div className="assessment-thank-you-mark" aria-hidden="true">C</div>
+      <span className="launch-section-label">Certora Assessments</span>
+      <h1>{ended ? "Assessment ended" : "Assessment submitted"}</h1>
+      <p>{message}</p>
+      <strong>Thank you for your time.</strong>
+      <small>You may now close this browser tab.</small>
+    </main>
+  );
 }
 
 function EmbeddedToolShell({
@@ -31,19 +41,27 @@ function EmbeddedToolShell({
   sessionActive?: boolean;
 }) {
   const [policyWarning, setPolicyWarning] = useState<{ message: string; count: number } | null>(null);
-  const { fullscreenRequired, requestFullscreen } = useAssessmentSession({
+  const [ended, setEnded] = useState<{ reason: "submitted" | "fullscreen" | "policy" } | null>(null);
+  useEffect(() => {
+    const handleCompleted = () => setEnded({ reason: "submitted" });
+    window.addEventListener("certora:assessment-completed", handleCompleted);
+    return () => window.removeEventListener("certora:assessment-completed", handleCompleted);
+  }, []);
+  const { fullscreenRequired, requestFullscreen, escapeWarningVisible, keepAssessmentOpen, endAssessmentFromEscape } = useAssessmentSession({
     active: sessionActive,
     exitWarning: "Leaving this assessment will end the session. Do you want to continue?",
-    onExitConfirmed: exitServerTool,
+    onExitConfirmed: () => setEnded({ reason: "fullscreen" }),
+    onFullscreenExited: () => setEnded({ reason: "fullscreen" }),
     onPolicyWarning: (reason, count) => setPolicyWarning({ message: reason, count }),
     onPolicyTerminated: (reason, count) => {
       setPolicyWarning({ message: `Assessment closed: ${reason}`, count });
       window.setTimeout(() => {
-        onSubmitAssessment?.();
-        if (!onSubmitAssessment) exitServerTool();
+        setEnded({ reason: "policy" });
       }, 900);
     },
   });
+
+  if (ended) return <AssessmentThankYou reason={ended.reason} />;
 
   return (
     <div className="embedded-shell assessment-kiosk-shell">
@@ -55,10 +73,24 @@ function EmbeddedToolShell({
         </div>
       )}
       {policyWarning && (
-        <div className="assessment-policy-toast" role="alert">
-          <strong>{policyWarning.count >= 5 ? "Assessment closed" : "Security warning"}</strong>
-          <span>{policyWarning.message}. Warning {policyWarning.count} of 5.</span>
-          <button type="button" onClick={() => setPolicyWarning(null)}>Dismiss</button>
+        <div className="assessment-blocking-backdrop" role="alertdialog" aria-modal="true">
+          <div className={`assessment-warning-dialog${policyWarning.count >= 5 ? " critical" : ""}`}>
+            <h2>{policyWarning.count >= 5 ? "Assessment closed" : "Please return your attention to the assessment"}</h2>
+            <p>{policyWarning.message}. Warning {policyWarning.count} of 5.</p>
+            {policyWarning.count < 5 && <button type="button" onClick={() => setPolicyWarning(null)}>Continue Assessment</button>}
+          </div>
+        </div>
+      )}
+      {escapeWarningVisible && (
+        <div className="assessment-blocking-backdrop" role="alertdialog" aria-modal="true">
+          <div className="assessment-warning-dialog critical">
+            <h2>Leaving fullscreen will end this assessment</h2>
+            <p>Your current work will be submitted and the session will close.</p>
+            <div className="assessment-dialog-actions">
+              <button type="button" className="secondary-btn" onClick={keepAssessmentOpen}>Keep Assessment Open</button>
+              <button type="button" className="assessment-exit-btn" onClick={endAssessmentFromEscape}>End Assessment</button>
+            </div>
+          </div>
         </div>
       )}
       {children}
@@ -83,7 +115,7 @@ export function App() {
   const recruiterAuthenticated = role === "provider" || role === "admin";
   const handleToolSubmit = useCallback(() => {
     if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
-    exitServerTool();
+    window.dispatchEvent(new CustomEvent("certora:assessment-completed"));
   }, []);
   const recruiterWorkspaceBody = useMemo(() => {
     if (recruiterAuthenticated) {
