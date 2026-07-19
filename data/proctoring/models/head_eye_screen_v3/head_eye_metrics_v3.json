@@ -1,0 +1,119 @@
+{
+  "metrics": {
+    "binary_screen_vs_offscreen_accuracy": 0.8333333333333334,
+    "binary_screen_vs_offscreen_f1": 0.8593155893536122,
+    "rows_total": 870,
+    "rows_train": 648,
+    "rows_test": 222,
+    "group_train": 221,
+    "group_test": 56,
+    "class_counts": {
+      "offscreen_up": 133,
+      "offscreen_down": 126,
+      "head_up_screen_center": 109,
+      "head_down_screen_center": 100,
+      "head_straight_screen_center": 76,
+      "offscreen_left": 69,
+      "head_left_screen_center": 54,
+      "offscreen_right": 52,
+      "head_right_screen_center": 52,
+      "head_right_screen_top_left": 50,
+      "head_left_screen_top_right": 49
+    },
+    "feature_count": 25,
+    "selected_features": [
+      "left_eye_open",
+      "right_eye_open",
+      "left_gaze_x",
+      "right_gaze_x",
+      "left_gaze_y",
+      "right_gaze_y",
+      "avg_gaze_x",
+      "avg_gaze_y",
+      "vergence_x",
+      "vergence_y",
+      "comp_residual_x",
+      "comp_residual_y",
+      "yaw_gaze_product",
+      "pitch_gaze_product",
+      "yaw_residual_abs",
+      "pitch_residual_abs",
+      "eye_open_avg",
+      "eye_open_diff",
+      "left_sclera_balance",
+      "right_sclera_balance",
+      "head_rotation_mag",
+      "gaze_rotation_mag",
+      "residual_mag",
+      "yaw_plus_gaze_abs",
+      "pitch_plus_gaze_abs"
+    ],
+    "model_type": "RandomForestClassifier",
+    "split_type": "GroupShuffleSplit by source_path",
+    "feature_strategy": "Anatomy-relative eye/gaze residuals with reduced absolute head-pose dependence"
+  },
+  "binary_confusion_matrix": [
+    [
+      72,
+      14
+    ],
+    [
+      23,
+      113
+    ]
+  ],
+  "classification_report": {
+    "0": {
+      "precision": 0.7578947368421053,
+      "recall": 0.8372093023255814,
+      "f1-score": 0.7955801104972375,
+      "support": 86.0
+    },
+    "1": {
+      "precision": 0.889763779527559,
+      "recall": 0.8308823529411765,
+      "f1-score": 0.8593155893536122,
+      "support": 136.0
+    },
+    "accuracy": 0.8333333333333334,
+    "macro avg": {
+      "precision": 0.8238292581848321,
+      "recall": 0.834045827633379,
+      "f1-score": 0.8274478499254249,
+      "support": 222.0
+    },
+    "weighted avg": {
+      "precision": 0.8386793756043652,
+      "recall": 0.8333333333333334,
+      "f1-score": 0.8346252687155572,
+      "support": 222.0
+    }
+  },
+  "feature_importance": {
+    "left_eye_open": 0.05246651227125922,
+    "right_eye_open": 0.0260624347935877,
+    "left_gaze_x": 0.03440280183162536,
+    "right_gaze_x": 0.0160864032935197,
+    "left_gaze_y": 0.021181640437284474,
+    "right_gaze_y": 0.024382183809373303,
+    "avg_gaze_x": 0.02116114120238639,
+    "avg_gaze_y": 0.019206444816597876,
+    "vergence_x": 0.015742063682708404,
+    "vergence_y": 0.008161295812483335,
+    "comp_residual_x": 0.03558420327188811,
+    "comp_residual_y": 0.02766180541775337,
+    "yaw_gaze_product": 0.19639845016874083,
+    "pitch_gaze_product": 0.023314445045155164,
+    "yaw_residual_abs": 0.08009773690067429,
+    "pitch_residual_abs": 0.01665135432905198,
+    "eye_open_avg": 0.03669836464167445,
+    "eye_open_diff": 0.022848452793699733,
+    "left_sclera_balance": 0.033559760364826996,
+    "right_sclera_balance": 0.015795023813120368,
+    "head_rotation_mag": 0.029006452871655545,
+    "gaze_rotation_mag": 0.06718773470663,
+    "residual_mag": 0.04432815982568692,
+    "yaw_plus_gaze_abs": 0.10186252531122603,
+    "pitch_plus_gaze_abs": 0.030152608587390484
+  }
+}

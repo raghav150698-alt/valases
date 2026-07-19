@@ -1,0 +1,59 @@
+{
+  "rows_total": 576,
+  "rows_train": 456,
+  "rows_test": 120,
+  "split": {
+    "group_split_used": true,
+    "group_column": "path(base video id)",
+    "groups_train": 38,
+    "groups_test": 10,
+    "rows_train": 456,
+    "rows_test": 120
+  },
+  "class_distribution": {
+    "0": 288,
+    "1": 288
+  },
+  "reports": {
+    "logistic": {
+      "roc_auc": 1.0,
+      "selected": {
+        "threshold": 0.5,
+        "precision": 1.0,
+        "recall": 0.9666666666666667,
+        "fpr": 0.0,
+        "tp": 58,
+        "fp": 0,
+        "tn": 60,
+        "fn": 2
+      }
+    },
+    "xgboost": {
+      "roc_auc": 1.0,
+      "selected": {
+        "threshold": 0.5,
+        "precision": 1.0,
+        "recall": 1.0,
+        "fpr": 0.0,
+        "tp": 60,
+        "fp": 0,
+        "tn": 60,
+        "fn": 0
+      }
+    },
+    "cnn": {
+      "roc_auc": 0.9966666666666666,
+      "selected": {
+        "threshold": 0.5,
+        "precision": 1.0,
+        "recall": 0.95,
+        "fpr": 0.0,
+        "tp": 57,
+        "fp": 0,
+        "tn": 60,
+        "fn": 3
+      }
+    }
+  },
+  "chosen_model": "xgboost"
+}

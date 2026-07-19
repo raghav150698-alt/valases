@@ -1,0 +1,1762 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Classagon Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:FILL@0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260706b" />
+</head>
+<body>
+  <main>
+    <div id="workspaceBrand" class="workspace-brand hidden">
+      <img src="/assets/credivo_logo.png?v=20260515" alt="" class="brand-logo" />
+    </div>
+    <button id="workspaceExpandFab" class="workspace-expand-fab hidden" type="button">Expand Workspace</button>
+
+    <section id="authView" class="auth-wrap">
+      <article class="panel auth-hero">
+        <img src="/assets/credivo_logo.png?v=20260515" alt="Classagon" class="auth-hero-logo" />
+        <div class="auth-hero-kicker">Enterprise Learning Cloud</div>
+        <h1>Secure Learning. Verified Outcomes.</h1>
+        <p>Courses, assessments, proctoring, and certificates on one controlled platform.</p>
+        <div class="auth-hero-proof">
+          <div class="auth-proof-item">
+            <strong>99.9%</strong>
+            <span>Uptime-ready delivery</span>
+          </div>
+          <div class="auth-proof-item">
+            <strong>AI + Human</strong>
+            <span>Layered proctoring confidence</span>
+          </div>
+          <div class="auth-proof-item">
+            <strong>Global-ready</strong>
+            <span>Secure exam flows at scale</span>
+          </div>
+        </div>
+        <div class="auth-hero-tags">
+          <span>Identity verification</span>
+          <span>Evidence-led scoring</span>
+          <span>Certificate issuance</span>
+        </div>
+        <div class="auth-assessment-formats" aria-label="Assessment formats available">
+          <div class="auth-format-heading">Assessment formats</div>
+          <div class="auth-format-grid">
+            <div class="auth-format-item"><strong>Coding</strong><span>Editor, starter code, tests</span></div>
+            <div class="auth-format-item"><strong>Excel</strong><span>Sheets, formulas, expected cells</span></div>
+            <div class="auth-format-item"><strong>Accounting & Tax</strong><span>Client facts, forms, review checks</span></div>
+            <div class="auth-format-item"><strong>Case Study</strong><span>Upload with review rubric</span></div>
+            <div class="auth-format-item"><strong>MCQ</strong><span>Question pool and scoring</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article id="loginCard" class="panel auth-card">
+        <h2>Login</h2>
+        <p>Sign in with your account to continue.</p>
+        <label>Email<input id="loginEmail" type="email" placeholder="admin@certora.in" /></label>
+        <label>Password
+          <div class="password-field">
+            <input id="loginPassword" type="password" placeholder="Password" />
+            <button id="loginShowPasswordBtn" class="btn small ghost password-toggle-btn" type="button" aria-label="Show password" aria-controls="loginPassword">
+              <span class="material-symbols-rounded" aria-hidden="true">visibility</span>
+            </button>
+          </div>
+        </label>
+        <div class="row wrap auth-login-actions">
+          <button id="loginBtn" class="btn primary"><span class="material-symbols-rounded" aria-hidden="true">login</span> Login</button>
+          <button id="googleBtn" class="btn google-icon-btn" type="button" aria-label="Continue with Google" title="Continue with Google">
+            <span class="google-mark" aria-hidden="true">G</span>
+          </button>
+        </div>
+        <button id="forgotPasswordBtn" class="forgot-password-link" type="button">Forgot password?</button>
+        <div class="auth-switch">New user? <button id="showSignupBtn" type="button" class="auth-switch-btn">Create an account</button></div>
+      </article>
+
+      <article id="signupCard" class="panel auth-card hidden">
+        <h2>Create Account</h2>
+        <p>Create your student or provider account.</p>
+        <label>Full Name<input id="signupName" type="text" /></label>
+        <label>Email<input id="signupEmail" type="email" /></label>
+        <label>Student Age (for student role)
+          <input id="signupStudentAge" type="number" min="1" max="120" placeholder="Age in years" />
+        </label>
+        <label>Password
+          <div class="password-field">
+            <input id="signupPassword" type="password" />
+            <button id="signupShowPasswordBtn" class="btn small ghost password-toggle-btn" type="button" aria-label="Show password" aria-controls="signupPassword">
+              <span class="material-symbols-rounded" aria-hidden="true">visibility</span>
+            </button>
+          </div>
+        </label>
+        <label>Role
+          <select id="signupRole">
+            <option value="student">Student</option>
+            <option value="provider">Provider</option>
+          </select>
+        </label>
+        <label>Verification ID Type
+          <select id="signupVerificationType">
+            <option value="aadhaar">Aadhaar (India)</option>
+            <option value="national_id">National ID</option>
+            <option value="passport">Passport</option>
+            <option value="driving_license">Driving License</option>
+            <option value="voter_id">Voter ID</option>
+            <option value="pan">PAN</option>
+            <option value="cin">CIN (Business)</option>
+            <option value="gst">GSTIN (Business)</option>
+            <option value="tax_id">Tax ID</option>
+            <option value="other">Other ID</option>
+          </select>
+        </label>
+        <label>Verification ID Number<input id="signupVerificationNumber" type="text" /></label>
+        <label>Verification Country Code<input id="signupVerificationCountry" type="text" value="IN" /></label>
+        <button id="signupBtn" class="btn primary"><span class="material-symbols-rounded" aria-hidden="true">person_add</span> Create Account</button>
+        <div class="auth-switch">Already have an account? <button id="showLoginBtn" type="button" class="auth-switch-btn">Back to login</button></div>
+      </article>
+
+      <article id="issuedCandidateCard" class="panel auth-card">
+        <h2>Issued Assessment Login</h2>
+        <p>Use credentials shared by recruiter/provider.</p>
+        <label>Candidate Email<input id="issuedCandidateEmail" type="email" /></label>
+        <label>Password<input id="issuedCandidatePassword" type="password" /></label>
+        <button id="issuedCandidateLoginBtn" class="btn primary">Login & Start Assessment</button>
+      </article>
+    </section>
+
+    <section id="issuedAssessmentAttemptScreen" class="assessment-screen hidden">
+      <div class="assessment-screen-head">
+        <div>
+          <h2 id="issuedAssessmentTitle">Issued Assessment</h2>
+          <p id="issuedAssessmentMeta" class="muted"></p>
+        </div>
+        <button id="issuedAssessmentCloseBtn" class="btn small danger">Exit Assessment Server</button>
+      </div>
+      <div class="item">
+        <div id="issuedAssessmentQuestions"></div>
+        <div class="row">
+          <button id="issuedAssessmentSubmitBtn" class="btn primary">Submit Assessment</button>
+        </div>
+        <div id="issuedAssessmentStatus" class="meta"></div>
+      </div>
+    </section>
+
+    <section id="providerView" class="admin-layout hidden">
+      <aside class="panel sidebar">
+        <div class="provider-sidebar-brand">
+          <div class="provider-sidebar-logo-wrap">
+            <img src="/assets/credivo_logo.png?v=20260515" alt="Classagon" class="provider-sidebar-logo" />
+          </div>
+          <h3>Workspace</h3>
+        </div>
+        <button class="nav-btn active provider-nav-btn" data-provider-view="home">Dashboard</button>
+        <button class="nav-btn provider-nav-btn" data-provider-view="assessments">Custom</button>
+        <button class="nav-btn provider-nav-btn" data-provider-view="assessment-catalog">Assessments</button>
+        <button class="nav-btn provider-nav-btn" data-provider-view="feedback">Feedback & Complaints</button>
+        <button class="nav-btn provider-nav-btn" data-provider-view="live">Live Class</button>
+        <button class="nav-btn provider-nav-btn" data-provider-view="certifications">Certifications</button>
+        <div class="sidebar-tools">
+          <button class="settings-toggle js-settings-toggle" type="button" aria-label="Settings"><span class="material-symbols-rounded" aria-hidden="true">settings</span></button>
+          <div class="settings-menu hidden">
+            <div class="settings-header">
+              <div class="settings-title">Settings</div>
+            </div>
+            <div class="settings-session">
+              <span class="badge js-session-badge">Not signed in</span>
+              <span class="badge js-user-uid-badge hidden">UID: -</span>
+            </div>
+            <div class="settings-actions">
+              <button class="btn small js-change-password-btn" type="button">Change Password</button>
+              <button class="btn ghost js-logout-btn" disabled>Logout</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="panel content" id="provider-view-home">
+        <h2>Dashboard</h2>
+        <h3>Assessment Analytics</h3>
+        <div class="stats assessment-dashboard-stats">
+          <div class="stat-card assessment-stat-card"><div class="assessment-stat-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16v10H4z"/><path d="m4 8 8 5 8-5"/></svg></div><div><div class="stat-title">Assessments Issued</div><div id="issuedCountStat" class="stat-value">0</div></div></div>
+          <div class="stat-card assessment-stat-card"><div class="assessment-stat-icon"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/><path d="M4 20h16"/></svg></div><div><div class="stat-title">Assessments Taken</div><div id="takenCountStat" class="stat-value">0</div></div></div>
+          <div class="stat-card assessment-stat-card"><div class="assessment-stat-icon"><svg viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 15l3-4 3 2 5-7"/></svg></div><div><div class="stat-title">Average Score</div><div id="avgScoreStat" class="stat-value">0.00%</div></div></div>
+        </div>
+      </section>
+
+      <section class="panel content hidden" id="provider-view-courses">
+        <h2>My Courses</h2>
+        <div class="row provider-courses-toolbar" id="providerCoursesHeader">
+          <div class="search-with-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/></svg>
+            <input id="providerCoursesSearch" class="search" type="text" placeholder="Search your courses" />
+          </div>
+          <div class="row provider-course-actions">
+            <button id="providerCoursesFilterBtn" class="btn small toolbar-icon-btn" type="button" title="Filter" aria-label="Filter">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8L4 5z"/></svg>
+            </button>
+            <div id="providerCoursesFilterMenu" class="filter-popover hidden">
+              <input id="providerCoursesSort" type="hidden" value="latest" />
+              <button class="provider-sort-option active" type="button" data-provider-sort="latest">Latest</button>
+              <button class="provider-sort-option" type="button" data-provider-sort="rating_desc">Top Rated</button>
+              <button class="provider-sort-option" type="button" data-provider-sort="title_asc">Course Name (A-Z)</button>
+              <button class="provider-sort-option" type="button" data-provider-sort="status_active">Active First</button>
+            </div>
+            <button id="refreshProviderCoursesBtn" class="btn small toolbar-icon-btn" title="Refresh" aria-label="Refresh">
+              <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5v5h-5"/><path d="M4 19v-5h5"/><path d="M20 10a8 8 0 0 0-14.9-3"/><path d="M4 14a8 8 0 0 0 14.9 3"/></svg>
+            </button>
+            <button id="openDraftsPageBtn" class="btn small toolbar-icon-btn" title="Drafts" aria-label="Drafts">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v4h4"/><path d="M9.5 12h7"/><path d="M9.5 15.5h7"/></svg>
+            </button>
+            <button id="openCourseWizardBtn" class="btn primary" title="New Course">+</button>
+          </div>
+        </div>
+        <div id="providerCoursesList" class="list"></div>
+        <section id="providerCourseViewer" class="moderation-toolbar hidden">
+          <div class="row between">
+            <h3 id="pcvTitle" style="margin:0;">Class Viewer</h3>
+            <button id="pcvCloseBtn" class="btn small">Close</button>
+          </div>
+          <div class="class-player-grid">
+            <aside>
+              <h4 style="margin:0 0 8px;">Topics</h4>
+              <div id="pcvTopicList" class="list"></div>
+              <h4 style="margin:12px 0 8px;">Live Classes</h4>
+              <div id="pcvLiveClassList" class="list"></div>
+            </aside>
+            <div>
+              <div id="pcvVideoShell" class="video-shell">
+                <video id="pcvVideo" style="width:100%; border-radius:10px; background:#000;"></video>
+                <button id="pcvFullscreenBtn" class="icon-corner-btn" title="Fullscreen" aria-label="Fullscreen"><span class="material-symbols-rounded" aria-hidden="true">fullscreen</span></button>
+                <div class="video-controls">
+                  <button id="pcvPlayBtn" class="icon-btn" title="Play/Pause" aria-label="Play/Pause"><span class="material-symbols-rounded" aria-hidden="true">play_arrow</span></button>
+                  <button id="pcvBack10Btn" class="icon-btn" title="Back 10 seconds" aria-label="Back 10 seconds"><span class="material-symbols-rounded" aria-hidden="true">replay_10</span></button>
+                  <button id="pcvFwd10Btn" class="icon-btn" title="Forward 10 seconds" aria-label="Forward 10 seconds"><span class="material-symbols-rounded" aria-hidden="true">forward_10</span></button>
+                  <div class="seek-wrap">
+                    <div id="pcvScrubber" class="yt-scrubber">
+                      <div id="pcvBuffered" class="yt-buffered"></div>
+                      <div id="pcvProgress" class="yt-progress"></div>
+                      <div id="pcvTimelineMarkers" class="timeline-markers overlay"></div>
+                      <div id="pcvThumb" class="yt-thumb"></div>
+                    </div>
+                    <div id="pcvHoverPreview" class="hover-preview hidden"></div>
+                    <div id="pcvHoverTime" class="hover-time hidden"></div>
+                  </div>
+                  <span id="pcvTimeMeta" class="meta">00:00 / 00:00</span>
+                  <span id="pcvCurrentTopic" class="meta">Topic: -</span>
+                  <label class="meta">Speed
+                    <select id="pcvSpeed" class="filter">
+                      <option value="0.75">0.75x</option>
+                      <option value="1" selected>1x</option>
+                      <option value="1.25">1.25x</option>
+                      <option value="1.5">1.5x</option>
+                      <option value="2">2x</option>
+                    </select>
+                  </label>
+                  <label class="meta">Vol
+                    <input id="pcvVolume" type="range" min="0" max="1" step="0.05" value="1" />
+                  </label>
+                </div>
+              </div>
+              <div id="pcvMarkerTooltip" class="marker-tooltip hidden"></div>
+            </div>
+          </div>
+        </section>
+        <section id="providerDraftsPage" class="moderation-toolbar hidden">
+          <div class="row between">
+            <h3 style="margin:0;">Drafts</h3>
+            <div class="row">
+              <button id="refreshDraftsBtn" class="btn small">Refresh Drafts</button>
+              <button id="closeDraftsPageBtn" class="btn small">Close</button>
+            </div>
+          </div>
+          <div id="providerDraftsList" class="list"></div>
+        </section>
+
+        <div id="courseWizard" class="moderation-toolbar hidden">
+          <div class="row between">
+            <h3 id="courseWizardTitle" style="margin:0;">New Course</h3>
+            <button id="closeCourseWizardBtn" class="btn small">Close</button>
+          </div>
+
+          <section id="cwStepDetails">
+            <h3>Step 1: Course Details</h3>
+            <div class="row wrap gap-sm">
+              <input id="cwCourseTitle" class="search" type="text" placeholder="Course Name" />
+              <select id="cwCourseLevel" class="filter">
+                <option value="Beginner">Beginner</option>
+                <option value="Intermediate">Intermediate</option>
+                <option value="Advanced">Advanced</option>
+              </select>
+              <input id="cwCourseCategory" class="search" type="text" placeholder="Category (Tax, GST, etc.)" />
+            </div>
+            <label>Description
+              <textarea id="cwCourseDescription" rows="3" placeholder="What will students learn?"></textarea>
+            </label>
+            <div class="item" style="padding:10px; margin-top:10px;">
+              <div><strong>Suitable Student Age Ranges</strong></div>
+              <div class="meta" style="margin-top:4px;">Select one or more ranges.</div>
+              <div class="row wrap gap-sm" style="margin-top:8px;">
+                <label class="checkbox-row"><input type="checkbox" data-cw-age-range="under_13" /><span>Under 13</span></label>
+                <label class="checkbox-row"><input type="checkbox" data-cw-age-range="13_17" /><span>13 - 17</span></label>
+                <label class="checkbox-row"><input type="checkbox" data-cw-age-range="18_24" /><span>18 - 24</span></label>
+                <label class="checkbox-row"><input type="checkbox" data-cw-age-range="25_34" /><span>25 - 34</span></label>
+                <label class="checkbox-row"><input type="checkbox" data-cw-age-range="35_44" /><span>35 - 44</span></label>
+                <label class="checkbox-row"><input type="checkbox" data-cw-age-range="45_plus" /><span>45+</span></label>
+              </div>
+            </div>
+            <label class="checkbox-row">
+              <input id="cwIncludesExam" type="checkbox" checked />
+              <span>Include certification exam</span>
+            </label>
+            <div class="row">
+              <button id="cwSaveDraftBtn" class="btn small">Save Draft</button>
+              <button id="cwNextToVideoBtn" class="btn">Next: Choose Video ></button>
+            </div>
+          </section>
+
+          <section id="cwStepVideo" class="hidden">
+            <h3>Step 2: Choose Video</h3>
+            <input id="cwIntroVideoUrl" class="search" type="url" placeholder="Intro video URL (mandatory, shown before enrollment)" />
+            <input id="cwVideoUrl" class="search" type="url" placeholder="Recorded video URL" />
+            <input id="cwCourseThumbnail" type="hidden" />
+            <div class="row wrap gap-sm" style="margin-top:8px;">
+              <input id="cwVideoFile" type="file" accept="video/*" style="display:none;" />
+              <button id="cwUploadVideoBtn" class="btn small">Upload Video</button>
+            </div>
+            <div id="cwUploadProgress" class="meta" style="margin-top:6px;"></div>
+            <div class="item" style="margin-top:10px;">
+              <div><strong>Thumbnail</strong></div>
+              <div class="meta">Thumbnail is required. Choose from video frame or upload an image from local system.</div>
+              <div class="row wrap gap-sm" style="margin-top:8px;">
+                <button id="cwUseCurrentFrameBtn" class="btn small">Use Current Video Frame</button>
+                <input id="cwThumbnailFile" type="file" accept="image/*" style="display:none;" />
+                <button id="cwUploadThumbnailBtn" class="btn small">Upload Thumbnail</button>
+              </div>
+              <img id="cwThumbnailPreview" alt="" class="thumb-preview hidden" />
+            </div>
+            <div class="meta" style="margin-top:8px;">Note: Recommended video specs - 16:9, 1080p preferred (minimum 720p), clear audio.</div>
+            <div class="row" style="margin-top:10px;">
+              <button id="cwBackToDetailsBtn" class="btn small">&lt; Back</button>
+              <button id="cwNextToTopicsBtn" class="btn">Next: Topics ></button>
+            </div>
+          </section>
+
+          <section id="cwStepTopics" class="hidden">
+            <h3>Step 3: Topics & Time Markers</h3>
+            <div class="class-player-grid">
+              <aside>
+                <h4 style="margin:0 0 8px;">Topics</h4>
+                <div id="cwTopicsDraftList" class="list"></div>
+              </aside>
+              <div>
+                <div class="item">
+                  <div class="row between">
+                    <strong>Video Preview</strong>
+                    <button id="cwLoadVideoPreviewBtn" class="btn small">Load/Refresh Video</button>
+                  </div>
+                  <div id="cwVideoShell" class="video-shell" style="margin-top:8px;">
+                    <video id="cwVideoPreview" style="width:100%; border-radius:10px; background:#000;"></video>
+                    <button id="cwFullscreenBtn" class="icon-corner-btn" title="Fullscreen" aria-label="Fullscreen"><span class="material-symbols-rounded" aria-hidden="true">fullscreen</span></button>
+                    <div class="video-controls">
+                      <button id="cwPlayBtn" class="icon-btn" title="Play/Pause" aria-label="Play/Pause"><span class="material-symbols-rounded" aria-hidden="true">play_arrow</span></button>
+                      <button id="cwBack10Btn" class="icon-btn" title="Back 10 seconds" aria-label="Back 10 seconds"><span class="material-symbols-rounded" aria-hidden="true">replay_10</span></button>
+                      <button id="cwFwd10Btn" class="icon-btn" title="Forward 10 seconds" aria-label="Forward 10 seconds"><span class="material-symbols-rounded" aria-hidden="true">forward_10</span></button>
+                      <div class="seek-wrap">
+                        <div id="cwScrubber" class="yt-scrubber">
+                          <div id="cwBuffered" class="yt-buffered"></div>
+                          <div id="cwProgress" class="yt-progress"></div>
+                          <div id="cwTimelineMarkers" class="timeline-markers overlay"></div>
+                          <div id="cwThumb" class="yt-thumb"></div>
+                        </div>
+                        <div id="cwHoverPreview" class="hover-preview hidden"></div>
+                        <div id="cwHoverTime" class="hover-time hidden"></div>
+                      </div>
+                      <span id="cwVideoTimeMeta" class="meta">00:00 / 00:00</span>
+                      <span id="cwCurrentTopic" class="meta">Topic: -</span>
+                      <label class="meta">Speed
+                        <select id="cwSpeed" class="filter">
+                          <option value="0.75">0.75x</option>
+                          <option value="1" selected>1x</option>
+                          <option value="1.25">1.25x</option>
+                          <option value="1.5">1.5x</option>
+                          <option value="2">2x</option>
+                        </select>
+                      </label>
+                      <label class="meta">Vol
+                        <input id="cwVolume" type="range" min="0" max="1" step="0.05" value="1" />
+                      </label>
+                    </div>
+                  </div>
+                  <div id="cwMarkerTooltip" class="marker-tooltip hidden"></div>
+                </div>
+                <div class="row wrap gap-sm" style="margin-top:10px;">
+                  <input id="cwTopicTitle" class="search" type="text" placeholder="Topic Name (e.g., Deduction Rules)" />
+                  <input id="cwTopicTime" class="filter" type="text" placeholder="Time (mm:ss or hh:mm:ss)" />
+                  <button id="cwUseCurrentTimeBtn" class="btn small">Use Current Time</button>
+                  <button id="cwAddTopicBtn" class="btn small">Add Topic</button>
+                </div>
+              </div>
+            </div>
+            <div class="row" style="margin-top:10px;">
+              <button id="cwBackToVideoBtn" class="btn small">&lt; Back</button>
+              <button id="cwSaveDraftBtn2" class="btn small">Save Draft</button>
+              <button id="cwNextToPricingBtn" class="btn">Next: Pricing ></button>
+            </div>
+          </section>
+
+          <section id="cwStepPricing" class="hidden">
+            <h3>Step 4: Pricing</h3>
+            <div class="item">
+              <div class="row wrap gap-sm">
+                <label style="flex:1 1 260px;">
+                  Base Course Price (INR)
+                  <input id="cwBasePriceAmount" class="search" type="number" min="1" step="0.01" required placeholder="Enter base amount" value="999" />
+                </label>
+              </div>
+              <div class="meta" style="margin-top:8px;">Final applicable learner price updates instantly as you enter the amount.</div>
+              <div id="cwPricingBreakdown" style="margin-top:12px;">
+                <div class="row between"><span class="meta">Base Amount</span><strong id="cwPricingBase">₹0.00</strong></div>
+                <div class="row between"><span class="meta">GST (18%)</span><strong id="cwPricingGst">₹0.00</strong></div>
+                <div class="row between"><span class="meta">Platform Commission (25%)</span><strong id="cwPricingCommission">₹0.00</strong></div>
+                <div class="row between"><span class="meta">One-time Hosting Fee</span><strong id="cwPricingHosting">₹2,500.00</strong></div>
+                <hr style="margin:10px 0; border:0; border-top:1px solid #e5e7eb;" />
+                <div class="row between"><span><strong>Final Applicable Price</strong></span><strong id="cwPricingFinal">₹2,500.00</strong></div>
+              </div>
+            </div>
+            <div class="row" style="margin-top:10px;">
+              <button id="cwBackToTopicsBtn" class="btn small">&lt; Back</button>
+              <button id="cwSaveDraftBtn3" class="btn small">Save Draft</button>
+              <button id="cwCreateCourseBtn" class="btn primary">Create Course</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="panel content hidden" id="provider-view-course-create">
+        <div class="row between">
+          <h2>Create New Course</h2>
+          <button id="closeCourseCreatePageBtn" class="btn small">Back to Courses</button>
+        </div>
+        <div id="providerCourseCreateMount"></div>
+      </section>
+
+      <section class="panel content hidden" id="provider-view-assessments">
+        <h2>Custom</h2>
+        <div class="row between provider-assessment-toolbar">
+          <h3>Assessment List</h3>
+          <div class="row gap-sm provider-course-actions provider-assessment-actions">
+            <div class="search-with-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/></svg>
+              <input id="providerAssessmentsSearch" class="search" type="text" placeholder="Search assessments" />
+            </div>
+            <button id="openAssessmentBuilderBtn" class="btn small toolbar-icon-btn" title="New Assessment" aria-label="New Assessment">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            </button>
+            <button id="refreshProviderAssessmentsBtn" class="btn small toolbar-icon-btn" title="Refresh Assessments" aria-label="Refresh Assessments">
+              <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5v5h-5"/><path d="M4 19v-5h5"/><path d="M20 10a8 8 0 0 0-14.9-3"/><path d="M4 14a8 8 0 0 0 14.9 3"/></svg>
+            </button>
+            <button id="providerAssessmentToolsBtn" class="btn small toolbar-icon-btn" title="Tools" aria-label="Tools">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.9L3 18.5V21h2.5l6.3-6.3a4 4 0 0 0 5.9-5.4l-2 2-2.6-.5-.5-2.6z"/></svg>
+            </button>
+            <div id="providerAssessmentToolsMenu" class="filter-popover open-left hidden">
+              <button type="button" class="filter-option" data-provider-assessment-tool="excel">Excel</button>
+              <button type="button" class="filter-option" data-provider-assessment-tool="coding">Coding Env</button>
+              <button type="button" class="filter-option" data-provider-assessment-tool="tax">Tax</button>
+              <button type="button" class="filter-option" data-provider-assessment-tool="accounts">Accounts</button>
+            </div>
+          </div>
+        </div>
+        <div id="providerAssessmentToolPanel" class="item hidden" style="margin:12px 0;"></div>
+        <div id="providerAssessmentsList" class="list"></div>
+      </section>
+
+      <section class="panel content hidden" id="provider-view-assessment-catalog">
+        <h2>Assessments</h2>
+        <p class="muted">Select a published assessment to view details and issue it.</p>
+        <div class="row between provider-assessment-toolbar assessment-catalog-toolbar">
+          <div class="search-with-icon assessment-catalog-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/></svg>
+            <input id="assessmentCatalogSearch" class="search" type="text" placeholder="Search title or internal ID" />
+          </div>
+          <div class="row gap-sm provider-course-actions provider-assessment-actions assessment-catalog-actions">
+            <select id="assessmentCatalogDuration" class="filter" aria-label="Filter by duration">
+              <option value="all">All durations</option>
+              <option value="short">30 mins or less</option>
+              <option value="standard">31-45 mins</option>
+              <option value="long">Over 45 mins</option>
+            </select>
+            <select id="assessmentCatalogSort" class="filter" aria-label="Sort assessments">
+              <option value="latest">Latest</option>
+              <option value="title_asc">Title A-Z</option>
+              <option value="duration_asc">Shortest first</option>
+              <option value="pass_desc">Highest pass score</option>
+              <option value="popular">Most issued</option>
+            </select>
+            <button id="refreshAssessmentCatalogBtn" class="btn small toolbar-icon-btn" title="Refresh catalog" aria-label="Refresh catalog">
+              <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5v5h-5"/><path d="M4 19v-5h5"/><path d="M20 10a8 8 0 0 0-14.9-3"/><path d="M4 14a8 8 0 0 0 14.9 3"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="assessmentCatalogList" class="list"></div>
+      </section>
+
+      <section class="panel content hidden assessment-detail-page" id="provider-view-assessment-detail">
+        <div class="row between assessment-detail-head">
+          <div>
+            <button id="backToAssessmentCatalogBtn" class="btn small ghost">Back to Assessments</button>
+            <h2 id="assessmentDetailTitle">Assessment Details</h2>
+            <div id="assessmentCatalogDetail" class="meta">Select an assessment from the catalog.</div>
+            <div id="assessmentDetailActions" class="actions"></div>
+          </div>
+          <div id="assessmentDetailPassBadge" class="assessment-catalog-score">70%</div>
+        </div>
+        <div class="assessment-detail-grid">
+          <div class="item">
+            <h3>Issue Assessment</h3>
+            <p class="muted">Enter candidate details. The candidate receives a one-time link and password valid for 7 days.</p>
+            <div class="row wrap gap-sm assessment-issue-form">
+              <input id="issueCandidateName" class="search" type="text" placeholder="Candidate name" />
+              <input id="issueCandidateEmail" class="search" type="email" placeholder="Candidate email" />
+              <button id="issueAssessmentBtn" class="btn small primary">Send Invite</button>
+            </div>
+            <div id="issueAssessmentStatus" class="meta"></div>
+          </div>
+          <div class="item">
+            <h3>Issued History</h3>
+            <div id="issuedAssessmentsList" class="list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="assessmentBuilderScreen" class="assessment-screen hidden">
+        <div class="assessment-screen-head">
+          <div>
+            <h2>Assessment Builder</h2>
+            <p class="muted">Closing this screen discards unsaved setup.</p>
+          </div>
+          <button id="assessmentBuilderCloseBtn" class="btn small icon-close-animated" aria-label="Close">
+            <span></span><span></span>
+          </button>
+        </div>
+
+        <div class="ab-wizard-shell">
+          <div class="ab-stepper">
+            <div class="ab-step-indicator active" data-ab-step-indicator="1"><span>1</span><strong>Assessment Setup</strong></div>
+            <div class="ab-step-indicator" data-ab-step-indicator="2"><span>2</span><strong>Assessment Settings</strong></div>
+            <div class="ab-step-indicator" data-ab-step-indicator="3"><span>3</span><strong>Questions</strong></div>
+          </div>
+
+          <div class="ab-step-viewport">
+            <div id="abStepTrack" class="ab-step-track">
+              <section class="item ab-step-page">
+                <h3>Assessment Setup</h3>
+                <p class="muted">Create a standalone assessment that candidates can access only through issued credentials.</p>
+                <div class="row wrap gap-sm">
+                  <select id="abCourseFilter" class="filter">
+                    <option value="all">All</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="draft">Drafts</option>
+                  </select>
+                  <select id="abCourseSelect" class="filter ab-course-select">
+                    <option value="standalone">Standalone Assessment</option>
+                  </select>
+                </div>
+                <div id="abCourseMeta" class="meta" style="margin-top:10px;">Standalone assessment selected.</div>
+                <div class="ab-sample-block">
+                  <div class="ab-type-heading">Start with a sample</div>
+                  <div class="ab-sample-grid" aria-label="Sample assessment templates">
+                    <button type="button" class="ab-sample-card" data-ab-sample-template="coding"><strong>Coding Assessment</strong><span>Problem statement, starter code, and test cases</span></button>
+                    <button type="button" class="ab-sample-card" data-ab-sample-template="spreadsheet"><strong>Excel Assessment</strong><span>Workbook data, formulas, and expected cells</span></button>
+                    <button type="button" class="ab-sample-card" data-ab-sample-template="tax_simulator"><strong>Accounting & Tax</strong><span>Client facts, documents, forms, and review checks</span></button>
+                    <button type="button" class="ab-sample-card" data-ab-sample-template="case_study"><strong>Case Study</strong><span>Upload-based business analysis with rubric</span></button>
+                    <button type="button" class="ab-sample-card" data-ab-sample-template="mcq"><strong>MCQ Assessment</strong><span>Question pool sample for objective testing</span></button>
+                  </div>
+                </div>
+                <div class="row wrap gap-sm" style="margin-top:16px;">
+                  <button id="abStep1NextBtn" class="btn primary">Next: Settings</button>
+                </div>
+              </section>
+
+              <section class="item ab-step-page">
+                <h3>Assessment Settings <span class="ab-inline-note">Max attempts must be between 1 and 3.</span></h3>
+                <p class="muted">Define exam behavior, scoring, and timing for student attempts.</p>
+                <div id="abStep2Error" class="meta hidden ab-step2-error"></div>
+                <div class="row wrap gap-sm">
+                  <label class="ab-field-wrap"><span class="ab-field-label">Assessment title <span class="required-asterisk">*</span></span>
+                    <input id="abTitle" class="search" type="text" placeholder="Assessment title" />
+                  </label>
+                  <select id="abAssessmentType" class="filter hidden" aria-label="Assessment type">
+                    <option value="mcq">MCQ Assessment</option>
+                    <option value="coding">Coding Assessment</option>
+                    <option value="spreadsheet">Excel Assessment</option>
+                    <option value="tax_simulator">Tax / Finance Simulator</option>
+                    <option value="case_study">Case Study / File Upload</option>
+                  </select>
+                  <label class="ab-field-wrap"><span class="ab-field-label">Max attempts <span class="required-asterisk">*</span></span>
+                    <input id="abMaxAttempts" class="filter" type="number" min="1" max="3" value="3" placeholder="Max attempts" />
+                  </label>
+                  <label class="ab-field-wrap ab-mcq-only"><span class="ab-field-label">Questions shown to student <span class="required-asterisk">*</span></span>
+                    <select id="abQuestionsPerAttempt" class="filter" title="Questions shown to student">
+                      <option value="25">25 questions</option>
+                      <option value="30">30 questions</option>
+                      <option value="35">35 questions</option>
+                      <option value="40">40 questions</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="ab-type-heading">Choose assessment format <span class="required-asterisk">*</span></div>
+                <div class="ab-type-card-row">
+                  <button type="button" class="ab-type-card active" data-ab-type-card="mcq" data-ab-sample-template="mcq"><strong>MCQ</strong><span>Question pool with options</span></button>
+                  <button type="button" class="ab-type-card" data-ab-type-card="coding" data-ab-sample-template="coding"><strong>Coding Assessment</strong><span>Code editor task</span></button>
+                  <button type="button" class="ab-type-card" data-ab-type-card="spreadsheet" data-ab-sample-template="spreadsheet"><strong>Excel Assessment</strong><span>Spreadsheet grid task</span></button>
+                  <button type="button" class="ab-type-card" data-ab-type-card="tax_simulator" data-ab-sample-template="tax_simulator"><strong>Tax Simulator</strong><span>Generic finance workbench</span></button>
+                  <button type="button" class="ab-type-card" data-ab-type-card="case_study" data-ab-sample-template="case_study"><strong>Case Study</strong><span>File upload/manual review</span></button>
+                </div>
+                <div class="row wrap gap-sm" style="margin-top:10px;">
+                  <label class="ab-field-wrap"><span class="ab-field-label">Passing score <span class="required-asterisk">*</span></span>
+                    <input id="abPassScore" class="filter" type="number" min="70" max="100" step="1" value="70" placeholder="Passing score %" />
+                  </label>
+                  <label class="ab-field-wrap ab-wide-field"><span class="ab-field-label">Instructions <span class="required-asterisk">*</span></span>
+                    <textarea id="abInstructions" class="search ab-textarea" rows="3" placeholder="Rules, allowed materials, and what the candidate must know before starting"></textarea>
+                  </label>
+                </div>
+                <div class="ab-metadata-grid">
+                  <label class="ab-field-wrap ab-wide-field"><span class="ab-field-label">About assessment <span class="required-asterisk">*</span></span>
+                    <textarea id="abAbout" class="search ab-textarea" rows="4" placeholder="Short description of what this assessment measures"></textarea>
+                  </label>
+                  <label class="ab-field-wrap"><span class="ab-field-label">Tools used <span class="required-asterisk">*</span></span>
+                    <textarea id="abTools" class="search ab-textarea" rows="4" placeholder="One per line, e.g. Calculator, Code editor, Spreadsheet"></textarea>
+                  </label>
+                  <label class="ab-field-wrap"><span class="ab-field-label">Topics included <span class="required-asterisk">*</span></span>
+                    <textarea id="abTopics" class="search ab-textarea" rows="4" placeholder="One per line, e.g. Payroll forms, Deductions, Filing rules"></textarea>
+                  </label>
+                </div>
+                <div class="row wrap gap-sm" style="margin-top:10px;">
+                  <label class="checkbox-row ab-mcq-only"><input id="abNegativeMarking" type="checkbox" /><span>Negative marking</span></label>
+                  <input id="abDefaultNegativeMarks" class="filter hidden" type="number" min="0" step="0.25" placeholder="Default negative marks/question" />
+                  <input id="abShuffleQuestions" type="checkbox" checked class="hidden" />
+                  <input id="abShuffleOptions" type="checkbox" checked class="hidden" />
+                  <input id="abCertificateEnabled" type="checkbox" checked class="hidden" />
+                </div>
+                <div class="row wrap gap-sm" style="margin-top:10px;">
+                  <label class="ab-field-wrap"><span class="ab-field-label">Timing mode <span class="required-asterisk">*</span></span>
+                    <select id="abTimingMode" class="filter" title="Time per assessment">
+                      <option value="question" selected>Time per question</option>
+                      <option value="assessment">Time per assessment</option>
+                    </select>
+                  </label>
+                  <label class="ab-field-wrap"><span class="ab-field-label">Total time limit <span class="required-asterisk">*</span></span>
+                    <select id="abDurationMinutes" class="filter" title="Assessment duration">
+                      <option value="25" selected>25 min/assessment</option>
+                      <option value="30">30 min/assessment</option>
+                      <option value="35">35 min/assessment</option>
+                      <option value="40">40 min/assessment</option>
+                      <option value="45">45 min/assessment</option>
+                    </select>
+                  </label>
+                  <label class="ab-field-wrap ab-mcq-only"><span class="ab-field-label">Time per question <span class="required-asterisk">*</span></span>
+                    <select id="abTimePerQuestionSeconds" class="filter" title="Time per question">
+                      <option value="25" selected>25 sec/question</option>
+                      <option value="30">30 sec/question</option>
+                      <option value="35">35 sec/question</option>
+                      <option value="40">40 sec/question</option>
+                      <option value="45">45 sec/question</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="row wrap gap-sm" style="margin-top:16px;">
+                  <button id="abStep2BackBtn" class="btn small">Back</button>
+                  <button id="abStep2NextBtn" class="btn primary">Next: Content</button>
+                </div>
+              </section>
+
+              <section class="item ab-step-page">
+                <h3>Assessment Content</h3>
+                <p class="muted">Create content for the selected assessment format. One assessment uses one format only.</p>
+                <div id="abMcqContentPanel" class="ab-content-panel">
+                  <div class="row wrap gap-sm">
+                    <select id="abQuestionType" class="filter">
+                      <option value="mcq_single_correct">MCQ - Single Correct</option>
+                      <option value="mcq_multiple_correct">MCQ - Multiple Correct</option>
+                    </select>
+                    <input id="abQuestionMarks" class="filter" type="number" min="1" step="0.5" placeholder="Marks" />
+                    <input id="abQuestionNegativeMarks" class="filter" type="number" min="0" step="0.25" placeholder="Negative marks" />
+                  </div>
+                  <textarea id="abQuestionText" class="search ab-textarea" rows="4" placeholder="Question text"></textarea>
+                  <div class="ab-options-grid" style="margin-top:8px;">
+                    <label class="ab-option-row"><input data-ab-correct="0" type="checkbox" /><input id="abOption1" class="search" type="text" placeholder="Option 1" /></label>
+                    <label class="ab-option-row"><input data-ab-correct="1" type="checkbox" /><input id="abOption2" class="search" type="text" placeholder="Option 2" /></label>
+                    <label class="ab-option-row"><input data-ab-correct="2" type="checkbox" /><input id="abOption3" class="search" type="text" placeholder="Option 3" /></label>
+                    <label class="ab-option-row"><input data-ab-correct="3" type="checkbox" /><input id="abOption4" class="search" type="text" placeholder="Option 4" /></label>
+                  </div>
+                  <div class="row" style="margin-top:8px;">
+                    <button id="abAddQuestionBtn" class="btn small">Add To Pool</button>
+                  </div>
+
+                  <section class="item" style="margin-top:12px;">
+                    <div class="row between">
+                      <h3>Question Pool</h3>
+                      <div id="abPoolMeta" class="meta">0 questions in pool.</div>
+                    </div>
+                    <div id="abQuestionPoolList" class="list"></div>
+                  </section>
+                </div>
+
+                <div id="abTaskContentPanel" class="ab-content-panel hidden">
+                  <div class="row wrap gap-sm">
+                    <input id="abTaskTitle" class="search" type="text" placeholder="Task / problem / case title" />
+                    <input id="abTaskMarks" class="filter" type="number" min="1" step="1" placeholder="Marks" />
+                  </div>
+                  <textarea id="abTaskDescription" class="search ab-textarea" rows="5" placeholder="Task description / problem statement / case prompt"></textarea>
+                  <textarea id="abTaskInstructions" class="search ab-textarea" rows="4" placeholder="Task-specific instructions"></textarea>
+
+                  <div id="abCodingFields" class="ab-format-fields">
+                    <input id="abCodingLanguages" class="search" type="text" placeholder="Allowed languages, e.g. Python, JavaScript" />
+                    <textarea id="abStarterCode" class="search" rows="5" placeholder="Starter code"></textarea>
+                    <textarea id="abVisibleTests" class="search" rows="3" placeholder='Visible test cases JSON, e.g. [{"name":"sample","input":"2 3","expected_output":"5"}]'></textarea>
+                    <textarea id="abHiddenTests" class="search" rows="3" placeholder='Hidden test cases JSON'></textarea>
+                    <label class="checkbox-row"><input id="abTaskAutoGrading" type="checkbox" checked /><span>Auto grading enabled</span></label>
+                  </div>
+
+                  <div id="abSpreadsheetFields" class="ab-format-fields hidden">
+                    <textarea id="abInitialSheet" class="search" rows="4" placeholder='Initial spreadsheet data JSON'></textarea>
+                    <textarea id="abExpectedValues" class="search" rows="3" placeholder='Expected final values JSON, e.g. {"B2":1200}'></textarea>
+                    <textarea id="abExpectedFormulas" class="search" rows="3" placeholder='Expected formulas JSON, e.g. {"B3":"=SUM(B1:B2)"}'></textarea>
+                    <input id="abLockedCells" class="search" type="text" placeholder="Locked cells, comma separated, e.g. A1,A2" />
+                    <label class="checkbox-row"><input id="abSpreadsheetAutoGrading" type="checkbox" checked /><span>Auto grading enabled</span></label>
+                  </div>
+
+                  <div id="abTaxFields" class="ab-format-fields hidden">
+                    <textarea id="abClientScenario" class="search" rows="4" placeholder="Client scenario"></textarea>
+                    <input id="abTaxYear" class="search" type="text" placeholder="Tax year" />
+                    <textarea id="abClientDocuments" class="search" rows="3" placeholder="Client documents, one per line"></textarea>
+                    <textarea id="abRequiredForms" class="search" rows="3" placeholder="Required simulated forms, one per line"></textarea>
+                    <textarea id="abScenarioFacts" class="search" rows="3" placeholder="Scenario facts"></textarea>
+                    <textarea id="abExpectedFormValues" class="search" rows="3" placeholder='Expected form values JSON'></textarea>
+                    <textarea id="abComplianceChecks" class="search" rows="3" placeholder="Compliance checks, one per line"></textarea>
+                    <textarea id="abRedFlags" class="search" rows="3" placeholder="Red flags candidate should identify, one per line"></textarea>
+                    <label class="checkbox-row"><input id="abTaxManualReview" type="checkbox" checked /><span>Manual review required</span></label>
+                  </div>
+
+                  <div id="abCaseFields" class="ab-format-fields hidden">
+                    <textarea id="abCasePrompt" class="search" rows="4" placeholder="Case prompt"></textarea>
+                    <input id="abAllowedFileTypes" class="search" type="text" placeholder="Allowed file types, e.g. pdf,docx,xlsx" />
+                    <input id="abMaxFileSize" class="filter" type="number" min="1" value="10" placeholder="Max file size MB" />
+                    <textarea id="abRubric" class="search" rows="4" placeholder="Rubric"></textarea>
+                    <label class="checkbox-row"><input id="abCaseManualReview" type="checkbox" checked /><span>Manual review required</span></label>
+                  </div>
+                </div>
+
+                <div class="row wrap gap-sm" style="margin-top:14px;">
+                  <button id="abStep3BackBtn" class="btn small">Back</button>
+                  <button id="abSaveDraftBtn" class="btn small">Save Assessment Draft</button>
+                  <button id="abPublishBtn" class="btn primary">Publish Assessment</button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel content hidden" id="provider-view-feedback">
+        <h2>Feedback & Complaints</h2>
+        <div class="row wrap gap-sm" style="margin-bottom:10px;">
+          <button id="providerFeedbackTabBtn" class="btn small mode-tab active" type="button" data-provider-fc-tab="feedback">Feedback</button>
+          <button id="providerComplaintsTabBtn" class="btn small mode-tab" type="button" data-provider-fc-tab="complaints">Complaints</button>
+          <button id="refreshProviderCommentsBtn" class="btn small toolbar-icon-btn" type="button" title="Refresh" aria-label="Refresh">
+            <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5v5h-5"/><path d="M4 19v-5h5"/><path d="M20 10a8 8 0 0 0-14.9-3"/><path d="M4 14a8 8 0 0 0 14.9 3"/></svg>
+          </button>
+        </div>
+
+        <section id="providerFeedbackHub" class="moderation-toolbar">
+          <div id="providerFeedbackTiles" class="stats small">
+            <button id="providerFeedbackTileNew" class="stat provider-tile-action" type="button">
+              <div class="k">New Feedback</div>
+              <div id="providerFeedbackNewCount" class="v">0</div>
+            </button>
+            <button id="providerFeedbackTileOld" class="stat provider-tile-action" type="button">
+              <div class="k">Average Rating</div>
+              <div id="providerFeedbackAvgBadge" class="v">0.0</div>
+            </button>
+          </div>
+          <div id="providerComplaintTiles" class="stats small hidden">
+            <button id="providerComplaintTileNew" class="stat provider-tile-action" type="button">
+              <div class="k">New Complaints</div>
+              <div id="providerComplaintNewCount" class="v">0</div>
+            </button>
+            <button id="providerComplaintTilePending" class="stat provider-tile-action" type="button">
+              <div class="k">Pending Complaints</div>
+              <div id="providerComplaintPendingCount" class="v">0</div>
+            </button>
+            <button id="providerComplaintTileClosed" class="stat provider-tile-action" type="button">
+              <div class="k">Closed Complaints</div>
+              <div id="providerComplaintClosedCount" class="v">0</div>
+            </button>
+          </div>
+        </section>
+
+        <section id="providerFeedbackDetailPage" class="moderation-toolbar hidden">
+          <div class="row between">
+            <h3 id="providerFeedbackDetailTitle" style="margin:0;">Feedback</h3>
+            <button id="providerFeedbackBackBtn" class="btn small" type="button">Back</button>
+          </div>
+          <div id="providerFeedbackDetailList" class="list"></div>
+        </section>
+
+        <section id="providerComplaintsDetailPage" class="moderation-toolbar hidden">
+          <div class="row between">
+            <h3 id="providerComplaintsDetailTitle" style="margin:0;">Complaints</h3>
+            <button id="providerComplaintsBackBtn" class="btn small" type="button">Back</button>
+          </div>
+          <div id="providerComplaintsDetailList" class="list"></div>
+        </section>
+      </section>
+
+      <section class="panel content hidden" id="provider-view-live">
+        <div class="row between">
+          <div>
+            <h2 style="margin:0;">Live Classes</h2>
+            <p class="muted" style="margin-top:6px;">Schedule sessions, start class at the right time, and end class to unlock assessment access.</p>
+          </div>
+          <div class="row wrap gap-sm">
+            <button id="refreshProviderLiveClassesBtn" class="btn small">Refresh</button>
+            <button id="openLiveClassSchedulerBtn" class="btn primary" title="Schedule Live Class">+ New Live Class</button>
+          </div>
+        </div>
+        <div id="providerLiveStats" class="stats small" style="margin-top:12px;"></div>
+        <div id="providerLiveClassSessionsList" class="list" style="margin-top:12px;"></div>
+      </section>
+
+      <section class="panel content hidden" id="provider-view-certifications">
+        <h2>Certifications</h2>
+        <p class="muted">Issued certificates with download/share links.</p>
+        <div class="row between">
+          <h3>Issued Certificates</h3>
+          <button id="refreshProviderCertsBtn" class="btn small">Refresh</button>
+        </div>
+        <div id="providerCertsList" class="list"></div>
+      </section>
+
+      <section class="panel content hidden" id="provider-view-profile">
+        <div class="row between">
+          <h2>Profile</h2>
+          <button id="providerProfileBackBtn" class="btn small">Back</button>
+        </div>
+        <div class="item" style="max-width:760px;">
+          <div class="row wrap gap-sm">
+            <label style="flex:1 1 280px;">Full Name
+              <input id="providerProfileName" class="search" type="text" readonly />
+            </label>
+            <label style="flex:1 1 280px;">Public UID
+              <input id="providerProfileUid" class="search" type="text" readonly />
+            </label>
+          </div>
+          <div class="row wrap gap-sm" style="margin-top:8px;">
+            <label style="flex:1 1 280px;">Phone Number
+              <input id="providerProfilePhone" class="search" type="text" readonly />
+            </label>
+            <label style="flex:1 1 280px;">Role
+              <input id="providerProfileRole" class="search" type="text" readonly />
+            </label>
+          </div>
+          <label style="margin-top:10px;">Email
+            <input id="providerProfileEmail" class="search" type="email" placeholder="Enter updated email" />
+          </label>
+          <div class="row" style="margin-top:10px;">
+            <button id="providerProfileSaveEmailBtn" class="btn primary">Update Email</button>
+            <span id="providerProfileStatus" class="meta"></span>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section id="assessmentPreviewScreen" class="assessment-screen assessment-preview hidden">
+      <div class="assessment-screen-head">
+        <div>
+          <h2>Assessment Preview</h2>
+          <p id="apMeta" class="muted">Preview mode</p>
+        </div>
+        <div id="apProctorBadge" class="badge">Warnings: 0/3</div>
+        <button id="assessmentPreviewCloseBtn" class="btn small">Close</button>
+      </div>
+      <aside id="apGazeDebugBox" class="ap-gaze-debug-box hidden" aria-live="polite">
+        <div class="ap-gaze-debug-eyebrow">Live Screen Check</div>
+        <div id="apGazeDebugState" class="ap-gaze-debug-state">Checking</div>
+        <div id="apGazeDebugZone" class="ap-gaze-debug-zone">Waiting for camera</div>
+        <div id="apGazeDebugConfidence" class="ap-gaze-debug-confidence"></div>
+        <div id="apGazeDebugHint" class="ap-gaze-debug-hint">This is a temporary training box.</div>
+      </aside>
+
+      <section id="apPrecheckPanel" class="item">
+        <div id="apPrecheckChecksPage">
+          <div id="apPrecheckChecklist" class="ap-precheck-checklist" aria-live="polite"></div>
+          <div id="apPrecheckStatus" class="meta" style="margin-top:6px;">Requesting camera/microphone permission...</div>
+          <div class="row wrap gap-sm ap-precheck-layout" style="margin-top:10px;">
+            <video id="apProctorVideo" autoplay muted playsinline style="width:260px;max-width:100%;border-radius:12px;border:1px solid #dbe4f0;background:#0b1220;"></video>
+            <div class="ap-precheck-side">
+              <div id="apPrecheckInstruction" class="ap-precheck-instruction" aria-live="polite">
+                Follow the guided checks. Continue to the next page only after all checks are complete.
+              </div>
+              <div id="apPrecheckInstructionDetail" class="ap-precheck-instruction-detail" aria-live="polite">
+                Keep your face centered, eyes on question area, and stay silent unless prompted.
+              </div>
+              <div id="apPrecheckVoiceScript" class="ap-precheck-voice-script hidden" aria-live="polite">
+                Read exactly: "I am ready for this proctored assessment."
+              </div>
+              <div id="apProctorHints" class="meta" style="min-width:260px;">Keep face visible, adequate lighting, and quiet environment.</div>
+            </div>
+          </div>
+          <div class="row wrap gap-sm" style="margin-top:12px;">
+            <button id="apRerunChecksBtn" class="btn small">Re-run checks</button>
+            <button id="apPrecheckNextBtn" class="btn primary" disabled>Next</button>
+          </div>
+        </div>
+
+        <div id="apPrecheckRulesPage" class="hidden">
+          <div class="ap-rules-heading">Read and follow all instructions before starting assessment.</div>
+          <ul class="ap-rules-list">
+            <li>Avoid mobile phone or secondary screen usage.</li>
+            <li>Do not read questions aloud; avoid external voices.</li>
+            <li>Keep your face centered and eyes on screen.</li>
+            <li>Tab switching and fullscreen exit are not allowed.</li>
+            <li>Do not look at non-text blank space for long periods.</li>
+            <li>Closing your eyes briefly is permitted.</li>
+            <li>Look at the dot that randomly appears on the screen.</li>
+          </ul>
+          <div class="row wrap gap-sm" style="margin-top:10px;">
+            <button id="apRulesSpeakBtn" class="btn small ap-rules-speak-btn">Read Instructions</button>
+            <div id="apRulesReadStatus" class="meta"></div>
+          </div>
+          <label class="checkbox-row" style="margin-top:12px;">
+            <input id="apEnvironmentAttest" type="checkbox" />
+            <span>I confirm screen sharing, remote desktop, and support tools like AnyDesk or TeamViewer are not running.</span>
+          </label>
+          <div id="apEnvironmentStatus" class="meta" style="margin-top:6px;">Assessment start remains blocked until you confirm the test machine is local-only.</div>
+          <div class="row wrap gap-sm" style="margin-top:12px;">
+            <button id="apBackToChecksBtn" class="btn small">Back</button>
+            <button id="apStartTestBtn" class="btn primary" disabled>Start Assessment</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="apQuestionPanel" class="item">
+        <div class="row between">
+          <div id="apProgressText" class="meta">Question 1/1</div>
+          <div id="apTimerText" class="meta"></div>
+        </div>
+        <div id="apAttentionChallenge" class="attention-challenge hidden" aria-live="polite">
+          <div id="apAttentionChallengeText" class="attention-challenge-text">Quick focus check</div>
+          <div id="apAttentionChallengeDot" class="attention-challenge-dot"></div>
+        </div>
+        <div id="apQuestionContent">
+          <h3 id="apQuestionText" style="margin-top:8px;">Question</h3>
+          <div id="apOptionsList" class="list" style="margin-top:10px;"></div>
+        </div>
+        <div class="row wrap gap-sm" style="margin-top:12px;">
+          <button id="apPrevBtn" class="btn small">Previous</button>
+          <button id="apNextBtn" class="btn small">Next</button>
+          <button id="apSubmitBtn" class="btn primary hidden">Submit</button>
+        </div>
+      </section>
+
+      <section id="apResultPanel" class="item hidden">
+        <h3>Assessment Result</h3>
+        <p class="muted" style="margin:8px 0 0; font-size:0.95rem; line-height:1.5;">
+          First, read your <strong>score</strong>, <strong>correct/wrong counts</strong>, and <strong>proctor summary</strong> below. That context is what you are judging in the training step.
+        </p>
+        <div id="apResultSummary" class="meta" style="margin-top:10px;"></div>
+        <div id="apWarningsSummary" class="meta" style="margin-top:6px;"></div>
+        <div id="apTrainingFeedbackPanel" class="item ap-training-review-block">
+          <div><strong>Training review</strong> <span class="meta" style="font-weight:600;">(after you have read the results above)</span></div>
+          <div class="meta" style="margin-top:6px;">Say whether the <strong>proctor model's outcome</strong> (warnings, risk, pass/fail) matched what you think was fair, given the same results. Saved for model improvements.</div>
+          <div class="row wrap gap-sm" style="margin-top:10px;">
+            <button id="apTrainingPassBtn" class="btn small">Pass (Model Correct)</button>
+            <button id="apTrainingFailBtn" class="btn small danger">Fail (Model Wrong)</button>
+          </div>
+          <label style="margin-top:10px;">
+            Comment
+            <textarea id="apTrainingComment" rows="3" placeholder="Why was the model correct or wrong?"></textarea>
+          </label>
+          <div class="row wrap gap-sm">
+            <button id="apTrainingSaveBtn" class="btn primary">Save Training Review</button>
+            <div id="apTrainingFeedbackStatus" class="meta"></div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section id="studentView" class="admin-layout hidden">
+      <aside class="panel sidebar">
+        <div class="provider-sidebar-brand">
+          <div class="provider-sidebar-logo-wrap">
+            <img src="/assets/credivo_logo.png?v=20260515" alt="Classagon" class="provider-sidebar-logo" />
+          </div>
+        </div>
+        <h3>Workspace</h3>
+        <button class="nav-btn active student-nav-btn" data-student-view="home">Home</button>
+        <button class="nav-btn student-nav-btn" data-student-view="available">Available Courses</button>
+        <button class="nav-btn student-nav-btn" data-student-view="enrolled">My Courses</button>
+        <button class="nav-btn student-nav-btn" data-student-view="assessments">Assessments</button>
+        <button class="nav-btn student-nav-btn" data-student-view="live">Live Classes</button>
+        <button class="nav-btn student-nav-btn" data-student-view="certifications">Certifications</button>
+        <button class="nav-btn student-nav-btn" data-student-view="profile">Profile</button>
+        <div class="sidebar-tools">
+          <button class="settings-toggle js-settings-toggle" type="button" aria-label="Settings">&#9881;</button>
+          <div class="settings-menu hidden">
+            <div class="settings-header">
+              <div class="settings-title">Settings</div>
+            </div>
+            <div class="settings-session">
+              <span class="badge js-session-badge">Not signed in</span>
+              <span class="badge js-user-uid-badge hidden">UID: -</span>
+            </div>
+            <div class="settings-actions">
+              <button class="btn small js-change-password-btn" type="button">Change Password</button>
+              <button class="btn ghost js-logout-btn" disabled>Logout</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="panel content" id="student-view-home">
+        <div class="row between">
+          <h2>Home</h2>
+          <button id="refreshStudentDashboardBtn" class="btn small">Refresh</button>
+        </div>
+        <div id="studentStats" class="stats"></div>
+        <div class="moderation-toolbar student-home-suggested" style="margin-top:16px;">
+          <div class="row between">
+            <h3 style="margin:0;">Suggested Courses</h3>
+            <div class="meta">Matched to your age range</div>
+          </div>
+          <div id="studentHomeAvailableList" class="list glimpse-list"></div>
+        </div>
+      </section>
+
+      <section class="panel content hidden" id="student-view-available">
+        <h2>Available Courses</h2>
+        <div class="row provider-courses-toolbar course-grid-controls">
+          <div class="search-with-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/></svg>
+            <input id="studentAvailableSearch" class="search" type="text" placeholder="Search by course or provider" />
+          </div>
+          <div class="row provider-course-actions">
+            <button id="studentAvailableFilterBtn" class="btn small toolbar-icon-btn" type="button" title="Filter" aria-label="Filter">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8L4 5z"/></svg>
+            </button>
+            <div id="studentAvailableFilterMenu" class="filter-popover open-left hidden">
+              <select id="studentAvailableSort" class="filter hidden">
+                <option value="latest">Latest</option>
+                <option value="rating_desc">Top Rated</option>
+                <option value="title_asc">Course Name (A-Z)</option>
+                <option value="provider_asc">Provider (A-Z)</option>
+              </select>
+              <button class="provider-sort-option active" type="button" data-student-available-sort="latest">Latest</button>
+              <button class="provider-sort-option" type="button" data-student-available-sort="rating_desc">Top Rated</button>
+              <button class="provider-sort-option" type="button" data-student-available-sort="title_asc">Course Name (A-Z)</button>
+              <button class="provider-sort-option" type="button" data-student-available-sort="provider_asc">Provider (A-Z)</button>
+            </div>
+            <button id="refreshStudentAvailableBtn" class="btn small toolbar-icon-btn" title="Refresh" aria-label="Refresh">
+              <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5v5h-5"/><path d="M4 19v-5h5"/><path d="M20 10a8 8 0 0 0-14.9-3"/><path d="M4 14a8 8 0 0 0 14.9 3"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="studentAvailableCourses" class="list"></div>
+      </section>
+      <section class="panel content hidden" id="student-view-available-course">
+        <div class="row between">
+          <h2 id="studentAvailableCourseTitle">Course Details</h2>
+          <button id="studentAvailableCourseBackBtn" class="btn small">Back to Available Courses</button>
+        </div>
+        <div class="item student-course-screen" style="max-width:1080px;">
+          <div id="studentAvailableCourseTopMeta" class="student-course-top-meta"></div>
+          <div id="studentAvailableCourseMeta" class="meta">Provider: - | Category: -</div>
+          <p id="studentAvailableCourseDescription" class="student-course-desc">Description not available.</p>
+          <div class="student-course-preview-wrap">
+            <div id="studentAvailableCoursePreviewWrap" style="position:relative;border-radius:12px;overflow:hidden;background:#000;">
+              <video id="studentAvailableCoursePreviewVideo" style="width:100%;display:block;max-height:420px;background:#000;" preload="metadata"></video>
+              <div class="student-course-preview-lock">
+                Enroll to unlock playback
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:14px;">
+            <h3 style="margin:0 0 8px 0;">Intro video</h3>
+            <video id="studentAvailableIntroVideo" style="width:100%;display:block;max-height:280px;border-radius:10px;background:#000;" controls preload="metadata"></video>
+            <div id="studentAvailableIntroMeta" class="meta" style="margin-top:6px;">Intro video is available before enrollment.</div>
+          </div>
+          <div style="margin-top:14px;">
+            <h3 style="margin:0 0 8px 0;">About this course</h3>
+            <div id="studentAvailableCourseAbout" class="meta"></div>
+          </div>
+          <div style="margin-top:14px;">
+            <h3 style="margin:0 0 8px 0;">Course Content</h3>
+            <div id="studentAvailableCourseContent" class="meta">No lessons added yet.</div>
+          </div>
+          <div id="studentAvailableCoursePrice" class="student-course-price">₹999</div>
+          <div id="studentAvailableCourseVerifyNote" class="meta">You need to be a verified student to enroll. Verify now.</div>
+          <div class="student-course-extra-grid">
+            <div><strong>Level</strong><div id="studentAvailableCourseLevel" class="meta">Beginner</div></div>
+            <div><strong>Language</strong><div id="studentAvailableCourseLanguage" class="meta">English</div></div>
+            <div><strong>Views per lesson</strong><div id="studentAvailableCourseViews" class="meta">3x</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel content hidden" id="student-view-enrolled">
+        <h2>My Enrolled Courses</h2>
+        <div class="row provider-courses-toolbar course-grid-controls">
+          <div class="search-with-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/></svg>
+            <input id="studentEnrolledSearch" class="search" type="text" placeholder="Search by course or provider" />
+          </div>
+          <div class="row provider-course-actions">
+            <button id="studentEnrolledFilterBtn" class="btn small toolbar-icon-btn" type="button" title="Filter" aria-label="Filter">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8L4 5z"/></svg>
+            </button>
+            <div id="studentEnrolledFilterMenu" class="filter-popover open-left hidden">
+              <select id="studentEnrolledSort" class="filter hidden">
+                <option value="latest">Latest</option>
+                <option value="rating_desc">Top Rated</option>
+                <option value="progress_desc">Progress</option>
+                <option value="title_asc">Course Name (A-Z)</option>
+                <option value="provider_asc">Provider (A-Z)</option>
+              </select>
+              <button class="provider-sort-option active" type="button" data-student-enrolled-sort="latest">Latest</button>
+              <button class="provider-sort-option" type="button" data-student-enrolled-sort="rating_desc">Top Rated</button>
+              <button class="provider-sort-option" type="button" data-student-enrolled-sort="progress_desc">Progress</button>
+              <button class="provider-sort-option" type="button" data-student-enrolled-sort="title_asc">Course Name (A-Z)</button>
+              <button class="provider-sort-option" type="button" data-student-enrolled-sort="provider_asc">Provider (A-Z)</button>
+            </div>
+          </div>
+        </div>
+        <div id="studentEnrolledCourses" class="list"></div>
+      </section>
+
+      <section class="panel content hidden" id="student-view-course">
+        <section id="studentCourseViewer" class="moderation-toolbar student-course-viewer">
+          <div class="student-course-hero">
+            <div class="student-course-hero-main">
+              <div class="student-course-title-row">
+                <h3 id="scvTitle">Course Viewer</h3>
+                <button id="scvCloseBtn" class="btn small">Back to Enrolled Courses</button>
+              </div>
+              <div id="scvMeta" class="meta student-course-subtitle"></div>
+            </div>
+          </div>
+          <div class="student-course-sections">
+            <section class="student-course-player-card">
+              <div id="scvVideoShell" class="video-shell">
+                <iframe id="scvStreamFrame" class="stream-iframe hidden" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
+                <video id="scvVideo" style="width:100%; border-radius:10px; background:#000;"></video>
+                <button id="scvMiniCloseBtn" class="icon-corner-btn corner-close" title="Close mini player" aria-label="Close mini player"></button>
+                <button id="scvMinimizeBtn" class="icon-corner-btn corner-left" title="Minimize player" aria-label="Minimize player"></button>
+                <button id="scvFullscreenBtn" class="icon-corner-btn" title="Fullscreen" aria-label="Fullscreen">&#9974;</button>
+                <div class="video-controls">
+                  <button id="scvPlayBtn" class="icon-btn" title="Play/Pause" aria-label="Play/Pause">&#9654;</button>
+                  <div class="seek-wrap">
+                    <div id="scvScrubber" class="yt-scrubber">
+                      <div id="scvBuffered" class="yt-buffered"></div>
+                      <div id="scvProgress" class="yt-progress"></div>
+                      <div id="scvTimelineMarkers" class="timeline-markers overlay"></div>
+                      <div id="scvThumb" class="yt-thumb"></div>
+                    </div>
+                    <div id="scvHoverPreview" class="hover-preview hidden"></div>
+                    <div id="scvHoverTime" class="hover-time hidden"></div>
+                  </div>
+                  <div id="scvVolumePack" class="scv-volume-pack">
+                    <button id="scvVolumeToggleBtn" class="icon-btn" title="Volume" aria-label="Volume"></button>
+                    <input id="scvVolume" type="range" min="0" max="1" step="0.05" value="1" />
+                  </div>
+                  <span id="scvTimeMeta" class="meta">00:00 / 00:00</span>
+                </div>
+                <div id="scvStreamMeta" class="meta hidden" style="margin-top:8px;color:#e5e7eb;"></div>
+              </div>
+              <div id="scvMarkerTooltip" class="marker-tooltip hidden"></div>
+              <div class="student-course-status item">
+                <div class="row between">
+                  <strong>Course Status</strong>
+                  <span id="scvProgressText" class="meta">0%</span>
+                </div>
+                <div class="student-course-progress-track">
+                  <div id="scvProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2563eb,#0ea5e9);"></div>
+                </div>
+                <div id="scvAssessmentPanel" class="row wrap gap-sm" style="margin-top:10px;">
+                  <span id="scvAssessmentStatus" class="meta">Watch the full video to unlock assessment.</span>
+                </div>
+              </div>
+              <div class="student-course-curriculum-block">
+                <h4>Resources</h4>
+                <div id="scvResourceList" class="list"></div>
+              </div>
+            </section>
+            <aside class="student-course-curriculum">
+              <div class="student-course-curriculum-block">
+                <h4>Curriculum</h4>
+                <div id="scvTopicList" class="list"></div>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel content hidden" id="student-view-assessments">
+        <h2>Assessments</h2>
+        <p class="muted">Track unlocked assessments and start tests from your enrolled courses.</p>
+        <div class="row between provider-courses-toolbar course-grid-controls">
+          <div class="search-with-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/></svg>
+            <input id="studentAssessmentsSearch" class="search" type="text" placeholder="Search by course or provider" />
+          </div>
+          <div class="row provider-course-actions">
+            <button id="studentAssessmentsFilterBtn" class="btn small toolbar-icon-btn" type="button" title="Filter" aria-label="Filter">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8L4 5z"/></svg>
+            </button>
+            <div id="studentAssessmentsFilterMenu" class="filter-popover open-left hidden">
+              <select id="studentAssessmentsSort" class="filter hidden">
+                <option value="latest">Latest</option>
+                <option value="status_available">Available First</option>
+                <option value="title_asc">Course Name (A-Z)</option>
+                <option value="provider_asc">Provider (A-Z)</option>
+              </select>
+              <select id="studentAssessmentsStatus" class="filter hidden" style="margin-top:8px;">
+                <option value="all">All Status</option>
+                <option value="available">Available</option>
+                <option value="locked">Locked</option>
+                <option value="unavailable">Unavailable</option>
+              </select>
+              <div class="filter-popover-label">Sort</div>
+              <button class="provider-sort-option active" type="button" data-student-assess-sort="latest">Latest</button>
+              <button class="provider-sort-option" type="button" data-student-assess-sort="status_available">Available First</button>
+              <button class="provider-sort-option" type="button" data-student-assess-sort="title_asc">Course Name (A-Z)</button>
+              <button class="provider-sort-option" type="button" data-student-assess-sort="provider_asc">Provider (A-Z)</button>
+              <div class="filter-popover-label">Status</div>
+              <button class="provider-sort-option active" type="button" data-student-assess-status="all">All Status</button>
+              <button class="provider-sort-option" type="button" data-student-assess-status="available">Available</button>
+              <button class="provider-sort-option" type="button" data-student-assess-status="locked">Locked</button>
+              <button class="provider-sort-option" type="button" data-student-assess-status="unavailable">Unavailable</button>
+            </div>
+            <button id="refreshStudentAssessmentsBtn" class="btn small toolbar-icon-btn" title="Refresh" aria-label="Refresh">
+              <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5v5h-5"/><path d="M4 19v-5h5"/><path d="M20 10a8 8 0 0 0-14.9-3"/><path d="M4 14a8 8 0 0 0 14.9 3"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="studentAssessmentsList" class="list"></div>
+      </section>
+
+      <section class="panel content hidden" id="student-view-live">
+        <div class="row between">
+          <h2>Live Classes</h2>
+          <button id="refreshStudentLiveClassesBtn" class="btn small">Refresh</button>
+        </div>
+        <p class="muted">Join upcoming or active live classes from your enrolled courses.</p>
+        <div id="studentLiveClassesList" class="list"></div>
+      </section>
+
+      <section class="panel content hidden" id="student-view-certifications">
+        <div class="row between">
+          <h2>Certifications</h2>
+          <button id="refreshStudentCertificationsBtn" class="btn small">Refresh</button>
+        </div>
+        <p class="muted">Certificates issued after passing eligible assessments.</p>
+        <div class="row between provider-courses-toolbar course-grid-controls">
+          <div class="search-with-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/></svg>
+            <input id="studentCertificationsSearch" class="search" type="text" placeholder="Search by course, provider or certificate ID" />
+          </div>
+          <div class="row provider-course-actions">
+            <button id="studentCertificationsFilterBtn" class="btn small toolbar-icon-btn" type="button" title="Filter" aria-label="Filter">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8L4 5z"/></svg>
+            </button>
+            <div id="studentCertificationsFilterMenu" class="filter-popover open-left hidden">
+              <select id="studentCertificationsSort" class="filter hidden">
+                <option value="latest">Latest</option>
+                <option value="course_asc">Course Name (A-Z)</option>
+                <option value="provider_asc">Provider (A-Z)</option>
+              </select>
+              <select id="studentCertificationsStatus" class="filter hidden">
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="revoked">Revoked</option>
+              </select>
+              <div class="filter-popover-label">Sort</div>
+              <button class="provider-sort-option active" type="button" data-student-cert-sort="latest">Latest</button>
+              <button class="provider-sort-option" type="button" data-student-cert-sort="course_asc">Course Name (A-Z)</button>
+              <button class="provider-sort-option" type="button" data-student-cert-sort="provider_asc">Provider (A-Z)</button>
+              <div class="filter-popover-label">Status</div>
+              <button class="provider-sort-option active" type="button" data-student-cert-status="all">All Status</button>
+              <button class="provider-sort-option" type="button" data-student-cert-status="active">Active</button>
+              <button class="provider-sort-option" type="button" data-student-cert-status="revoked">Revoked</button>
+            </div>
+          </div>
+        </div>
+        <div id="studentCertificatesTabList" class="list"></div>
+      </section>
+
+      <section class="panel content hidden" id="student-view-profile">
+        <div class="row between">
+          <h2>Profile</h2>
+          <button id="studentProfileBackBtn" class="btn small">Back</button>
+        </div>
+        <div class="item" style="max-width:760px;">
+          <div class="row wrap gap-sm">
+            <label style="flex:1 1 280px;">Full Name
+              <input id="studentProfileName" class="search" type="text" readonly />
+            </label>
+            <label style="flex:1 1 280px;">Public UID
+              <input id="studentProfileUid" class="search" type="text" readonly />
+            </label>
+          </div>
+          <div class="row wrap gap-sm" style="margin-top:8px;">
+            <label style="flex:1 1 280px;">Phone Number
+              <input id="studentProfilePhone" class="search" type="text" readonly />
+            </label>
+            <label style="flex:1 1 280px;">Role
+              <input id="studentProfileRole" class="search" type="text" readonly />
+            </label>
+          </div>
+          <label style="margin-top:10px;">Email
+            <input id="studentProfileEmail" class="search" type="email" placeholder="Enter updated email" />
+          </label>
+          <div class="row" style="margin-top:10px;">
+            <button id="studentProfileSaveEmailBtn" class="btn primary">Update Email</button>
+            <span id="studentProfileStatus" class="meta"></span>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section id="providerLiveCreateScreen" class="assessment-screen hidden">
+      <div class="assessment-screen-head">
+        <div>
+          <h2>Create Live Class</h2>
+          <p class="muted">Dedicated live-course ID is auto-generated. Use AI assist to draft agenda and activities.</p>
+        </div>
+        <button id="closeLiveClassSchedulerBtn" class="btn small">Close</button>
+      </div>
+      <div class="assessment-screen-grid">
+        <section class="item">
+          <h3>Schedule</h3>
+          <div class="row wrap gap-sm">
+            <input id="liveClassTitle" class="search" type="text" placeholder="Live class title" />
+            <input id="liveClassTimezone" class="filter" type="text" value="Asia/Kolkata" placeholder="Timezone" />
+            <input id="liveClassStartAt" class="filter" type="datetime-local" />
+            <input id="liveClassEndAt" class="filter" type="datetime-local" />
+          </div>
+          <div class="row wrap gap-sm" style="margin-top:8px;">
+            <select id="liveClassRecurrencePattern" class="filter">
+              <option value="none">No repeat</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="weekends">Weekends</option>
+              <option value="custom">Custom weekdays</option>
+            </select>
+            <input id="liveClassRecurrenceCount" class="filter" type="number" min="1" max="60" value="1" placeholder="Repeat count" />
+          </div>
+          <div id="liveClassCustomDaysRow" class="row wrap gap-sm hidden" style="margin-top:8px;">
+            <label class="checkbox-row"><input type="checkbox" data-live-custom-day="0" /><span>Mon</span></label>
+            <label class="checkbox-row"><input type="checkbox" data-live-custom-day="1" /><span>Tue</span></label>
+            <label class="checkbox-row"><input type="checkbox" data-live-custom-day="2" /><span>Wed</span></label>
+            <label class="checkbox-row"><input type="checkbox" data-live-custom-day="3" /><span>Thu</span></label>
+            <label class="checkbox-row"><input type="checkbox" data-live-custom-day="4" /><span>Fri</span></label>
+            <label class="checkbox-row"><input type="checkbox" data-live-custom-day="5" /><span>Sat</span></label>
+            <label class="checkbox-row"><input type="checkbox" data-live-custom-day="6" /><span>Sun</span></label>
+          </div>
+          <div class="row wrap gap-sm" style="margin-top:8px;">
+            <select id="liveClassMode" class="filter">
+              <option value="in_app">In-App Classroom</option>
+              <option value="external">External Link</option>
+            </select>
+            <input id="liveClassExternalUrl" class="search" type="url" placeholder="External meeting URL (if external mode)" />
+            <input id="liveClassMaxParticipants" class="filter" type="number" min="1" max="2000" value="200" placeholder="Max participants" />
+          </div>
+          <label>Description
+            <textarea id="liveClassDescription" rows="5" placeholder="Agenda and class notes"></textarea>
+          </label>
+          <div class="row wrap gap-sm">
+            <label class="checkbox-row"><input id="liveClassAllowChat" type="checkbox" checked /><span>Enable chat</span></label>
+            <label class="checkbox-row"><input id="liveClassAllowRaiseHand" type="checkbox" checked /><span>Enable raise hand</span></label>
+            <label class="checkbox-row"><input id="liveClassAllowReactions" type="checkbox" checked /><span>Enable reactions</span></label>
+          </div>
+          <div class="row wrap gap-sm" style="margin-top:10px;">
+            <button id="createLiveClassBtn" class="btn primary">Create Live Class</button>
+            <button id="cancelLiveClassSchedulerBtn" class="btn small">Cancel</button>
+          </div>
+        </section>
+        <section class="item">
+          <h3>AI Assist</h3>
+          <p class="muted">Generate teaching draft content from your title and description.</p>
+          <div class="row wrap gap-sm">
+            <button id="liveClassGenerateAgendaBtn" class="btn small">Generate Agenda</button>
+            <button id="liveClassGeneratePollBtn" class="btn small">Generate Poll Ideas</button>
+            <button id="liveClassGenerateSummaryBtn" class="btn small">Generate Recap Notes</button>
+          </div>
+          <label style="margin-top:10px;">
+            AI Draft Output
+            <textarea id="liveClassAiOutput" rows="15" placeholder="Generated agenda / poll / recap notes will appear here"></textarea>
+          </label>
+          <div class="row wrap gap-sm">
+            <button id="liveClassAppendAiBtn" class="btn small">Append To Description</button>
+            <button id="liveClassReplaceAiBtn" class="btn small">Replace Description</button>
+          </div>
+        </section>
+        <section class="item">
+          <h3>Teaching Toolkit</h3>
+          <ul class="meta" style="margin: 0 0 0 16px;">
+            <li>Interactive whiteboard notes</li>
+            <li>Live poll + vote tally</li>
+            <li>Raise hand moderation</li>
+            <li>Reactions and class chat</li>
+            <li>Live participant list</li>
+          </ul>
+          <div class="meta" style="margin-top:12px;">After creating schedule, use Start Session from Live Classes list at class time.</div>
+        </section>
+      </div>
+    </section>
+
+    <section id="liveClassroomScreen" class="assessment-screen hidden">
+      <div class="assessment-screen-head">
+        <div>
+          <h2 id="liveRoomTitle">Live Classroom</h2>
+          <p id="liveRoomMeta" class="muted">Interactive class room</p>
+        </div>
+        <div class="row wrap gap-sm">
+          <span class="meta">Live session</span>
+        </div>
+      </div>
+      <div class="live-stage-shell" id="liveRoomStageShell">
+        <div id="liveRoomStageTopbar" class="live-stage-topbar">
+          <div class="row live-topbar-row" style="width:100%;align-items:center;">
+            <div class="row gap-sm live-topbar-actions">
+              <button id="liveRoomFullscreenBtn" class="btn small live-dock-btn live-icon-btn live-topbar-btn live-topbar-icon" title="Fullscreen" data-tip="Fullscreen" aria-label="Fullscreen"><span class="ico"></span><span class="lbl">Fullscreen</span></button>
+              <button id="leaveLiveRoomBtn" class="btn small live-dock-btn live-icon-btn live-topbar-btn live-topbar-danger" title="Leave room" data-tip="Leave" aria-label="Leave room"><span class="ico"></span><span class="lbl">Leave</span></button>
+            </div>
+          </div>
+        </div>
+        <video id="liveRoomStageVideo" autoplay playsinline class="live-stage-video"></video>
+        <div id="liveRoomStagePlaceholder" class="live-stage-placeholder hidden">
+          <div class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="7" width="13" height="10" rx="2"></rect>
+              <path d="M16 10l5-3v10l-5-3z"></path>
+              <path d="M4 4l16 16"></path>
+            </svg>
+          </div>
+          <div class="title">Camera is turned off</div>
+          <div class="sub">Video will appear once camera/screen is active.</div>
+        </div>
+        <div id="liveRoomFocusTile" class="live-focus-tile hidden">
+          <video id="liveRoomFocusVideo" autoplay playsinline class="live-focus-video"></video>
+          <div id="liveRoomFocusLabel" class="live-video-label">Active speaker</div>
+        </div>
+        <video id="liveRoomLocalVideo" autoplay muted playsinline class="hidden"></video>
+        <div id="liveRoomRemoteVideoGrid" class="hidden"></div>
+        <div id="liveRoomReactionMenu" class="live-popover hidden">
+          <div class="row wrap gap-sm">
+            <button class="btn small" data-live-reaction="👍">👍</button>
+            <button class="btn small" data-live-reaction="👏">👏</button>
+            <button class="btn small" data-live-reaction="🔥">🔥</button>
+            <button class="btn small" data-live-reaction="✅">✅</button>
+            <button class="btn small" data-live-reaction="🎉">🎉</button>
+          </div>
+        </div>
+        <div id="liveRoomReactionBurstLayer" class="live-reaction-burst-layer" aria-hidden="true"></div>
+        <div id="liveRoomControlDock" class="live-control-dock">
+          <button id="liveRoomToggleToolsBtn" class="btn small live-dock-btn live-icon-btn" title="Tools" data-tip="Tools" aria-label="Tools"><span class="ico"></span><span class="lbl">Tools</span></button>
+          <button id="liveRoomToggleChatBtn" class="btn small live-dock-btn live-icon-btn" title="Chat" data-tip="Chat" aria-label="Chat"><span class="ico"></span><span class="lbl">Chat</span></button>
+          <button id="liveRoomReactBtn" class="btn small live-dock-btn live-icon-btn" title="Reactions" data-tip="Reactions" aria-label="Reactions"><span class="ico"></span><span class="lbl">React</span></button>
+          <button id="liveRoomVideoStartBtn" class="btn small live-dock-btn live-icon-btn" title="Camera" data-tip="Camera" aria-label="Camera"><span class="ico"></span><span class="lbl">Camera</span></button>
+          <button id="liveRoomToggleMicBtn" class="btn small live-dock-btn live-icon-btn" title="Microphone" data-tip="Mic" aria-label="Microphone"><span class="ico"></span><span class="lbl">Mic</span></button>
+          <button id="liveRoomShareScreenBtn" class="btn small live-dock-btn live-icon-btn" title="Share screen" data-tip="Share screen" aria-label="Share screen"><span class="ico"></span><span class="lbl">Share</span></button>
+          <button id="liveRoomParticipantsBtn" class="btn small live-dock-btn live-icon-btn" title="Participants" data-tip="Participants" aria-label="Participants">
+            <span class="ico"></span>
+            <span class="lbl">Participants</span>
+            <span id="liveRoomParticipantsCountBadge" class="live-dock-count">0</span>
+          </button>
+          <span id="liveRoomRecordingBadge" class="status-pill status-in_review hidden">Recording...</span>
+        </div>
+        <button id="liveRoomStopShareOverlayBtn" class="btn small live-stop-share-overlay hidden"><span class="ico"></span><span class="lbl">Stop sharing</span></button>
+        <aside id="liveRoomToolsPanel" class="live-updrawer hidden">
+          <div class="row between" style="align-items:center;">
+            <h3 style="margin:0;">Tools</h3>
+            <div class="live-recording-controls">
+              <button id="liveRoomStartRecordingBtn" class="btn small live-record-icon-btn" title="Start recording" aria-label="Start recording"><span class="ico"></span></button>
+              <button id="liveRoomPauseRecordingBtn" class="btn small live-record-icon-btn" title="Pause or resume recording" aria-label="Pause or resume recording"><span class="ico"></span></button>
+              <button id="liveRoomStopRecordingBtn" class="btn small live-record-icon-btn" title="Stop recording" aria-label="Stop recording"><span class="ico"></span></button>
+            </div>
+          </div>
+          <div class="live-tools-grid" style="margin-top:10px;">
+            <button id="liveRoomOpenWhiteboardBtn" class="btn small live-tool-action"><span class="ico"></span><span class="lbl">Whiteboard</span></button>
+            <button id="liveRoomOpenBreakoutBtn" class="btn small live-tool-action"><span class="ico"></span><span class="lbl">Breakout Rooms</span></button>
+            <button id="liveRoomOpenPollBtn" class="btn small live-tool-action"><span class="ico"></span><span class="lbl">Quick Poll</span></button>
+            <button id="liveRoomOpenQaBtn" class="btn small live-tool-action"><span class="ico"></span><span class="lbl">Q&amp;A</span></button>
+          </div>
+          <div class="item" style="margin-top:10px;">
+            <div class="row between">
+              <strong>Host Controls</strong>
+              <label class="row" style="gap:6px;">
+                <input id="liveRoomWaitingToggle" type="checkbox" checked />
+                <span class="meta">Waiting room</span>
+              </label>
+            </div>
+            <div id="liveRoomWaitingList" class="list" style="margin-top:8px;"></div>
+          </div>
+        </aside>
+        <div id="liveRoomParticipantsMenu" class="live-popover live-participants-popover hidden">
+          <div class="row between" style="align-items:center;">
+            <strong>Participants</strong>
+            <span id="liveRoomParticipantsCountText" class="meta">0 online</span>
+          </div>
+          <div id="liveRoomParticipantsList" class="list" style="max-height:220px;overflow:auto;margin-top:8px;"></div>
+        </div>
+        <aside id="liveRoomWhiteboardPanel" class="live-side-panel hidden">
+          <div class="row between" style="align-items:center;">
+            <h3 style="margin:0;">Whiteboard</h3>
+            <button class="btn small" data-live-side-close="whiteboard">Close</button>
+          </div>
+          <textarea id="liveRoomBoardText" rows="12" placeholder="Write key concepts, formulas, and reminders" style="margin-top:10px;"></textarea>
+          <div class="row wrap gap-sm" style="margin-top:8px;">
+            <button id="liveRoomSaveBoardBtn" class="btn small">Save Board</button>
+            <button id="liveRoomShareWhiteboardBtn" class="btn small">Show to Everyone</button>
+          </div>
+          <div class="row wrap gap-sm" style="margin-top:8px;">
+            <input id="liveRoomAiTopicInput" class="search" type="text" placeholder="Topic for AI explainer" />
+            <button id="liveRoomAiExplainBtn" class="btn small">AI Explain</button>
+          </div>
+        </aside>
+        <aside id="liveRoomPollComposerPanel" class="live-side-panel hidden">
+          <div class="row between" style="align-items:center;">
+            <h3 style="margin:0;">Quick Poll</h3>
+            <button class="btn small" data-live-side-close="poll-composer">Close</button>
+          </div>
+          <input id="liveRoomPollQuestion" class="search" type="text" placeholder="Poll question" style="margin-top:10px;" />
+          <input id="liveRoomPollOptions" class="search" type="text" placeholder="Options (comma separated)" style="margin-top:8px;" />
+          <div class="row wrap gap-sm" style="margin-top:8px;">
+            <button id="liveRoomStartPollBtn" class="btn small">Share Poll</button>
+            <button id="liveRoomClosePollBtn" class="btn small">Close Poll</button>
+          </div>
+          <div id="liveRoomPollPanel" class="item hidden" style="margin-top:10px;"></div>
+        </aside>
+        <aside id="liveRoomBreakoutPanel" class="live-side-panel hidden">
+          <div class="row between" style="align-items:center;">
+            <h3 style="margin:0;">Breakout Rooms</h3>
+            <button class="btn small" data-live-side-close="breakout">Close</button>
+          </div>
+          <div class="meta" style="margin-top:8px;">Select a participant from Participants and assign a room.</div>
+          <div class="row wrap gap-sm" style="margin-top:8px;">
+            <input id="liveRoomBreakoutName" class="search" type="text" placeholder="Room name (e.g., Group A)" />
+            <button id="liveRoomAssignBreakoutBtn" class="btn small">Assign Selected</button>
+            <button id="liveRoomClearBreakoutsBtn" class="btn small">Close Breakouts</button>
+            <button id="liveRoomShareBreakoutBtn" class="btn small">Show to Everyone</button>
+          </div>
+        </aside>
+        <aside id="liveRoomQaPanel" class="live-side-panel hidden">
+          <div class="row between" style="align-items:center;">
+            <h3 style="margin:0;">Q&amp;A</h3>
+            <button class="btn small" data-live-side-close="qa">Close</button>
+          </div>
+          <input id="liveRoomQaInput" class="search" type="text" placeholder="Type a question or note" style="margin-top:10px;" />
+          <div class="row wrap gap-sm" style="margin-top:8px;">
+            <button id="liveRoomAddQaBtn" class="btn small">Add</button>
+            <button id="liveRoomShareQaBtn" class="btn small">Show to Everyone</button>
+          </div>
+          <div id="liveRoomQaList" class="list" style="max-height:220px;overflow:auto;margin-top:10px;"></div>
+        </aside>
+        <aside id="liveRoomChatPanel" class="live-drawer live-drawer-right live-chat-panel hidden">
+          <div class="live-chat-head">
+            <h3>Class Chat</h3>
+          </div>
+          <div id="liveRoomChatList" class="list live-chat-list"></div>
+          <div class="live-chat-compose">
+            <input id="liveRoomChatInput" class="search" type="text" placeholder="Type message" />
+            <button id="liveRoomSendChatBtn" class="btn small live-chat-send-btn"><span class="ico"></span><span class="lbl">Send</span></button>
+          </div>
+        </aside>
+      </div>
+      <div id="liveRoomWaitingOverlay" class="live-waiting-overlay hidden">
+        <div class="live-waiting-card">
+          <h3>Waiting Room</h3>
+          <p id="liveRoomWaitingText">You are waiting for host approval to enter the class.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="nonAdminView" class="panel hidden">
+      <h2>Account Logged In</h2>
+      <p id="nonAdminText">This account view is not configured yet.</p>
+      <div id="nonAdminRoleFix" class="row wrap gap-sm hidden" style="margin-top:12px;">
+        <select id="nonAdminRoleSelect" class="filter">
+          <option value="student">Student</option>
+          <option value="provider">Provider</option>
+        </select>
+        <button id="nonAdminUpdateRoleBtn" class="btn small">Update Account Type</button>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="nonAdminBackToLoginBtn" class="btn small">Back to Login</button>
+      </div>
+    </section>
+
+    <section id="adminView" class="admin-layout hidden">
+      <aside class="panel sidebar">
+        <div class="provider-sidebar-brand">
+          <div class="provider-sidebar-logo-wrap">
+            <img src="/assets/credivo_logo.png?v=20260515" alt="Classagon" class="provider-sidebar-logo" />
+          </div>
+        </div>
+        <h3>Workspace</h3>
+        
+        <button class="nav-btn active" data-view="home">Home</button>
+        <button class="nav-btn" data-view="reports">Reports & Compliants <span id="reportsBadge" class="nav-badge hidden">0</span></button>
+        <button class="nav-btn" data-view="users">Users</button>
+        <button class="nav-btn" data-view="billing">Billing & Payments</button>
+        <div class="sidebar-tools">
+          <button class="settings-toggle js-settings-toggle" type="button" aria-label="Settings"><span class="material-symbols-rounded" aria-hidden="true">settings</span></button>
+          <div class="settings-menu hidden">
+            <div class="settings-header">
+              <div class="settings-title">Settings</div>
+            </div>
+            <div class="settings-session">
+              <span class="badge js-session-badge">Not signed in</span>
+              <span class="badge js-user-uid-badge hidden">UID: -</span>
+            </div>
+            <div class="settings-actions">
+              <button class="btn small js-change-password-btn" type="button">Change Password</button>
+              <button class="btn small js-collapse-workspace-btn">Collapse Workspace</button>
+              <button class="btn ghost js-logout-btn" disabled>Logout</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="panel content" id="view-home">
+        <div class="row between">
+          <h2>Home</h2>
+        </div>
+        <h3>Analytics</h3>
+        <div id="analyticsGrid" class="stats"></div>
+        
+      </section>
+
+      <section class="panel content hidden" id="view-reports">
+        <h2>Reports & Compliants</h2>
+        <div class="moderation-toolbar">
+          <div class="row wrap gap-sm">
+            <button class="btn small mode-tab active" data-mode="reports">Reports</button>
+            <button class="btn small mode-tab" data-mode="complaints">Compliants</button>
+          </div>
+          <div class="row wrap gap-sm">
+            <input id="moderationSearch" type="text" placeholder="Search details or reporter" class="search" />
+            <select id="moderationStatusFilter" class="filter">
+              <option value="all">All Status</option>
+              <option value="open">Open</option>
+              <option value="in_review">In Review</option>
+              <option value="resolved">Resolved</option>
+              <option value="dismissed">Dismissed</option>
+            </select>
+          </div>
+          <div class="row wrap gap-sm export-actions">
+            <button id="exportReportsBtn" class="btn small">Export Reports CSV</button>
+            <button id="exportComplaintsBtn" class="btn small">Export Compliants CSV</button>
+          </div>
+        </div>
+
+        <div id="moderationSummary" class="stats small"></div>
+        <div id="moderationTypeCounts" class="chips"></div>
+        <div id="moderationList" class="list"></div>
+      </section>
+
+      <section class="panel content hidden" id="view-users">
+        <h2>Users</h2>
+        <div class="row wrap gap-sm approvals-toolbar">
+          <input id="adminUsersSearch" type="text" placeholder="Search by name, email, phone, KYC..." class="search" />
+          <button id="refreshAdminUsersBtn" class="btn small">Refresh</button>
+        </div>
+        <div id="approvalSummary" class="stats small"></div>
+        <div class="row wrap gap-sm">
+          <button class="btn small approval-tab active" data-approval-tab="students">Students</button>
+          <button class="btn small approval-tab" data-approval-tab="providers">Providers</button>
+        </div>
+
+        <section id="studentsApprovalPane">
+          <h3>Students</h3>
+          <div id="pendingStudents" class="list"></div>
+        </section>
+
+        <section id="providersApprovalPane" class="hidden">
+          <h3>Providers</h3>
+          <div id="pendingProviders" class="list"></div>
+        </section>
+      </section>
+
+      <section class="panel content hidden" id="view-billing">
+        <h2>Billing & Payments</h2>
+        <div id="billingPanel" class="list"></div>
+      </section>
+
+      <section class="panel content hidden" id="view-profile">
+        <div class="row between">
+          <h2>Profile</h2>
+          <button id="adminProfileBackBtn" class="btn small">Back</button>
+        </div>
+        <div class="item" style="max-width:760px;">
+          <div class="row wrap gap-sm">
+            <label style="flex:1 1 280px;">Full Name
+              <input id="adminProfileName" class="search" type="text" readonly />
+            </label>
+            <label style="flex:1 1 280px;">Public UID
+              <input id="adminProfileUid" class="search" type="text" readonly />
+            </label>
+          </div>
+          <div class="row wrap gap-sm" style="margin-top:8px;">
+            <label style="flex:1 1 280px;">Phone Number
+              <input id="adminProfilePhone" class="search" type="text" readonly />
+            </label>
+            <label style="flex:1 1 280px;">Role
+              <input id="adminProfileRole" class="search" type="text" readonly />
+            </label>
+          </div>
+          <label style="margin-top:10px;">Email
+            <input id="adminProfileEmail" class="search" type="email" placeholder="Enter updated email" />
+          </label>
+          <div class="row" style="margin-top:10px;">
+            <button id="adminProfileSaveEmailBtn" class="btn primary">Update Email</button>
+            <span id="adminProfileStatus" class="meta"></span>
+          </div>
+        </div>
+      </section>
+    </section>
+
+  </main>
+  <div id="proctorWarningModal" class="proctor-modal hidden" role="dialog" aria-modal="true" aria-labelledby="proctorWarningTitle">
+    <div class="proctor-modal-card">
+      <div id="proctorWarningTitle" class="proctor-modal-title">Proctoring Warning</div>
+      <div id="proctorWarningBody" class="proctor-modal-body">Please read the warning carefully.</div>
+      <div id="proctorWarningCountdown" class="meta" style="margin-top:10px;">You can continue after 5 seconds.</div>
+      <div class="row" style="margin-top:14px;">
+        <button id="proctorWarningAcknowledgeBtn" class="btn primary" disabled>Understood</button>
+      </div>
+    </div>
+  </div>
+  <div id="authProgressOverlay" class="auth-progress-overlay hidden" aria-live="polite" aria-busy="true">
+    <div class="auth-progress-card">
+      <div class="auth-progress-spinner" aria-hidden="true"></div>
+      <div id="authProgressTitle" class="auth-progress-title">Signing you in</div>
+      <div id="authProgressDetail" class="auth-progress-detail">Please wait while we load your workspace.</div>
+    </div>
+  </div>
+  <div id="appNetworkBusy" class="app-network-busy hidden" aria-live="polite" aria-busy="true">
+    <div class="app-network-busy-bar"></div>
+    <div id="appNetworkBusyText" class="app-network-busy-text">Loading...</div>
+  </div>
+  <div id="toastStack" class="toast-stack"></div>
+
+  <script type="module" src="/assets/app.js?v=20260706b"></script>
+</body>
+</html>
+
+
+

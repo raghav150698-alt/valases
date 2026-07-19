@@ -1,0 +1,59 @@
+{
+  "rows_total": 576,
+  "rows_train": 456,
+  "rows_test": 120,
+  "split": {
+    "group_split_used": true,
+    "group_column": "path(base video id)",
+    "groups_train": 38,
+    "groups_test": 10,
+    "rows_train": 456,
+    "rows_test": 120
+  },
+  "class_distribution": {
+    "0": 288,
+    "1": 288
+  },
+  "reports": {
+    "logistic": {
+      "roc_auc": 1.0,
+      "selected": {
+        "threshold": 0.5,
+        "precision": 1.0,
+        "recall": 1.0,
+        "fpr": 0.0,
+        "tp": 60,
+        "fp": 0,
+        "tn": 60,
+        "fn": 0
+      }
+    },
+    "xgboost": {
+      "roc_auc": 1.0,
+      "selected": {
+        "threshold": 0.5,
+        "precision": 1.0,
+        "recall": 1.0,
+        "fpr": 0.0,
+        "tp": 60,
+        "fp": 0,
+        "tn": 60,
+        "fn": 0
+      }
+    },
+    "cnn": {
+      "roc_auc": 0.9997222222222222,
+      "selected": {
+        "threshold": 0.5,
+        "precision": 0.9836065573770492,
+        "recall": 1.0,
+        "fpr": 0.016666666666666666,
+        "tp": 60,
+        "fp": 1,
+        "tn": 59,
+        "fn": 0
+      }
+    }
+  },
+  "chosen_model": "logistic"
+}

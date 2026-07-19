@@ -1,0 +1,267 @@
+{
+  "metrics": {
+    "frame_validation_accuracy": 0.953125,
+    "frame_validation_macro_f1": 0.9465244755244756,
+    "screen_vs_away_accuracy": 0.96875,
+    "class_counts": {
+      "away": 68,
+      "bottom_center_non_text": 28,
+      "bottom_left_non_text": 28,
+      "bottom_right_non_text": 28,
+      "left_non_text": 28,
+      "right_non_text": 28,
+      "text_area": 28,
+      "top_center_non_text": 28,
+      "top_left_non_text": 28,
+      "top_right_non_text": 28
+    },
+    "classes": [
+      "away",
+      "bottom_center_non_text",
+      "bottom_left_non_text",
+      "bottom_right_non_text",
+      "left_non_text",
+      "right_non_text",
+      "text_area",
+      "top_center_non_text",
+      "top_left_non_text",
+      "top_right_non_text"
+    ],
+    "feature_names": [
+      "nose_left_delta",
+      "nose_right_delta",
+      "ratio_delta",
+      "left_eye_open_delta",
+      "right_eye_open_delta",
+      "left_gaze_x_delta",
+      "right_gaze_x_delta",
+      "left_gaze_y_delta",
+      "right_gaze_y_delta",
+      "mouth_open_delta",
+      "avg_gaze_x_delta",
+      "avg_gaze_y_delta",
+      "gaze_x_skew",
+      "gaze_y_skew",
+      "eye_open_avg_delta",
+      "eye_open_diff_delta",
+      "horizontal_magnitude",
+      "vertical_magnitude",
+      "combined_screen_distance"
+    ],
+    "holdout_rows": 64,
+    "train_rows": 256,
+    "source_count": 31,
+    "caveat": "Validation is frame-level because the current self-collected set has only one named video per screen zone. Treat this as a useful tuning signal, not a final accuracy claim."
+  },
+  "classification_report": {
+    "away": {
+      "precision": 1.0,
+      "recall": 0.9230769230769231,
+      "f1-score": 0.96,
+      "support": 13.0
+    },
+    "bottom_center_non_text": {
+      "precision": 0.8333333333333334,
+      "recall": 1.0,
+      "f1-score": 0.9090909090909091,
+      "support": 5.0
+    },
+    "bottom_left_non_text": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 6.0
+    },
+    "bottom_right_non_text": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 6.0
+    },
+    "left_non_text": {
+      "precision": 0.8571428571428571,
+      "recall": 1.0,
+      "f1-score": 0.9230769230769231,
+      "support": 6.0
+    },
+    "right_non_text": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 5.0
+    },
+    "text_area": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 6.0
+    },
+    "top_center_non_text": {
+      "precision": 0.8571428571428571,
+      "recall": 1.0,
+      "f1-score": 0.9230769230769231,
+      "support": 6.0
+    },
+    "top_left_non_text": {
+      "precision": 1.0,
+      "recall": 0.6,
+      "f1-score": 0.75,
+      "support": 5.0
+    },
+    "top_right_non_text": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 6.0
+    },
+    "accuracy": 0.953125,
+    "macro avg": {
+      "precision": 0.9547619047619047,
+      "recall": 0.9523076923076923,
+      "f1-score": 0.9465244755244756,
+      "support": 64.0
+    },
+    "weighted avg": {
+      "precision": 0.9601934523809523,
+      "recall": 0.953125,
+      "f1-score": 0.9508184003496503,
+      "support": 64.0
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "away",
+      "bottom_center_non_text",
+      "bottom_left_non_text",
+      "bottom_right_non_text",
+      "left_non_text",
+      "right_non_text",
+      "text_area",
+      "top_center_non_text",
+      "top_left_non_text",
+      "top_right_non_text"
+    ],
+    "matrix": [
+      [
+        12,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        6,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        6,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        5,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        6,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        6,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        1,
+        3,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        6
+      ]
+    ]
+  }
+}

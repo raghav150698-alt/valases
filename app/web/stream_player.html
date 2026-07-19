@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Classagon Stream Player</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+  <style>
+    .stream-wrap { max-width: 1100px; margin: 20px auto; padding: 0 14px; }
+    .stream-grid { display:grid; grid-template-columns: 300px minmax(0,1fr); gap:14px; align-items:start; }
+    .stream-lessons { border:1px solid #e2e8f0; border-radius:12px; background:#fff; padding:10px; max-height:70vh; overflow:auto; }
+    .stream-player { border:1px solid #e2e8f0; border-radius:12px; background:#fff; padding:10px; }
+    .stream-iframe { width:100%; aspect-ratio:16/9; border:0; border-radius:10px; background:#0f172a; }
+    .stream-item { border:1px solid #e2e8f0; border-radius:10px; padding:8px; margin-bottom:8px; cursor:pointer; }
+    .stream-item.active { border-color:#2563eb; box-shadow:0 0 0 1px #2563eb inset; }
+  </style>
+</head>
+<body>
+  <main class="stream-wrap">
+    <section class="panel" style="padding:14px;">
+      <div class="row wrap gap-sm" style="align-items:end;">
+        <label style="min-width:200px;">Course ID
+          <input id="courseIdInput" class="search" type="number" min="1" />
+        </label>
+        <button id="loadCourseBtn" class="btn small">Load Course</button>
+      </div>
+      <div id="streamNotice" class="meta" style="margin-top:8px;">Login required. This page uses your existing Firebase login session.</div>
+    </section>
+
+    <section class="stream-grid" style="margin-top:12px;">
+      <aside class="stream-lessons">
+        <h3 style="margin:0 0 8px;">Lessons</h3>
+        <div id="lessonList"></div>
+      </aside>
+      <section class="stream-player">
+        <iframe id="playerFrame" class="stream-iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
+        <div class="row wrap gap-sm" style="margin-top:8px;">
+          <div id="usageInfo" class="meta">Fair usage: -</div>
+          <div id="resumeInfo" class="meta">Resume: -</div>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script type="module" src="/assets/stream_player_module.js"></script>
+</body>
+</html>

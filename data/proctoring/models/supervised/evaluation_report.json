@@ -1,0 +1,61 @@
+{
+  "rows_total": 2331,
+  "rows_train": 1859,
+  "rows_test": 472,
+  "split": {
+    "group_split_used": true,
+    "group_column": "path(base video id)",
+    "groups_train": 1669,
+    "groups_test": 422,
+    "rows_train": 1859,
+    "rows_test": 472
+  },
+  "class_distribution": {
+    "0": 775,
+    "1": 1556
+  },
+  "reports": {
+    "logistic": {
+      "roc_auc": 0.7623175091370255,
+      "selected": {
+        "threshold": 0.575,
+        "precision": 0.9308176100628931,
+        "recall": 0.4758842443729904,
+        "fpr": 0.06832298136645963,
+        "tp": 148,
+        "fp": 11,
+        "tn": 150,
+        "fn": 163
+      }
+    },
+    "xgboost": {
+      "roc_auc": 0.8453995326636177,
+      "selected": {
+        "threshold": 0.725,
+        "precision": 0.9408602150537635,
+        "recall": 0.5627009646302251,
+        "fpr": 0.06832298136645963,
+        "tp": 175,
+        "fp": 11,
+        "tn": 150,
+        "fn": 136
+      }
+    },
+    "cnn": {
+      "roc_auc": 0.8110083681172735,
+      "selected": {
+        "threshold": 0.625,
+        "precision": 0.9298245614035088,
+        "recall": 0.5112540192926045,
+        "fpr": 0.07453416149068323,
+        "tp": 159,
+        "fp": 12,
+        "tn": 149,
+        "fn": 152
+      },
+      "diagnostic_only": true,
+      "reason": "CNN is not exported because the app scoring path expects predict_proba-compatible models."
+    }
+  },
+  "chosen_model": "xgboost"
+}

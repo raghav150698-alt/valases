@@ -1,0 +1,18 @@
+{
+  "model": "xgboost",
+  "manual_review_threshold": 0.725,
+  "warning_threshold": 0.575,
+  "critical_threshold": 0.845,
+  "auto_deduction_enabled": false,
+  "deduction_policy": {
+    "per_warning_pct": 0,
+    "high_risk_event_pct": 0,
+    "max_total_deduction_pct": 0
+  },
+  "guardrails": {
+    "require_two_signals": true,
+    "require_min_confidence": 0.7,
+    "always_manual_review_if_critical": true,
+    "min_holdout_for_auto_deduction": 100
+  }
+}

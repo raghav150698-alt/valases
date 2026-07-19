@@ -1,0 +1,24 @@
+{
+  "model_type": "isolation_forest",
+  "supervised": false,
+  "note": "Only one class found in labels. Trained one-class anomaly detector.",
+  "pseudo_anomaly_rate_on_test": 0.1,
+  "rows_total": 48,
+  "rows_train": 38,
+  "rows_test": 10,
+  "features": [
+    "f00",
+    "f01",
+    "f02",
+    "f03",
+    "f04",
+    "f05",
+    "f06",
+    "f07",
+    "f08",
+    "f09"
+  ],
+  "class_distribution": {
+    "0": 48
+  }
+}

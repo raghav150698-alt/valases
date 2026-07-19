@@ -1,0 +1,20 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f3f6fb; color: #152235; }
+.topbar { padding: 14px 20px; background: #0f766e; color: #fff; }
+.topbar h1 { margin: 0; font-size: 20px; }
+.wrap { max-width: 1120px; margin: 20px auto; padding: 0 16px 40px; display: grid; gap: 16px; }
+.panel { background: #fff; border: 1px solid #dbe4ef; border-radius: 12px; padding: 14px; }
+.panel h2 { margin: 0 0 10px; font-size: 18px; }
+.row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+input, textarea, select, button { font: inherit; }
+input, textarea, select { padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; min-width: 180px; flex: 1; }
+textarea { min-height: 84px; }
+button { border: 0; background: #0f766e; color: #fff; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
+button.ghost { background: #475569; }
+button:hover { opacity: 0.92; }
+.msg { min-height: 20px; margin: 0; color: #334155; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { border-bottom: 1px solid #e2e8f0; padding: 8px; text-align: left; }
+.q { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+.q h4 { margin: 0 0 8px; font-size: 15px; }
+.opts label { display: block; padding: 4px 0; }

@@ -1,0 +1,49 @@
+{
+  "metrics": {
+    "binary_screen_vs_offscreen_accuracy": 0.9516129032258065,
+    "binary_screen_vs_offscreen_f1": 0.9651162790697675,
+    "rows_evaluated": 124,
+    "classical_weight": 0.55,
+    "pytorch_weight": 0.45,
+    "threshold": 0.5,
+    "classical_bundle": "D:\\Lenovo\\certora\\data\\proctoring\\models\\head_eye_screen_v2\\head_eye_screen_bundle_v2.before_new_person.joblib",
+    "pytorch_model": "D:\\Lenovo\\certora\\data\\proctoring\\models\\eye_gaze_pytorch_v5\\eye_gaze_pytorch_model.pt"
+  },
+  "binary_confusion_matrix": [
+    [
+      35,
+      1
+    ],
+    [
+      5,
+      83
+    ]
+  ],
+  "classification_report": {
+    "0": {
+      "precision": 0.875,
+      "recall": 0.9722222222222222,
+      "f1-score": 0.9210526315789473,
+      "support": 36.0
+    },
+    "1": {
+      "precision": 0.9880952380952381,
+      "recall": 0.9431818181818182,
+      "f1-score": 0.9651162790697675,
+      "support": 88.0
+    },
+    "accuracy": 0.9516129032258065,
+    "macro avg": {
+      "precision": 0.9315476190476191,
+      "recall": 0.9577020202020202,
+      "f1-score": 0.9430844553243574,
+      "support": 124.0
+    },
+    "weighted avg": {
+      "precision": 0.9552611367127497,
+      "recall": 0.9516129032258065,
+      "f1-score": 0.9523236072175938,
+      "support": 124.0
+    }
+  }
+}

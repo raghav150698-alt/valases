@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Assessment Standalone</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Assessment Standalone</h1>
+  </header>
+
+  <main class="wrap">
+    <section class="panel">
+      <h2>Recruiter</h2>
+      <div class="row">
+        <input id="rName" placeholder="Name (for signup)" />
+        <input id="rEmail" placeholder="Recruiter email" />
+        <input id="rPass" type="password" placeholder="Password" />
+      </div>
+      <div class="row">
+        <button id="rSignup">Signup</button>
+        <button id="rLogin">Login</button>
+        <button id="rRefresh" class="ghost">Refresh Data</button>
+      </div>
+      <p id="rMsg" class="msg"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Create Custom Assessment</h2>
+      <div class="row">
+        <input id="tTitle" placeholder="Assessment title" />
+        <input id="tDuration" type="number" min="5" max="180" value="30" placeholder="Duration (min)" />
+        <input id="tPass" type="number" min="70" max="100" value="70" placeholder="Pass %" />
+      </div>
+      <textarea id="tDesc" placeholder="Description"></textarea>
+      <textarea id="tQuestions" placeholder='Questions JSON: [{"text":"Q1","options":["A","B"],"correct_index":0}]'></textarea>
+      <div class="row">
+        <button id="tCreate">Create Assessment</button>
+      </div>
+      <p id="tMsg" class="msg"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Issue Assessment</h2>
+      <div class="row">
+        <select id="issueTemplate"></select>
+      </div>
+      <div class="row">
+        <input id="cName" placeholder="Candidate name" />
+        <input id="cEmail" placeholder="Candidate email" />
+        <button id="issueBtn">Issue</button>
+      </div>
+      <p id="issueMsg" class="msg"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Recruiter Results</h2>
+      <table id="issuesTable">
+        <thead>
+          <tr>
+            <th>Candidate</th>
+            <th>Email</th>
+            <th>Assessment</th>
+            <th>Status</th>
+            <th>Score</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Candidate Login</h2>
+      <div class="row">
+        <input id="candUser" placeholder="Username" />
+        <input id="candPass" type="password" placeholder="Password" />
+        <button id="candLogin">Login</button>
+      </div>
+      <p id="candMsg" class="msg"></p>
+    </section>
+
+    <section class="panel" id="attemptPanel">
+      <h2 id="aTitle">Assessment Attempt</h2>
+      <p id="aMeta"></p>
+      <div id="questions"></div>
+      <div class="row">
+        <button id="submitAttempt">Submit Assessment</button>
+      </div>
+      <p id="attemptMsg" class="msg"></p>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
