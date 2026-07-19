@@ -6,6 +6,13 @@ import { CodingEnv } from "../tools/CodingEnv";
 import { ExcelAssessmentSubmission, ExcelSimulator } from "../tools/ExcelSimulator";
 import { RemoteDesktopTool } from "../tools/RemoteDesktopTool";
 
+function apiErrorMessage(error: unknown, fallback: string): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (detail && typeof detail === "object") return JSON.stringify(detail);
+  return fallback;
+}
+
 type Assessment = {
   exam_id: number;
   title: string;
@@ -734,7 +741,7 @@ export function ProviderAssessments() {
                 </button>
               </div>
               {!canCreateAssessment && <div className="workspace-form-note">Add a title, valid duration and score{isMcqForm ? "." : ", plus a task prompt and marks."}</div>}
-              {createAssessment.isError && <div className="workspace-error">The assessment could not be created. Review the fields and try again.</div>}
+              {createAssessment.isError && <div className="workspace-error">{apiErrorMessage(createAssessment.error, "The assessment could not be created. Review the fields and try again.")}</div>}
             </section>
 
             {form.assessment_type === "spreadsheet" && (
