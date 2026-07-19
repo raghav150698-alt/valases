@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/api";
+import { useCandidateGazeProctor } from "../assessment/useCandidateGazeProctor";
 import { useAssessmentSession } from "../assessment/useAssessmentSession";
 import { useAssessmentTimer } from "../student/useAssessmentTimer";
 import { ExcelAssessmentSubmission, ExcelSimulator } from "../tools/ExcelSimulator";
@@ -50,6 +51,7 @@ export function IssuedCandidatePanel() {
   const [completion, setCompletion] = useState<{ title: string; message: string } | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isAcceptingConsent, setIsAcceptingConsent] = useState(false);
+  const { status: gazeStatus, error: gazeError, stream: gazeStream, start: startGazeProctor, stop: stopGazeProctor } = useCandidateGazeProctor(Boolean(paper));
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -116,16 +118,18 @@ export function IssuedCandidatePanel() {
     if (isAcceptingConsent) return;
     setIsAcceptingConsent(true);
     try {
+      await startGazeProctor();
       await issuedApi("POST", "/exams/issued/consent", {
         policy_version: "privacy-2026-07-19",
         consent_version: "candidate-consent-1.0",
-        camera: false,
+        camera: true,
         microphone: false,
         recording: false,
       });
       setConsentAccepted(true);
     } catch {
-      setStatus("We could not record your consent. Check your connection and try again.");
+      stopGazeProctor();
+      setStatus("We could not start camera proctoring. Check camera permission and your connection, then try again.");
       if (document.fullscreenElement) void document.exitFullscreen();
     } finally {
       setIsAcceptingConsent(false);
@@ -279,7 +283,7 @@ export function IssuedCandidatePanel() {
               <span className="launch-section-label">Before you begin</span>
               <h3 id="candidate-consent-title">Assessment privacy and integrity notice</h3>
               <p>Your answers, submitted work, timestamps, and assessment activity are collected to administer, score, secure, and review this assessment.</p>
-              <p>This session uses browser security checks. Leaving fullscreen closes the assessment. Repeated security warnings can close the attempt and send it for human review. Automated signals are not a final employment decision.</p>
+              <p>This session uses browser security checks and local camera-based gaze detection. Camera frames are processed for integrity signals and are not recorded by this flow. Leaving fullscreen closes the assessment. Automated signals are not a final employment decision.</p>
               <div className="candidate-policy-links">
                 <a href="/legal/privacy-policy.html" target="_blank" rel="noreferrer">Privacy policy</a>
                 <a href="/legal/data-retention-and-deletion.html" target="_blank" rel="noreferrer">Retention and deletion</a>
@@ -289,7 +293,8 @@ export function IssuedCandidatePanel() {
                 <input type="checkbox" checked={consentAccepted} disabled={isAcceptingConsent} onChange={(event) => { if (event.target.checked) { void requestFullscreen(); void acceptConsent(); } }} />
                 <span>I have read and agree to this assessment data and integrity notice.</span>
               </label>
-              {isAcceptingConsent && <div className="candidate-login-progress compact" role="status"><span className="candidate-loading-spinner" aria-hidden="true" /><span><strong>Preparing fullscreen assessment</strong><small>Recording your consent and loading the workspace...</small></span></div>}
+              {isAcceptingConsent && <div className="candidate-login-progress compact" role="status"><span className="candidate-loading-spinner" aria-hidden="true" /><span><strong>Preparing fullscreen assessment</strong><small>Starting the camera model and calibrating your on-screen gaze...</small></span></div>}
+              {gazeError && <small className="candidate-login-status" role="alert">{gazeError}</small>}
               <small>Need an accommodation or have a privacy question? Contact the organization that issued this assessment.</small>
             </section>
           ) : (
@@ -330,6 +335,8 @@ export function IssuedCandidatePanel() {
               <h3>{paper.assessment_title}</h3>
             </div>
             <div className="assessment-runtime-meta">
+              <span className={`candidate-proctor-state ${gazeStatus}`}><i aria-hidden="true" />Camera proctor {gazeStatus === "active" ? "active" : gazeStatus}</span>
+              {gazeStream && <video className="candidate-proctor-preview" aria-label="Camera proctor preview" autoPlay muted playsInline ref={(node) => { if (node && node.srcObject !== gazeStream) node.srcObject = gazeStream; }} />}
               <span>{paper.assessment_type === "mcq" ? `Question ${index + 1}/${paper.questions.length}` : "Task workspace"}</span>
               <span>Timer: {timerDisplay}</span>
             </div>

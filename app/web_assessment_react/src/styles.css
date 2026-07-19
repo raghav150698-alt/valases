@@ -1340,6 +1340,28 @@ body { margin: 0; background: #f6f8fb; }
   font-size: 12px;
   font-weight: 700;
 }
+.assessment-runtime-meta .candidate-proctor-state {
+  gap: 7px;
+  border-color: #b9d8cc;
+  background: #edf8f3;
+  color: #175443;
+}
+.candidate-proctor-state i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #16a36f;
+  box-shadow: 0 0 0 3px rgba(22, 163, 111, .13);
+}
+.candidate-proctor-state.error i { background: #dc2626; box-shadow: 0 0 0 3px rgba(220, 38, 38, .13); }
+.candidate-proctor-preview {
+  width: 54px;
+  height: 30px;
+  object-fit: cover;
+  border: 1px solid #b9d8cc;
+  border-radius: 4px;
+  transform: scaleX(-1);
+}
 .question-runtime-surface {
   padding: 18px;
   border: 1px solid #dde6f2;
