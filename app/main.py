@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -225,7 +225,7 @@ app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 @app.get("/")
 def frontend():
-    return FileResponse(str(WEB_DIR / "index.html"))
+    return RedirectResponse(url="/assessment/", status_code=307)
 
 
 @app.get("/stream-player")
