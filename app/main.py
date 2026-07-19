@@ -241,8 +241,9 @@ app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 
 @app.get("/")
-def frontend():
-    return RedirectResponse(url="/assessment/", status_code=307)
+def frontend(request: Request):
+    query = f"?{request.url.query}" if request.url.query else ""
+    return RedirectResponse(url=f"/assessment/{query}", status_code=307)
 
 
 @app.get("/stream-player")
