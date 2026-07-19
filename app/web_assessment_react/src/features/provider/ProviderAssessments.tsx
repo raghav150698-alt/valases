@@ -374,7 +374,7 @@ export function ProviderAssessments() {
       setCandidateEmail("");
       setIssueNotice(data?.email_delivery?.sent
         ? "Invitation sent. The candidate received the secure assessment link."
-        : "Assessment issued, but email delivery is not configured. Use the secure link and temporary password shown by the API response.");
+        : `Assessment issued, but email delivery failed: ${data?.email_delivery?.reason || "SMTP settings are incomplete."} Use the secure link and temporary password shown by the API response.`);
       await qc.invalidateQueries({ queryKey: ["issued-by-me"] });
       await qc.invalidateQueries({ queryKey: ["provider-assessments"] });
     },
