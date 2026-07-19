@@ -1,5 +1,12 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
+  "buildCommand": "npm --prefix app/web_assessment_react ci && npm --prefix app/web_assessment_react run build",
+  "functions": {
+    "api/index.py": {
+      "includeFiles": ["app/web_assessment_react/dist/**"]
+    }
+  },
   "routes": [
     { "src": "/assets/(.*)", "dest": "/api/index" },
     { "src": "/media/(.*)", "dest": "/api/index" },
