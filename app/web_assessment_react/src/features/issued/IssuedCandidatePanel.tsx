@@ -48,6 +48,8 @@ export function IssuedCandidatePanel() {
   const [policyWarning, setPolicyWarning] = useState<{ reason: string; count: number } | null>(null);
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [completion, setCompletion] = useState<{ title: string; message: string } | null>(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [isAcceptingConsent, setIsAcceptingConsent] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -94,13 +96,25 @@ export function IssuedCandidatePanel() {
   };
 
   const login = async () => {
-    const auth = accessKey
-      ? await api.post(`/exams/issued/key/${encodeURIComponent(accessKey)}/login`, { password })
-      : await api.post("/exams/issued/login", { email, password });
-    await loadMe(String(auth.data.token || ""));
+    if (isSigningIn) return;
+    setIsSigningIn(true);
+    setStatus("");
+    try {
+      const auth = accessKey
+        ? await api.post(`/exams/issued/key/${encodeURIComponent(accessKey)}/login`, { password })
+        : await api.post("/exams/issued/login", { email, password });
+      await loadMe(String(auth.data.token || ""));
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setStatus(detail || "We could not sign you in. Check the issued credentials and try again.");
+    } finally {
+      setIsSigningIn(false);
+    }
   };
 
   const acceptConsent = async () => {
+    if (isAcceptingConsent) return;
+    setIsAcceptingConsent(true);
     try {
       await issuedApi("POST", "/exams/issued/consent", {
         policy_version: "privacy-2026-07-19",
@@ -112,6 +126,9 @@ export function IssuedCandidatePanel() {
       setConsentAccepted(true);
     } catch {
       setStatus("We could not record your consent. Check your connection and try again.");
+      if (document.fullscreenElement) void document.exitFullscreen();
+    } finally {
+      setIsAcceptingConsent(false);
     }
   };
 
@@ -227,31 +244,34 @@ export function IssuedCandidatePanel() {
   }
 
   return (
-    <section className={`card issued-access-card${paper && consentAccepted ? " active-session" : ""}`}>
-      <div className="workspace-section-head">
+    <section className={paper && consentAccepted ? "issued-assessment-runtime" : "card issued-access-card"}>
+      {!paper && <div className="workspace-section-head">
         <div>
           <span className="launch-section-label">Issued assessment access</span>
           <h2>Candidate sign in</h2>
           <p>Use the recruiter-issued credentials to open the assessment. This screen stays separate from the recruiter workspace.</p>
         </div>
-      </div>
+      </div>}
       {!paper ? (
-        <div className="issued-login-panel">
+        <form className="issued-login-panel" aria-busy={isSigningIn} onSubmit={(event) => { event.preventDefault(); void login(); }}>
           {!accessKey && (
             <label className="field-stack">
               <span>Issued email</span>
-              <input placeholder="candidate@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input placeholder="candidate@company.com" value={email} disabled={isSigningIn} onChange={(e) => setEmail(e.target.value)} />
             </label>
           )}
           <label className="field-stack">
             <span>Issued password</span>
-            <input placeholder="Enter issued password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <input placeholder="Enter issued password" type="password" value={password} disabled={isSigningIn} onChange={(e) => setPassword(e.target.value)} />
           </label>
           <div className="auth-actions">
-            <button onClick={login}>Login</button>
+            <button type="submit" disabled={isSigningIn || !password || (!accessKey && !email)}>
+              {isSigningIn ? "Opening assessment..." : "Login"}
+            </button>
           </div>
-          {status && <small>{status}</small>}
-        </div>
+          {isSigningIn && <div className="candidate-login-progress" role="status" aria-live="polite"><span className="candidate-loading-spinner" aria-hidden="true" /><span><strong>Signing you in</strong><small>Loading your secured assessment workspace...</small></span></div>}
+          {status && <small className="candidate-login-status" role="alert">{status}</small>}
+        </form>
       ) : (
         <>
           {!consentAccepted ? (
@@ -266,9 +286,10 @@ export function IssuedCandidatePanel() {
                 <a href="/legal/candidate-consent.html" target="_blank" rel="noreferrer">Full consent notice</a>
               </div>
               <label className="candidate-consent-check">
-                <input type="checkbox" checked={consentAccepted} onChange={(event) => { if (event.target.checked) void acceptConsent(); }} />
+                <input type="checkbox" checked={consentAccepted} disabled={isAcceptingConsent} onChange={(event) => { if (event.target.checked) { void requestFullscreen(); void acceptConsent(); } }} />
                 <span>I have read and agree to this assessment data and integrity notice.</span>
               </label>
+              {isAcceptingConsent && <div className="candidate-login-progress compact" role="status"><span className="candidate-loading-spinner" aria-hidden="true" /><span><strong>Preparing fullscreen assessment</strong><small>Recording your consent and loading the workspace...</small></span></div>}
               <small>Need an accommodation or have a privacy question? Contact the organization that issued this assessment.</small>
             </section>
           ) : (

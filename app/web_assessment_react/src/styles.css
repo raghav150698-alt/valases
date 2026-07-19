@@ -1246,25 +1246,71 @@ body { margin: 0; background: #f6f8fb; }
 }
 .issued-login-panel {
   max-width: 420px;
+  display: grid;
+  gap: 14px;
 }
-.issued-access-card.active-session {
+.candidate-login-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 11px 13px;
+  border: 1px solid #b9d8cc;
+  border-radius: 6px;
+  background: #edf8f3;
+  color: #173f34;
+}
+.candidate-login-progress.compact { max-width: 520px; }
+.candidate-login-progress > span:last-child { display: grid; gap: 2px; }
+.candidate-login-progress small { color: #526b63; }
+.candidate-loading-spinner {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border: 3px solid #b9d8cc;
+  border-top-color: #176b57;
+  border-radius: 50%;
+  animation: candidate-spin .8s linear infinite;
+}
+.candidate-login-status { color: #9f1239; }
+@keyframes candidate-spin { to { transform: rotate(360deg); } }
+.issued-assessment-runtime {
   position: fixed;
   inset: 0;
   z-index: 900;
   width: 100vw;
   height: 100dvh;
   margin: 0;
-  padding: 16px;
-  overflow: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 0;
   border-radius: 0;
   background: #f4f7f9;
 }
-.issued-access-card.active-session .excel-assessment,
-.issued-access-card.active-session .task-candidate-workspace,
-.issued-access-card.active-session .question-runtime-surface {
+.issued-assessment-runtime > .assessment-runtime-header {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-bottom: 1px solid #d9e4f2;
+  background: #ffffff;
+}
+.issued-assessment-runtime > .excel-assessment,
+.issued-assessment-runtime > .task-candidate-workspace,
+.issued-assessment-runtime > .question-runtime-surface {
   width: 100%;
   max-width: none;
+  min-height: 0;
+}
+.issued-assessment-runtime > .excel-assessment {
+  flex: 1 1 auto;
+  height: auto;
+}
+.issued-assessment-runtime > .task-candidate-workspace,
+.issued-assessment-runtime > .question-runtime-surface {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 16px;
 }
 .assessment-runtime-header {
   display: flex;
