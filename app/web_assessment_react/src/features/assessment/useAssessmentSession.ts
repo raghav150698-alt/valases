@@ -6,8 +6,14 @@ type AssessmentSessionOptions = {
   exitWarning: string;
   onExitConfirmed: () => void;
   onFullscreenExited?: () => void;
-  onPolicyWarning?: (reason: string, warningCount: number) => void;
-  onPolicyTerminated?: (reason: string, warningCount: number) => void;
+  onPolicyWarning?: (reason: string, warningCount: number, signal?: ProctorViolation) => void;
+  onPolicyTerminated?: (reason: string, warningCount: number, signal?: ProctorViolation) => void;
+};
+
+export type ProctorViolation = {
+  eventType: string;
+  severity?: "info" | "warning" | "critical";
+  details?: Record<string, unknown>;
 };
 
 const MAX_WARNINGS = 5;
@@ -72,7 +78,7 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
     }
     void requestFullscreen();
 
-    const recordViolation = (reason: string, immediate = false) => {
+    const recordViolation = (reason: string, immediate = false, signal?: ProctorViolation) => {
       if (terminatedRef.current) return;
       const now = Date.now();
       if (now - Number(recentReasonsRef.current[reason] || 0) < 2500) return;
@@ -81,10 +87,10 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
       warningCountRef.current = nextCount;
       setWarningCount(nextCount);
       setLastWarning(reason);
-      warningCallbackRef.current?.(reason, nextCount);
+      warningCallbackRef.current?.(reason, nextCount, signal);
       if (immediate || nextCount >= MAX_WARNINGS) {
         terminatedRef.current = true;
-        terminatedCallbackRef.current?.(reason, nextCount);
+        terminatedCallbackRef.current?.(reason, nextCount, signal);
       }
     };
 
@@ -138,12 +144,18 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
     };
 
     const handleProctorSignal = (event: Event) => {
-      const detail = (event as CustomEvent<{ event_type?: string; duration_ms?: number }>).detail || {};
+      const detail = (event as CustomEvent<{ event_type?: string; duration_ms?: number; confidence?: number; object_label?: string }>).detail || {};
       const eventType = String(detail.event_type || "").toLowerCase();
       const durationMs = Number(detail.duration_ms || 0);
       const isSustainedGazeAway = ["look_away_over_2s", "gaze_away_over_3s", "gaze_pattern_review_flag"].includes(eventType);
       if (isSustainedGazeAway && durationMs >= 2000) {
-        recordViolation("Sustained gaze away was detected");
+        recordViolation("Sustained gaze away was detected", false, { eventType: "look_away_over_2s", details: { duration_ms: durationMs } });
+      } else if (eventType === "mobile_phone_detected") {
+        recordViolation("A mobile phone was detected. Put it away before continuing", false, {
+          eventType: "mobile_phone_detected",
+          severity: "critical",
+          details: { confidence: Number(detail.confidence || 0), object_label: String(detail.object_label || "cell phone") },
+        });
       }
     };
     const handleProctorMessage = (event: MessageEvent) => {

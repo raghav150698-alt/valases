@@ -221,8 +221,8 @@ export function AuthPanel() {
           {error && <div className="inline-error">{error}</div>}
         </form>
         <div className="auth-legal-links">
-          <a href="/legal/privacy-policy.html" target="_blank" rel="noreferrer">Privacy</a>
-          <a href="/legal/data-retention-and-deletion.html" target="_blank" rel="noreferrer">Data retention</a>
+          <a href="/legal/privacy-policy" target="_blank" rel="noreferrer">Privacy</a>
+          <a href="/legal/data-retention-and-deletion" target="_blank" rel="noreferrer">Data retention</a>
         </div>
       </div>
     </section>

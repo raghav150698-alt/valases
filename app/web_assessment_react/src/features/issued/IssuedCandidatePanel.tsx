@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useCandidateGazeProctor } from "../assessment/useCandidateGazeProctor";
 import { useAssessmentSession } from "../assessment/useAssessmentSession";
@@ -54,6 +54,7 @@ export function IssuedCandidatePanel() {
   const [briefingError, setBriefingError] = useState("");
   const welcomeSpeechRef = useRef<SpeechSynthesisUtterance | null>(null);
   const welcomeSpeechRunRef = useRef(0);
+  const submittingRef = useRef(false);
   const { status: gazeStatus, error: gazeError, stream: gazeStream, start: startGazeProctor, stop: stopGazeProctor } = useCandidateGazeProctor(Boolean(paper));
 
   useEffect(() => {
@@ -112,7 +113,7 @@ export function IssuedCandidatePanel() {
   const welcomeBriefing = useMemo(() => {
     if (!paper) return "";
     const assessmentType = paper.assessment_type.replaceAll("_", " ");
-    return `Welcome to your Certora assessment. You are about to begin ${paper.assessment_title}, a ${assessmentType} assessment with ${paper.duration_minutes} minutes available. Before continuing, move to a quiet place, keep a stable internet connection, and have your camera ready. The assessment must remain in fullscreen. Camera-based gaze detection runs during the session. If sustained attention away from the screen is detected, the timer pauses and an integrity warning appears. Exiting fullscreen ends the assessment. Listen to this briefing completely, then select Next to review privacy and camera consent.`;
+    return `Welcome to your Certora assessment. You are about to begin ${paper.assessment_title}, a ${assessmentType} assessment with ${paper.duration_minutes} minutes available. Before continuing, move to a quiet place, keep a stable internet connection, put away mobile phones, and have your camera ready. The assessment must remain in fullscreen. Camera-based attention and object checks run during the session. If sustained attention away from the screen or a mobile phone is detected, the timer pauses and an integrity warning appears. Exiting fullscreen ends the assessment. Listen to this briefing completely, then select Next to review privacy and camera consent.`;
   }, [paper]);
 
   const playWelcomeBriefing = () => {
@@ -199,8 +200,18 @@ export function IssuedCandidatePanel() {
   const current = useMemo(() => (paper ? paper.questions[index] : null), [paper, index]);
   const isMcqAssessment = paper?.assessment_type === "mcq";
 
+  const finishCandidateSession = useCallback((title: string, message: string) => {
+    submittingRef.current = true;
+    setPolicyWarning(null);
+    stopGazeProctor();
+    setCompletion({ title, message });
+    setPaper(null);
+    if (document.fullscreenElement) void document.exitFullscreen();
+  }, [stopGazeProctor]);
+
   const submit = async (endReason: "fullscreen" | "policy" | "manual" | null = null) => {
-    if (!paper) return;
+    if (!paper || submittingRef.current) return;
+    submittingRef.current = true;
     const submittedData = paper.assessment_type === "spreadsheet"
       ? (excelSubmission || { final_sheet_json: {}, formulas_json: {}, calculated_values_json: {}, activity_log: [] })
       : paper.assessment_type === "coding"
@@ -215,41 +226,41 @@ export function IssuedCandidatePanel() {
         proctoring_events: proctorEvents,
         time_taken_seconds: 0,
       });
-      setPaper(null);
-      setCompletion({
-        title: endReason ? "Assessment ended" : "Assessment submitted",
-        message: endReason === "fullscreen"
+      finishCandidateSession(
+        endReason ? "Assessment ended" : "Assessment submitted",
+        endReason === "fullscreen"
           ? "Your session ended because fullscreen was exited. Your work and integrity events were sent for review."
           : endReason === "policy"
             ? "Your session ended after the assessment integrity warning limit was reached. Your work was sent for review."
             : endReason === "manual"
               ? "You ended this assessment. Your completed work was submitted for review."
           : response.message || "Thank you. Your assessment was submitted successfully for recruiter review.",
-      });
+      );
     } catch {
       if (endReason) {
-        setPaper(null);
-        setCompletion({
-          title: "Assessment ended",
-          message: endReason === "fullscreen"
+        finishCandidateSession(
+          "Assessment ended",
+          endReason === "fullscreen"
             ? "Fullscreen was exited and this session is now closed. The recorded activity will be reviewed."
             : "This session is now closed. Your recorded work and integrity activity will be reviewed.",
-        });
+        );
       } else {
+        submittingRef.current = false;
         setStatus("Submission failed. Check your connection and try again.");
       }
     }
   };
 
-  const recordProctorEvent = async (reason: string, severity = "warning") => {
-    const event = { event_type: reason, severity, details: { source: "candidate_browser" }, recorded_at: new Date().toISOString() };
+  const recordProctorEvent = async (eventType: string, severity = "warning", details: Record<string, unknown> = {}) => {
+    const eventDetails = { source: "candidate_browser", ...details };
+    const event = { event_type: eventType, severity, details: eventDetails, recorded_at: new Date().toISOString() };
     setProctorEvents((currentEvents) => [...currentEvents.slice(-99), event]);
     if (!token) return;
     try {
       const response = await issuedApi<{ warning_count: number; should_terminate: boolean }>("POST", "/exams/issued/proctor-event", {
-        event_type: reason,
+        event_type: eventType,
         severity,
-        details: { source: "candidate_browser" },
+        details: eventDetails,
       });
       if (response.should_terminate) {
         setStatus("Assessment closed because the warning limit was reached. Your attempt has been sent for review.");
@@ -263,19 +274,23 @@ export function IssuedCandidatePanel() {
     active: Boolean(paper && consentAccepted),
     exitWarning: "Exiting now will end this assessment. Do you want to continue?",
     onExitConfirmed: () => {
+      if (submittingRef.current) return;
       void submit("manual");
     },
     onFullscreenExited: () => {
+      if (submittingRef.current) return;
       setPolicyWarning({ reason: "Fullscreen was exited. The assessment is ending", count: 5 });
-      void recordProctorEvent("Fullscreen was exited", "critical").finally(() => submit("fullscreen"));
+      void recordProctorEvent("fullscreen_exited", "critical").finally(() => submit("fullscreen"));
     },
-    onPolicyWarning: (reason, count) => {
+    onPolicyWarning: (reason, count, signal) => {
+      if (submittingRef.current) return;
       setPolicyWarning({ reason, count });
-      void recordProctorEvent(reason);
+      void recordProctorEvent(signal?.eventType || "browser_policy_warning", signal?.severity || "warning", { reason, ...(signal?.details || {}) });
     },
-    onPolicyTerminated: async (reason) => {
+    onPolicyTerminated: async (reason, _count, signal) => {
+      if (submittingRef.current) return;
       setPolicyWarning({ reason: `Assessment closed: ${reason}`, count: 5 });
-      await recordProctorEvent(reason, "critical");
+      await recordProctorEvent(signal?.eventType || "browser_policy_terminated", "critical", { reason, ...(signal?.details || {}) });
       await submit("policy");
     },
   });
@@ -308,34 +323,34 @@ export function IssuedCandidatePanel() {
   }
 
   return (
-    <section className={paper && consentAccepted ? "issued-assessment-runtime" : "card issued-access-card"}>
-      {!paper && <div className="workspace-section-head">
-        <div>
-          <span className="launch-section-label">Issued assessment access</span>
-          <h2>Candidate sign in</h2>
-          <p>Use the recruiter-issued credentials to open the assessment. This screen stays separate from the recruiter workspace.</p>
-        </div>
-      </div>}
+    <section className={paper && consentAccepted ? "issued-assessment-runtime" : paper ? "candidate-entry-container" : "candidate-login-surface"}>
       {!paper ? (
+        <div className="candidate-login-layout">
+          <div className="candidate-login-intro">
+            <span className="candidate-brand-mark" aria-hidden="true">C</span>
+            <h1>Welcome</h1>
+            <p>Sign in with the details from your assessment invitation.</p>
+          </div>
         <form className="issued-login-panel" aria-busy={isSigningIn} onSubmit={(event) => { event.preventDefault(); void login(); }}>
           {!accessKey && (
             <label className="field-stack">
-              <span>Issued email</span>
-              <input placeholder="candidate@company.com" value={email} disabled={isSigningIn} onChange={(e) => setEmail(e.target.value)} />
+              <span>Email address</span>
+              <input autoComplete="email" placeholder="name@company.com" value={email} disabled={isSigningIn} onChange={(e) => setEmail(e.target.value)} />
             </label>
           )}
           <label className="field-stack">
-            <span>Issued password</span>
-            <input placeholder="Enter issued password" type="password" value={password} disabled={isSigningIn} onChange={(e) => setPassword(e.target.value)} />
+            <span>Assessment password</span>
+            <input autoComplete="current-password" placeholder="Enter your password" type="password" value={password} disabled={isSigningIn} onChange={(e) => setPassword(e.target.value)} />
           </label>
           <div className="auth-actions">
             <button type="submit" disabled={isSigningIn || !password || (!accessKey && !email)}>
-              {isSigningIn ? "Opening assessment..." : "Login"}
+              {isSigningIn ? "Signing in..." : "Continue"}
             </button>
           </div>
-          {isSigningIn && <div className="candidate-login-progress" role="status" aria-live="polite"><span className="candidate-loading-spinner" aria-hidden="true" /><span><strong>Signing you in</strong><small>Loading your secured assessment workspace...</small></span></div>}
+          {isSigningIn && <div className="candidate-login-progress" role="status" aria-live="polite"><span className="candidate-loading-spinner" aria-hidden="true" /><span><strong>Signing you in</strong><small>Preparing your assessment...</small></span></div>}
           {status && <small className="candidate-login-status" role="alert">{status}</small>}
         </form>
+        </div>
       ) : (
         <>
           {!consentAccepted ? (
@@ -360,7 +375,7 @@ export function IssuedCandidatePanel() {
                 <div className="candidate-written-note">
                   <span className="launch-section-label">Written note</span>
                   <h3>Before you begin</h3>
-                  <p>Choose a quiet place with a stable connection and keep your camera available. The assessment runs in fullscreen and uses local gaze detection for integrity checks.</p>
+                  <p>Choose a quiet place with a stable connection, put away mobile phones, and keep your camera available. The assessment runs in fullscreen and uses local attention and object checks.</p>
                   <ul>
                     <li>Read each task carefully and submit only when your work is complete.</li>
                     <li>Sustained gaze away pauses the timer and displays a warning.</li>
@@ -397,17 +412,17 @@ export function IssuedCandidatePanel() {
               <span className="launch-section-label">Before you begin</span>
               <h3 id="candidate-consent-title">Assessment privacy and integrity notice</h3>
               <p>Your answers, submitted work, timestamps, and assessment activity are collected to administer, score, secure, and review this assessment.</p>
-              <p>This session uses browser security checks and local camera-based gaze detection. Camera frames are processed for integrity signals and are not recorded by this flow. Leaving fullscreen closes the assessment. Automated signals are not a final employment decision.</p>
+              <p>This session uses browser security checks and on-device camera analysis for attention and prohibited-object signals, including mobile phones. Camera frames are processed in the browser and are not recorded by this flow. Leaving fullscreen closes the assessment. Automated signals require recruiter review and are not a final employment decision.</p>
               <div className="candidate-policy-links">
-                <a href="/legal/privacy-policy.html" target="_blank" rel="noreferrer">Privacy policy</a>
-                <a href="/legal/data-retention-and-deletion.html" target="_blank" rel="noreferrer">Retention and deletion</a>
-                <a href="/legal/candidate-consent.html" target="_blank" rel="noreferrer">Full consent notice</a>
+                <a href="/legal/privacy-policy" target="_blank" rel="noreferrer">Privacy policy</a>
+                <a href="/legal/data-retention-and-deletion" target="_blank" rel="noreferrer">Retention and deletion</a>
+                <a href="/legal/candidate-consent" target="_blank" rel="noreferrer">Full consent notice</a>
               </div>
               <label className="candidate-consent-check">
                 <input type="checkbox" checked={consentAccepted} disabled={isAcceptingConsent} onChange={(event) => { if (event.target.checked) { void requestFullscreen(); void acceptConsent(); } }} />
                 <span>I have read and agree to this assessment data and integrity notice.</span>
               </label>
-              {isAcceptingConsent && <div className="candidate-login-progress compact" role="status"><span className="candidate-loading-spinner" aria-hidden="true" /><span><strong>Preparing fullscreen assessment</strong><small>Starting the camera model and calibrating your on-screen gaze...</small></span></div>}
+              {isAcceptingConsent && <div className="candidate-login-progress compact" role="status"><span className="candidate-loading-spinner" aria-hidden="true" /><span><strong>Preparing fullscreen assessment</strong><small>Starting integrity checks and calibrating the camera...</small></span></div>}
               {gazeError && <small className="candidate-login-status" role="alert">{gazeError}</small>}
               <small>Need an accommodation or have a privacy question? Contact the organization that issued this assessment.</small>
             </section>
@@ -450,7 +465,7 @@ export function IssuedCandidatePanel() {
               <h3>{paper.assessment_title}</h3>
             </div>
             <div className="assessment-runtime-meta">
-              <span className={`candidate-proctor-state ${gazeStatus}`}><i aria-hidden="true" />Camera proctor {gazeStatus === "active" ? "active" : gazeStatus}</span>
+              <span className={`candidate-proctor-state ${gazeStatus}`}><i aria-hidden="true" />Integrity monitoring {gazeStatus === "active" ? "active" : gazeStatus}</span>
               {gazeStream && <video className="candidate-proctor-preview" aria-label="Camera proctor preview" autoPlay muted playsInline ref={(node) => { if (node && node.srcObject !== gazeStream) node.srcObject = gazeStream; }} />}
               <span>{paper.assessment_type === "mcq" ? `Question ${index + 1}/${paper.questions.length}` : "Task workspace"}</span>
               <span>Timer: {timerDisplay}</span>
@@ -468,18 +483,21 @@ export function IssuedCandidatePanel() {
               onAutosave={(submission) => setExcelSubmission(submission)}
               onSubmit={async (submission) => {
                 if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
+                if (submittingRef.current) return;
+                submittingRef.current = true;
                 setExcelSubmission(submission);
-                const response = await issuedApi<{ passed: boolean; score_pct: number; status: string }>("POST", "/exams/issued/submit", {
-                  answers: {},
-                  submitted_data: submission,
-                  proctoring_events: [...proctorEvents, ...submission.activity_log],
-                  time_taken_seconds: 0,
-                });
-                setPaper(null);
-                setCompletion({
-                  title: "Assessment submitted",
-                  message: `Thank you. Your assessment was submitted successfully with status: ${response.status}.`,
-                });
+                try {
+                  await issuedApi<{ status: string }>("POST", "/exams/issued/submit", {
+                    answers: {},
+                    submitted_data: submission,
+                    proctoring_events: [...proctorEvents, ...submission.activity_log],
+                    time_taken_seconds: 0,
+                  });
+                  finishCandidateSession("Assessment submitted", "Thank you. Your assessment was submitted successfully for recruiter review.");
+                } catch {
+                  submittingRef.current = false;
+                  setStatus("Submission failed. Check your connection and try again.");
+                }
               }}
             />
           )}

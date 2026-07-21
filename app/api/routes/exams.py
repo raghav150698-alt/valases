@@ -211,7 +211,27 @@ def _issued_proctoring_state(issue: AssessmentIssue) -> dict:
     state.setdefault("warning_count", 0)
     state.setdefault("events", [])
     state.setdefault("terminated", False)
+    state.setdefault("mobile_phone_detection_count", 0)
+    state.setdefault("integrity_penalty_pct", 0.0)
+    state.setdefault("mandatory_review", False)
     return state
+
+
+def _apply_issued_integrity_event(state: dict, event_type: str) -> None:
+    """Apply deterministic, reviewable adjustments to an issued attempt."""
+    if str(event_type or "").strip().lower() != "mobile_phone_detected":
+        return
+    phone_count = int(state.get("mobile_phone_detection_count") or 0) + 1
+    state["mobile_phone_detection_count"] = phone_count
+    state["integrity_penalty_pct"] = min(30.0, float(phone_count * 10))
+    state["mandatory_review"] = True
+
+
+def _integrity_adjusted_score(raw_score_pct: float | None, state: dict) -> float | None:
+    if raw_score_pct is None:
+        return None
+    penalty = min(30.0, max(0.0, float(state.get("integrity_penalty_pct") or 0)))
+    return round(max(0.0, float(raw_score_pct) - penalty), 2)
 
 
 def _internal_assessment_id(exam_id: int) -> str:
@@ -1143,8 +1163,8 @@ def issue_assessment_to_candidate(
         temporary_password=temp_password,
         expires_at=issue.access_expires_at,
         company_name=(profile.display_name or settings.app_name or "Your organization").strip(),
-        privacy_url=f"{base_url}/legal/privacy-policy.html",
-        retention_url=f"{base_url}/legal/data-retention-and-deletion.html",
+        privacy_url=f"{base_url}/legal/privacy-policy",
+        retention_url=f"{base_url}/legal/data-retention-and-deletion",
     )
     return {
         "issued_id": issue.id,
@@ -1458,6 +1478,8 @@ def issued_candidate_consent(
     if issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
         raise HTTPException(status_code=409, detail="Assessment is no longer active")
     state = _issued_proctoring_state(issue)
+    normalized_event_type = str(payload.event_type or "").strip().lower()
+    _apply_issued_integrity_event(state, normalized_event_type)
     state["consent"] = {
         "policy_version": payload.policy_version,
         "consent_version": payload.consent_version,
@@ -1501,7 +1523,7 @@ def issued_candidate_proctor_event(
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
     state["events"] = [*(state.get("events") or [])[-99:], event]
-    should_terminate = int(state["warning_count"]) >= 5 or "fullscreen" in payload.event_type.lower()
+    should_terminate = int(state["warning_count"]) >= 5 or "fullscreen" in normalized_event_type
     if should_terminate:
         state["terminated"] = True
         state["termination_reason"] = "warning_limit_reached"
@@ -1544,7 +1566,8 @@ def issued_candidate_submit(
             raise HTTPException(status_code=400, detail="Assessment task is missing")
         submitted_data = payload.submitted_data or {}
         auto_score, submission_status, score_detail = _score_task_submission(task, submitted_data)
-        score_pct = round((float(auto_score or 0) / float(task.marks or 1)) * 100.0, 2) if auto_score is not None and float(task.marks or 0) > 0 else None
+        raw_score_pct = round((float(auto_score or 0) / float(task.marks or 1)) * 100.0, 2) if auto_score is not None and float(task.marks or 0) > 0 else None
+        score_pct = _integrity_adjusted_score(raw_score_pct, proctoring_state)
         if forced_manual_review:
             submission_status = "manual_review"
         submission = AssessmentSubmission(
@@ -1570,6 +1593,8 @@ def issued_candidate_submit(
         issue.result_json = {
             "assessment_type": assessment_type,
             "provisional_score": auto_score,
+            "raw_provisional_score_pct": raw_score_pct,
+            "integrity_penalty_pct": float(proctoring_state.get("integrity_penalty_pct") or 0),
             "provisional_score_pct": score_pct,
             "status": "review_pending",
             "automatic_status": submission_status,
@@ -1605,12 +1630,19 @@ def issued_candidate_submit(
         elif bool(exam.negative_marking):
             awarded_marks -= float(q.negative_marks or 0)
 
-    percentage = round((awarded_marks / total_marks) * 100.0, 2) if total_marks > 0 else 0.0
+    raw_percentage = round((awarded_marks / total_marks) * 100.0, 2) if total_marks > 0 else 0.0
+    percentage = _integrity_adjusted_score(raw_percentage, proctoring_state) or 0.0
     issue.status = "review_pending"
     issue.score_pct = None
     issue.passed = None
     issue.completed_at = submitted_at
-    issue.result_json = {"provisional_score_pct": percentage, "detail": {"correct_count": correct_count, "question_count": len(questions), "awarded_marks": awarded_marks, "total_marks": total_marks}, "proctoring": proctoring_state}
+    issue.result_json = {
+        "raw_provisional_score_pct": raw_percentage,
+        "integrity_penalty_pct": float(proctoring_state.get("integrity_penalty_pct") or 0),
+        "provisional_score_pct": percentage,
+        "detail": {"correct_count": correct_count, "question_count": len(questions), "awarded_marks": awarded_marks, "total_marks": total_marks},
+        "proctoring": proctoring_state,
+    }
     db.add(
         AssessmentSubmission(
             assessment_id=exam.id,

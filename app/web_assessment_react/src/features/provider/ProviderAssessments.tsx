@@ -1158,6 +1158,9 @@ export function ProviderAssessments() {
               <div className="workspace-surface-head"><div><h3>{review.data.candidate_name || review.data.candidate_email}</h3><p>{review.data.assessment_title} · Candidate result detail</p></div><button type="button" className="workspace-icon-btn" aria-label="Close result detail" onClick={() => setReviewIssueId(null)}>×</button></div>
               <div className="result-detail-summary">
                 <div><span>Provisional score</span><strong>{review.data.result?.provisional_score_pct == null ? "Manual" : `${Number(review.data.result.provisional_score_pct).toFixed(1)}%`}</strong></div>
+                <div><span>Raw checkpoint score</span><strong>{review.data.result?.raw_provisional_score_pct == null ? "--" : `${Number(review.data.result.raw_provisional_score_pct).toFixed(1)}%`}</strong></div>
+                <div><span>Integrity adjustment</span><strong>{Number(review.data.result?.integrity_penalty_pct || 0) > 0 ? `-${Number(review.data.result.integrity_penalty_pct).toFixed(1)} pts` : "None"}</strong></div>
+                <div><span>Phone detections</span><strong>{Number(review.data.result?.proctoring?.mobile_phone_detection_count || 0)}</strong></div>
                 <div><span>Review status</span><strong>{review.data.status === "reviewed" ? "Finalized" : "Awaiting decision"}</strong></div>
                 <div><span>Time taken</span><strong>{formatDuration(review.data.submission?.time_taken_seconds)}</strong></div>
                 <div><span>Submitted</span><strong>{formatResultDate(review.data.submission?.submitted_at)}</strong></div>

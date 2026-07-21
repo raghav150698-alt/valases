@@ -1,4 +1,5 @@
 import { IssuedCandidatePanel } from "../features/issued/IssuedCandidatePanel";
+import type { ReactNode } from "react";
 
 export function App() {
   const params = new URLSearchParams(window.location.search);
@@ -6,21 +7,42 @@ export function App() {
 
   if (!issuedAccessKey) {
     return (
-      <main className="assessment-thank-you candidate-portal-empty" role="main">
-        <div className="assessment-thank-you-mark" aria-hidden="true">C</div>
-        <span className="launch-section-label">Certora Assessments</span>
-        <h1>Use your issued assessment link</h1>
-        <p>This secure environment opens only from the unique link sent by your recruiter.</p>
-        <small>Return to the invitation email and open the assessment link provided there.</small>
-      </main>
+      <CandidatePortalFrame>
+        <main className="assessment-thank-you candidate-portal-empty" role="main">
+          <div className="assessment-thank-you-mark" aria-hidden="true">C</div>
+          <h1>Open your invitation link</h1>
+          <p>Your assessment link is included in the invitation email.</p>
+          <small>Contact the organization that invited you if the link has expired.</small>
+        </main>
+      </CandidatePortalFrame>
     );
   }
 
   return (
-    <div className="launch-shell candidate-only-shell">
-      <main className="shell launch-content candidate-content">
+    <CandidatePortalFrame>
+      <main className="candidate-content">
         <IssuedCandidatePanel />
       </main>
+    </CandidatePortalFrame>
+  );
+}
+
+function CandidatePortalFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="candidate-portal-shell">
+      <header className="candidate-portal-header">
+        <a className="candidate-portal-brand" href="/" aria-label="Certora Assessments home"><span aria-hidden="true">C</span><strong>Certora</strong></a>
+        <span>Candidate assessments</span>
+      </header>
+      {children}
+      <footer className="candidate-portal-footer">
+        <span>Certora Assessments</span>
+        <nav aria-label="Legal information">
+          <a href="/legal/privacy-policy">Privacy</a>
+          <a href="/legal/candidate-consent">Consent</a>
+          <a href="/legal/data-retention-and-deletion">Data retention</a>
+        </nav>
+      </footer>
     </div>
   );
 }

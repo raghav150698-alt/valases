@@ -12,11 +12,17 @@ type FaceLandmarker = {
   detectForVideo: (video: HTMLVideoElement, timestamp: number) => { faceLandmarks?: Landmark[][] };
   close?: () => void;
 };
+type DetectionCategory = { categoryName?: string; displayName?: string; score?: number };
+type ObjectDetector = {
+  detectForVideo: (video: HTMLVideoElement, timestamp: number) => { detections?: Array<{ categories?: DetectionCategory[] }> };
+  close?: () => void;
+};
 type ProctorStatus = "idle" | "starting" | "calibrating" | "active" | "error";
 
 const VISION_MODULE_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 const VISION_WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
 const FACE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task";
+const OBJECT_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite";
 const GAZE_MODEL_URL = "/assets/generated/screen_gaze_model.json";
 const AWAY_WARNING_MS = 2000;
 
@@ -96,8 +102,8 @@ function isAway(model: GazeModel, metrics: FaceMetrics, ref: FaceMetrics) {
   return model.class_names[topIndex] === "away" || awayProbability >= Number(model.thresholds?.suspect_away_probability ?? 0.48);
 }
 
-function emitGazeSignal(eventType: string, durationMs: number) {
-  window.dispatchEvent(new CustomEvent("certora:proctor-signal", { detail: { event_type: eventType, duration_ms: durationMs } }));
+function emitProctorSignal(eventType: string, details: Record<string, unknown>) {
+  window.dispatchEvent(new CustomEvent("certora:proctor-signal", { detail: { event_type: eventType, ...details } }));
 }
 
 export function useCandidateGazeProctor(active: boolean) {
@@ -107,9 +113,13 @@ export function useCandidateGazeProctor(active: boolean) {
   const streamRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const landmarkerRef = useRef<FaceLandmarker | null>(null);
+  const objectDetectorRef = useRef<ObjectDetector | null>(null);
   const frameTimerRef = useRef<number | null>(null);
   const awaySinceRef = useRef(0);
   const lastWarningRef = useRef(0);
+  const lastObjectScanRef = useRef(0);
+  const lastPhoneWarningRef = useRef(0);
+  const phoneDetectionStreakRef = useRef(0);
 
   const stop = useCallback(() => {
     if (frameTimerRef.current) window.clearInterval(frameTimerRef.current);
@@ -121,7 +131,11 @@ export function useCandidateGazeProctor(active: boolean) {
     videoRef.current = null;
     landmarkerRef.current?.close?.();
     landmarkerRef.current = null;
+    objectDetectorRef.current?.close?.();
+    objectDetectorRef.current = null;
     awaySinceRef.current = 0;
+    lastObjectScanRef.current = 0;
+    phoneDetectionStreakRef.current = 0;
     setStatus("idle");
   }, []);
 
@@ -144,12 +158,17 @@ export function useCandidateGazeProctor(active: boolean) {
       const vision = await import(/* @vite-ignore */ VISION_MODULE_URL) as {
         FilesetResolver: { forVisionTasks: (url: string) => Promise<unknown> };
         FaceLandmarker: { createFromOptions: (resolver: unknown, options: unknown) => Promise<FaceLandmarker> };
+        ObjectDetector: { createFromOptions: (resolver: unknown, options: unknown) => Promise<ObjectDetector> };
       };
       const resolver = await vision.FilesetResolver.forVisionTasks(VISION_WASM_URL);
       const landmarker = await vision.FaceLandmarker.createFromOptions(resolver, {
         baseOptions: { modelAssetPath: FACE_MODEL_URL }, runningMode: "VIDEO", numFaces: 2,
       });
       landmarkerRef.current = landmarker;
+      const objectDetector = await vision.ObjectDetector.createFromOptions(resolver, {
+        baseOptions: { modelAssetPath: OBJECT_MODEL_URL }, runningMode: "VIDEO", maxResults: 6, scoreThreshold: 0.45,
+      });
+      objectDetectorRef.current = objectDetector;
       const gazeModelResponse = await fetch(GAZE_MODEL_URL, { cache: "no-store" });
       if (!gazeModelResponse.ok) throw new Error("The gaze model could not be loaded.");
       const gazeModel = await gazeModelResponse.json() as GazeModel;
@@ -171,10 +190,12 @@ export function useCandidateGazeProctor(active: boolean) {
       frameTimerRef.current = window.setInterval(() => {
         const currentVideo = videoRef.current;
         const currentLandmarker = landmarkerRef.current;
-        if (!currentVideo || !currentLandmarker || currentVideo.readyState < 2) return;
+        const currentObjectDetector = objectDetectorRef.current;
+        if (!currentVideo || !currentLandmarker || !currentObjectDetector || currentVideo.readyState < 2) return;
+        const frameTimestamp = performance.now();
         let suspicious = false;
         try {
-          const faces = currentLandmarker.detectForVideo(currentVideo, performance.now()).faceLandmarks || [];
+          const faces = currentLandmarker.detectForVideo(currentVideo, frameTimestamp).faceLandmarks || [];
           if (faces.length !== 1) suspicious = true;
           else {
             const metrics = computeFaceMetrics(faces[0]);
@@ -184,6 +205,30 @@ export function useCandidateGazeProctor(active: boolean) {
           return;
         }
         const now = Date.now();
+        if (now - lastObjectScanRef.current >= 850) {
+          lastObjectScanRef.current = now;
+          try {
+            const detections = currentObjectDetector.detectForVideo(currentVideo, frameTimestamp).detections || [];
+            const categories = detections.flatMap((detection) => detection.categories || []);
+            const phone = categories
+              .filter((category) => {
+                const label = String(category.categoryName || category.displayName || "").trim().toLowerCase();
+                return label === "cell phone" || label === "mobile phone" || label === "phone";
+              })
+              .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))[0];
+            phoneDetectionStreakRef.current = phone ? phoneDetectionStreakRef.current + 1 : 0;
+            if (phone && phoneDetectionStreakRef.current >= 2 && now - lastPhoneWarningRef.current >= 8000) {
+              lastPhoneWarningRef.current = now;
+              phoneDetectionStreakRef.current = 0;
+              emitProctorSignal("mobile_phone_detected", {
+                confidence: Number(Number(phone.score || 0).toFixed(4)),
+                object_label: String(phone.categoryName || phone.displayName || "cell phone"),
+              });
+            }
+          } catch {
+            phoneDetectionStreakRef.current = 0;
+          }
+        }
         if (!suspicious) {
           awaySinceRef.current = 0;
           return;
@@ -192,7 +237,7 @@ export function useCandidateGazeProctor(active: boolean) {
         const duration = now - awaySinceRef.current;
         if (duration >= AWAY_WARNING_MS && now - lastWarningRef.current >= 4000) {
           lastWarningRef.current = now;
-          emitGazeSignal("look_away_over_2s", duration);
+          emitProctorSignal("look_away_over_2s", { duration_ms: duration });
         }
       }, 220);
     } catch (caught) {
