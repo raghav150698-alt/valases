@@ -52,6 +52,18 @@ function humanizeAuthError(err: unknown) {
   return message;
 }
 
+function isSupabaseNetworkError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err || "");
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("failed to fetch") ||
+    normalized.includes("networkerror") ||
+    normalized.includes("network request failed") ||
+    normalized.includes("err_blocked_by_client") ||
+    normalized.includes("winerror 10013")
+  );
+}
+
 export function AuthPanel() {
   const { register, handleSubmit, formState } = useForm<Form>({ resolver: zodResolver(schema) });
   const setSession = useSessionStore((s) => s.setSession);
@@ -83,15 +95,25 @@ export function AuthPanel() {
     setError("");
     try {
       if (supabaseConfigured && supabase) {
-        const { data, error: signInError } = await supabase.auth.signInWithPassword({
-          email: values.email.trim(),
-          password: values.password,
-        });
-        if (signInError || !data.session?.access_token) {
-          throw new Error(signInError?.message || "Supabase did not return a session.");
+        try {
+          const { data, error: signInError } = await supabase.auth.signInWithPassword({
+            email: values.email.trim(),
+            password: values.password,
+          });
+          if (signInError || !data.session?.access_token) {
+            throw new Error(signInError?.message || "Supabase did not return a session.");
+          }
+          await completeSupabaseSession(data.session.access_token);
+          return;
+        } catch (supabaseError) {
+          if (!isSupabaseNetworkError(supabaseError)) throw supabaseError;
+
+          // Keep password login available when a browser or network policy blocks
+          // direct calls to the Supabase project domain.
+          const { data } = await api.post("/auth/login", values);
+          setSession(data.access_token, data.role);
+          return;
         }
-        await completeSupabaseSession(data.session.access_token);
-        return;
       }
 
       const { data: authConfig } = await api.get<FirebaseConfigResponse>("/config/firebase");
