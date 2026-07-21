@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useCandidateGazeProctor } from "../assessment/useCandidateGazeProctor";
 import { useAssessmentSession } from "../assessment/useAssessmentSession";
@@ -51,12 +51,23 @@ export function IssuedCandidatePanel() {
   const [completion, setCompletion] = useState<{ title: string; message: string } | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isAcceptingConsent, setIsAcceptingConsent] = useState(false);
+  const [welcomeCompleted, setWelcomeCompleted] = useState(false);
+  const [briefingState, setBriefingState] = useState<"idle" | "playing" | "completed" | "error">("idle");
+  const [briefingError, setBriefingError] = useState("");
+  const welcomeSpeechRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const welcomeSpeechRunRef = useRef(0);
   const { status: gazeStatus, error: gazeError, stream: gazeStream, start: startGazeProctor, stop: stopGazeProctor } = useCandidateGazeProctor(Boolean(paper));
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const key = String(params.get("issued_key") || "").trim();
     if (key) setAccessKey(key);
+  }, []);
+
+  useEffect(() => () => {
+    welcomeSpeechRunRef.current += 1;
+    window.speechSynthesis?.cancel();
+    welcomeSpeechRef.current = null;
   }, []);
 
   const issuedApi = async <T,>(method: "GET" | "POST", path: string, body?: unknown) => {
@@ -93,8 +104,59 @@ export function IssuedCandidatePanel() {
     setProctorEvents([]);
     setPolicyWarning(null);
     setConsentAccepted(false);
+    setWelcomeCompleted(false);
+    setBriefingState("idle");
+    setBriefingError("");
     setCompletion(null);
     setStatus("");
+  };
+
+  const welcomeBriefing = useMemo(() => {
+    if (!paper) return "";
+    const assessmentType = paper.assessment_type.replaceAll("_", " ");
+    return `Welcome to your Certora assessment. You are about to begin ${paper.assessment_title}, a ${assessmentType} assessment with ${paper.duration_minutes} minutes available. Before continuing, move to a quiet place, keep a stable internet connection, and have your camera ready. The assessment must remain in fullscreen. Camera-based gaze detection runs during the session. If sustained attention away from the screen is detected, the timer pauses and an integrity warning appears. Exiting fullscreen ends the assessment. Listen to this briefing completely, then select Next to review privacy and camera consent.`;
+  }, [paper]);
+
+  const playWelcomeBriefing = () => {
+    if (!welcomeBriefing || briefingState === "playing") return;
+    setBriefingError("");
+    if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+      setBriefingState("error");
+      setBriefingError("Audio briefing is not supported in this browser. Open the link in current Chrome, Edge, or Safari and try again.");
+      return;
+    }
+    welcomeSpeechRunRef.current += 1;
+    const runId = welcomeSpeechRunRef.current;
+    window.speechSynthesis.cancel();
+    const voices = window.speechSynthesis.getVoices();
+    const selectedVoice = voices.find((voice) => voice.lang.toLowerCase() === "en-in")
+      || voices.find((voice) => voice.lang.toLowerCase().startsWith("en"))
+      || null;
+    const segments = welcomeBriefing.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((segment) => segment.trim()).filter(Boolean) || [welcomeBriefing];
+    const speakSegment = (position: number) => {
+      if (runId !== welcomeSpeechRunRef.current) return;
+      if (position >= segments.length) {
+        welcomeSpeechRef.current = null;
+        setBriefingState("completed");
+        return;
+      }
+      const utterance = new SpeechSynthesisUtterance(segments[position]);
+      utterance.voice = selectedVoice;
+      utterance.rate = 0.94;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      utterance.onend = () => speakSegment(position + 1);
+      utterance.onerror = (event) => {
+        welcomeSpeechRef.current = null;
+        if (event.error === "canceled" || event.error === "interrupted" || runId !== welcomeSpeechRunRef.current) return;
+        setBriefingState("error");
+        setBriefingError("The audio briefing stopped unexpectedly. Select Play audio briefing to try again.");
+      };
+      welcomeSpeechRef.current = utterance;
+      window.speechSynthesis.speak(utterance);
+    };
+    setBriefingState("playing");
+    speakSegment(0);
   };
 
   const login = async () => {
@@ -279,7 +341,61 @@ export function IssuedCandidatePanel() {
       ) : (
         <>
           {!consentAccepted ? (
+            !welcomeCompleted ? (
+            <section className="candidate-welcome-panel" aria-labelledby="candidate-welcome-title">
+              <nav className="candidate-entry-steps" aria-label="Assessment preparation progress">
+                <span className="active"><b>1</b>Welcome</span>
+                <span><b>2</b>Privacy and camera</span>
+                <span><b>3</b>Assessment</span>
+              </nav>
+              <div className="candidate-welcome-heading">
+                <span className="launch-section-label">Your assessment is ready</span>
+                <h2 id="candidate-welcome-title">Welcome to Certora Assessments</h2>
+                <p>Review the written note and listen to the complete audio briefing before continuing.</p>
+              </div>
+              <div className="candidate-assessment-summary">
+                <div><small>Assessment</small><strong>{paper.assessment_title}</strong></div>
+                <div><small>Format</small><strong>{paper.assessment_type.replaceAll("_", " ")}</strong></div>
+                <div><small>Time available</small><strong>{paper.duration_minutes} minutes</strong></div>
+              </div>
+              <div className="candidate-welcome-content">
+                <div className="candidate-written-note">
+                  <span className="launch-section-label">Written note</span>
+                  <h3>Before you begin</h3>
+                  <p>Choose a quiet place with a stable connection and keep your camera available. The assessment runs in fullscreen and uses local gaze detection for integrity checks.</p>
+                  <ul>
+                    <li>Read each task carefully and submit only when your work is complete.</li>
+                    <li>Sustained gaze away pauses the timer and displays a warning.</li>
+                    <li>Leaving fullscreen ends the assessment and submits the recorded attempt for review.</li>
+                  </ul>
+                </div>
+                <div className={`candidate-audio-note ${briefingState}`}>
+                  <div className="candidate-audio-note-head">
+                    <div><span className="launch-section-label">Required audio note</span><h3>{briefingState === "completed" ? "Briefing completed" : "Listen before continuing"}</h3></div>
+                    <span className="candidate-audio-status">{briefingState === "playing" ? "Playing" : briefingState === "completed" ? "Completed" : "Not played"}</span>
+                  </div>
+                  <div className="candidate-audio-visual" aria-hidden="true">{Array.from({ length: 18 }, (_, position) => <i key={position} />)}</div>
+                  <button type="button" className="candidate-audio-button" disabled={briefingState === "playing"} onClick={playWelcomeBriefing}>
+                    {briefingState === "playing" ? "Audio briefing playing..." : briefingState === "completed" ? "Replay audio briefing" : "Play audio briefing"}
+                  </button>
+                  <small>The Next button appears only after the audio finishes.</small>
+                  {briefingError && <small className="candidate-login-status" role="alert">{briefingError}</small>}
+                </div>
+              </div>
+              <div className="candidate-welcome-footer">
+                <span aria-live="polite">{briefingState === "completed" ? "Audio complete. You may continue." : "Complete the audio briefing to unlock the next step."}</span>
+                <div className="candidate-welcome-next-slot">
+                  {briefingState === "completed" ? <button type="button" className="assessment-primary-btn" onClick={() => setWelcomeCompleted(true)}>Next</button> : <div className="candidate-next-locked" aria-hidden="true">Next</div>}
+                </div>
+              </div>
+            </section>
+            ) : (
             <section className="candidate-consent-panel" aria-labelledby="candidate-consent-title">
+              <nav className="candidate-entry-steps" aria-label="Assessment preparation progress">
+                <span className="done"><b>1</b>Welcome</span>
+                <span className="active"><b>2</b>Privacy and camera</span>
+                <span><b>3</b>Assessment</span>
+              </nav>
               <span className="launch-section-label">Before you begin</span>
               <h3 id="candidate-consent-title">Assessment privacy and integrity notice</h3>
               <p>Your answers, submitted work, timestamps, and assessment activity are collected to administer, score, secure, and review this assessment.</p>
@@ -297,6 +413,7 @@ export function IssuedCandidatePanel() {
               {gazeError && <small className="candidate-login-status" role="alert">{gazeError}</small>}
               <small>Need an accommodation or have a privacy question? Contact the organization that issued this assessment.</small>
             </section>
+            )
           ) : (
             <>
           {fullscreenRequired && (
