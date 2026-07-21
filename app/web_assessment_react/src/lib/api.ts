@@ -2,7 +2,7 @@ import axios from "axios";
 import { useSessionStore } from "./sessionStore";
 
 export const api = axios.create({
-  baseURL: "/",
+  baseURL: String(import.meta.env.VITE_API_BASE_URL || "/").trim() || "/",
   headers: { "Content-Type": "application/json" },
 });
 

@@ -4,6 +4,7 @@ from html import escape
 import random
 import re
 import secrets
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import delete, func, select, text
@@ -252,6 +253,35 @@ def _task_to_dict(task: AssessmentTask | None, *, include_expected: bool = False
     if include_expected:
         out["expected_output"] = task.expected_output_json or {}
     return out
+
+
+def _candidate_task_to_dict(task: AssessmentTask | None) -> dict | None:
+    if not task:
+        return None
+    metadata = task.metadata_json or {}
+    allowed_metadata = {
+        key: metadata[key]
+        for key in (
+            "workspace",
+            "answer_format",
+            "initial_spreadsheet_data",
+            "locked_cells",
+            "attachments",
+            "starter_code",
+            "public_examples",
+            "form_fields",
+            "red_flag_options",
+        )
+        if key in metadata
+    }
+    return {
+        "id": task.id,
+        "type": task.type,
+        "title": task.title,
+        "description": task.description,
+        "instructions": task.instructions,
+        "metadata": allowed_metadata,
+    }
 
 
 def _score_expected_mapping(submitted: dict, expected: dict, total_marks: float) -> tuple[float, dict]:
@@ -1078,6 +1108,15 @@ def issue_assessment_to_candidate(
     if exam.status != ExamStatus.PUBLISHED:
         raise HTTPException(status_code=400, detail="Only published assessments can be issued")
 
+    settings = get_settings()
+    configured_candidate_url = str(settings.candidate_app_base_url or "").strip()
+    if settings.is_production and not configured_candidate_url:
+        raise HTTPException(status_code=503, detail="Candidate portal URL is not configured")
+    base_url = (configured_candidate_url or f"{request.url.scheme}://{request.headers.get('host')}").rstrip("/")
+    parsed_candidate_url = urlsplit(base_url)
+    if parsed_candidate_url.scheme not in {"http", "https"} or not parsed_candidate_url.netloc:
+        raise HTTPException(status_code=503, detail="Candidate portal URL is invalid")
+
     candidate_email = str(payload.candidate_email).strip().lower()
     candidate_name = str(payload.candidate_name).strip()
     temp_password = secrets.token_urlsafe(8)
@@ -1095,8 +1134,6 @@ def issue_assessment_to_candidate(
     db.add(issue)
     db.commit()
     db.refresh(issue)
-    settings = get_settings()
-    base_url = (settings.candidate_app_base_url or f"{request.url.scheme}://{request.headers.get('host')}").rstrip("/")
     login_link = f"{base_url}/?issued_key={issue.access_key}"
     email_delivery = _safe_send_assessment_issue_email(
         to_email=candidate_email,
@@ -1406,9 +1443,7 @@ def issued_candidate_get_assessment(
         "timing_mode": exam.timing_mode,
         "time_per_question_seconds": exam.time_per_question_seconds,
         "questions_per_attempt": exam.questions_per_attempt,
-        "pass_score": exam.pass_score,
-        "total_marks": exam.total_marks,
-        "task": _task_to_dict(task, include_expected=False),
+        "task": _candidate_task_to_dict(task),
         "questions": payload_questions,
     }
 

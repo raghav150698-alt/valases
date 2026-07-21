@@ -21,9 +21,7 @@ type IssuedExam = {
     title: string;
     description: string;
     instructions: string;
-    marks: number;
     metadata: Record<string, unknown>;
-    grading_config: Record<string, unknown>;
   } | null;
   questions: IssuedQuestion[];
   status: string;

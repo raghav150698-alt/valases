@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { AuthPanel } from "../features/auth/AuthPanel";
 import { useAssessmentSession } from "../features/assessment/useAssessmentSession";
 import { ProviderAssessments } from "../features/provider/ProviderAssessments";
-import { IssuedCandidatePanel } from "../features/issued/IssuedCandidatePanel";
 import { CodingEnv } from "../features/tools/CodingEnv";
 import { ExcelSimulator } from "../features/tools/ExcelSimulator";
 import { AccountingTool } from "../features/tools/AccountingTool";
@@ -11,6 +10,25 @@ import { TaxTool } from "../features/tools/TaxTool";
 import { useSessionStore } from "../lib/sessionStore";
 
 type View = "provider";
+
+function CandidatePortalRedirect({ accessKey }: { accessKey: string }) {
+  const candidateBaseUrl = String(import.meta.env.VITE_CANDIDATE_APP_URL || "").trim().replace(/\/$/, "");
+  const candidateUrl = candidateBaseUrl ? `${candidateBaseUrl}/?issued_key=${encodeURIComponent(accessKey)}` : "";
+
+  useEffect(() => {
+    if (candidateUrl) window.location.replace(candidateUrl);
+  }, [candidateUrl]);
+
+  return (
+    <main className="assessment-thank-you" role="status">
+      <div className="assessment-thank-you-mark" aria-hidden="true">C</div>
+      <span className="launch-section-label">Candidate assessment</span>
+      <h1>{candidateUrl ? "Opening secure assessment" : "Candidate portal required"}</h1>
+      <p>{candidateUrl ? "You are being redirected to the isolated candidate environment." : "Ask the recruiter for a newly issued candidate link."}</p>
+      {candidateUrl && <a className="assessment-primary-btn" href={candidateUrl}>Continue</a>}
+    </main>
+  );
+}
 
 function AssessmentThankYou({ reason = "submitted" }: { reason?: "submitted" | "fullscreen" | "policy" }) {
   const ended = reason !== "submitted";
@@ -166,13 +184,7 @@ export function App() {
   }
 
   if (issuedAccessKey) {
-    return (
-      <div className="launch-shell">
-        <div className="shell launch-content candidate-content">
-          <IssuedCandidatePanel />
-        </div>
-      </div>
-    );
+    return <CandidatePortalRedirect accessKey={issuedAccessKey} />;
   }
 
   if (!recruiterAuthenticated) {
