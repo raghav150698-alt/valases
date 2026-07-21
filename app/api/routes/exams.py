@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from html import escape
 
+import logging
 import random
 import re
 import secrets
@@ -48,6 +49,7 @@ ALLOWED_TIME_PER_QUESTION_SECONDS = {25, 30, 35, 40, 45}
 ALLOWED_ASSESSMENT_TYPES = {x.value for x in AssessmentType}
 STANDALONE_ASSESSMENT_CATEGORY = "__standalone_assessment__"
 ISSUED_TOKEN_ROLE = "issued_candidate"
+request_logger = logging.getLogger("certora.request")
 
 
 def _sync_pk_sequence_if_needed(db: Session, table_name: str, pk_col: str = "id") -> None:
@@ -1488,10 +1490,23 @@ def issued_candidate_consent(
         "recording": bool(payload.recording),
         "accepted_at": datetime.now(timezone.utc).isoformat(),
     }
-    issue.result_json = {"proctoring": state}
+    result = dict(issue.result_json) if isinstance(issue.result_json, dict) else {}
+    result["proctoring"] = state
+    issue.result_json = result
     db.add(issue)
-    db.commit()
-    return {"accepted": True, "consent": state["consent"]}
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        request_logger.exception(
+            "issued_candidate_consent_persistence_failed",
+            extra={"request_log": {"issue_id": issue.id}},
+        )
+        # Consent is also included in the candidate's bounded local event trail
+        # and is persisted with the final submission. A transient database write
+        # must not strand a candidate after they have explicitly consented.
+        return {"accepted": True, "persisted": False, "consent": state["consent"]}
+    return {"accepted": True, "persisted": True, "consent": state["consent"]}
 
 
 @router.post("/issued/proctor-event")

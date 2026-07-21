@@ -179,19 +179,36 @@ export function IssuedCandidatePanel() {
     if (isAcceptingConsent) return;
     setIsAcceptingConsent(true);
     setStatus("");
+    const consentDetails = {
+      policy_version: "privacy-2026-07-19",
+      consent_version: "candidate-consent-1.0",
+      camera: true,
+      microphone: false,
+      recording: false,
+      accepted_at: new Date().toISOString(),
+    };
+    setProctorEvents((currentEvents) => [
+      ...currentEvents.filter((event) => event.event_type !== "candidate_consent_accepted").slice(-99),
+      { event_type: "candidate_consent_accepted", severity: "info", details: consentDetails, recorded_at: consentDetails.accepted_at },
+    ]);
     try {
       await issuedApi("POST", "/exams/issued/consent", {
-        policy_version: "privacy-2026-07-19",
-        consent_version: "candidate-consent-1.0",
-        camera: true,
-        microphone: false,
-        recording: false,
+        policy_version: consentDetails.policy_version,
+        consent_version: consentDetails.consent_version,
+        camera: consentDetails.camera,
+        microphone: consentDetails.microphone,
+        recording: consentDetails.recording,
       });
-    } catch {
-      setStatus("We could not confirm your consent with the assessment service. Check your connection and try again.");
-      if (document.fullscreenElement) void document.exitFullscreen();
-      setIsAcceptingConsent(false);
-      return;
+    } catch (error) {
+      const responseStatus = Number((error as { response?: { status?: number } })?.response?.status || 0);
+      if (!responseStatus || responseStatus < 500) {
+        setStatus("We could not confirm your consent with the assessment service. Check your connection and try again.");
+        if (document.fullscreenElement) void document.exitFullscreen();
+        setIsAcceptingConsent(false);
+        return;
+      }
+      // The explicit consent event is retained locally and submitted with the
+      // attempt, so a transient server write failure does not block the session.
     }
     try {
       await startGazeProctor();
