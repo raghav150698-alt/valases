@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev:candidate": "vite --mode candidate",
     "build": "tsc -b && vite build",
-    "build:candidate": "tsc -b && vite build --mode candidate",
+    "build:candidate": "tsc -b && vite build --mode candidate && node scripts/finalize-candidate-build.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
