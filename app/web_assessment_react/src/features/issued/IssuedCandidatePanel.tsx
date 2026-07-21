@@ -178,8 +178,8 @@ export function IssuedCandidatePanel() {
   const acceptConsent = async () => {
     if (isAcceptingConsent) return;
     setIsAcceptingConsent(true);
+    setStatus("");
     try {
-      await startGazeProctor();
       await issuedApi("POST", "/exams/issued/consent", {
         policy_version: "privacy-2026-07-19",
         consent_version: "candidate-consent-1.0",
@@ -187,10 +187,18 @@ export function IssuedCandidatePanel() {
         microphone: false,
         recording: false,
       });
+    } catch {
+      setStatus("We could not confirm your consent with the assessment service. Check your connection and try again.");
+      if (document.fullscreenElement) void document.exitFullscreen();
+      setIsAcceptingConsent(false);
+      return;
+    }
+    try {
+      await startGazeProctor();
       setConsentAccepted(true);
     } catch {
       stopGazeProctor();
-      setStatus("We could not start camera proctoring. Check camera permission and your connection, then try again.");
+      setStatus("We could not start integrity monitoring. Check camera permission and try again.");
       if (document.fullscreenElement) void document.exitFullscreen();
     } finally {
       setIsAcceptingConsent(false);
