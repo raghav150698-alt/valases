@@ -192,7 +192,15 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         raw = [x.strip() for x in (self.cors_allow_origins or "").split(",")]
-        return [x for x in raw if x]
+        origins = [x.rstrip("/") for x in raw if x]
+        candidate_url = (self.candidate_app_base_url or "").strip()
+        if candidate_url:
+            parsed = urlsplit(candidate_url)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                candidate_origin = urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+                if candidate_origin not in origins:
+                    origins.append(candidate_origin)
+        return origins
 
     @property
     def trusted_hosts_list(self) -> list[str]:
