@@ -1480,8 +1480,6 @@ def issued_candidate_consent(
     if issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
         raise HTTPException(status_code=409, detail="Assessment is no longer active")
     state = _issued_proctoring_state(issue)
-    normalized_event_type = str(payload.event_type or "").strip().lower()
-    _apply_issued_integrity_event(state, normalized_event_type)
     state["consent"] = {
         "policy_version": payload.policy_version,
         "consent_version": payload.consent_version,
@@ -1529,6 +1527,8 @@ def issued_candidate_proctor_event(
     if severity not in {"info", "warning", "critical"}:
         raise HTTPException(status_code=400, detail="Invalid proctor event severity")
     state = _issued_proctoring_state(issue)
+    normalized_event_type = str(payload.event_type or "").strip().lower()
+    _apply_issued_integrity_event(state, normalized_event_type)
     if severity in {"warning", "critical"}:
         state["warning_count"] = int(state.get("warning_count") or 0) + 1
     event = {
