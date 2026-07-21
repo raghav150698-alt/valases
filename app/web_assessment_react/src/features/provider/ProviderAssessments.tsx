@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "../../lib/api";
 import { CodingEnv } from "../tools/CodingEnv";
@@ -24,6 +24,18 @@ type Assessment = {
   time_per_question_seconds: number | null;
   questions_per_attempt: number;
   question_count: number;
+  checkpoint_count?: number;
+  is_certora_default?: boolean;
+  template_version?: number | null;
+  task?: {
+    title: string;
+    description: string;
+    instructions: string;
+    marks: number;
+    metadata: Record<string, unknown>;
+    expected_output: Record<string, unknown>;
+    grading_config: { checkpoints?: Array<{ id: string; label: string; weight: number; source: string; expected: unknown }> };
+  } | null;
 };
 
 type QuestionOption = { option_text: string; is_correct: boolean; position: number };
@@ -55,6 +67,33 @@ type IssuedRow = {
 };
 
 type WorkspaceTab = "dashboard" | "custom" | "assessments" | "results";
+
+type DefaultAssessment = {
+  id: string;
+  title: string;
+  summary: string;
+  assessment_type: string;
+  duration_minutes: number;
+  pass_score: number;
+  topics: string[];
+  checkpoint_count: number;
+  review_required: boolean;
+};
+
+type DefaultAssessmentDetail = DefaultAssessment & {
+  task?: { expected_output?: Record<string, unknown>; grading_config?: { checkpoints?: BuilderCheckpoint[] } };
+  questions?: Array<{ question_text: string; options: Array<{ option_text: string; is_correct: boolean }> }>;
+};
+
+type BuilderCheckpoint = {
+  id: string;
+  label: string;
+  source: string;
+  comparator: "numeric" | "exact" | "contains" | "contains_all" | "regex" | "set_contains_all";
+  expected: string;
+  weight: number;
+  tolerance: number;
+};
 
 function SearchIcon() {
   return (
@@ -150,7 +189,7 @@ export function ProviderAssessments() {
     tools: "",
     topics: "",
     pass_score: 70,
-    assessment_type: "mcq" as "mcq" | "spreadsheet" | "coding" | "tax_simulator" | "case_study",
+    assessment_type: "mcq" as "mcq" | "spreadsheet" | "coding" | "accounting" | "tax_simulator" | "case_study",
     max_attempts: 3,
     questions_per_attempt: 25,
     timing_mode: "question" as "question" | "assessment",
@@ -177,6 +216,13 @@ export function ProviderAssessments() {
   const [showSettings, setShowSettings] = useState(false);
   const [resultAssessmentFilter, setResultAssessmentFilter] = useState("all");
   const [resultStatusFilter, setResultStatusFilter] = useState("all");
+  const [builderStep, setBuilderStep] = useState(1);
+  const [checkpoints, setCheckpoints] = useState<BuilderCheckpoint[]>([
+    { id: "checkpoint-1", label: "Required result", source: "field:result", comparator: "numeric", expected: "", weight: 100, tolerance: 0.01 },
+  ]);
+  const [reviewScore, setReviewScore] = useState(0);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [previewDefaultId, setPreviewDefaultId] = useState<string | null>(null);
 
   const toolTypes = ["Excel", "Coding Env", "Desktop Accounting (GnuCash)", "Tax Software"];
 
@@ -196,15 +242,54 @@ export function ProviderAssessments() {
     queryFn: async () => (await api.get<IssuedRow[]>("/exams/issued/by-me")).data,
   });
 
+  const defaultAssessments = useQuery({
+    queryKey: ["default-assessment-library"],
+    queryFn: async () => (await api.get<DefaultAssessment[]>("/exams/default-library")).data,
+  });
+
+  const defaultAssessmentDetail = useQuery({
+    queryKey: ["default-assessment-detail", previewDefaultId],
+    enabled: Boolean(previewDefaultId),
+    queryFn: async () => (await api.get<DefaultAssessmentDetail>(`/exams/default-library/${previewDefaultId}`)).data,
+  });
+
   const review = useQuery({
     queryKey: ["issued-review", reviewIssueId],
     enabled: Boolean(reviewIssueId),
     queryFn: async () => (await api.get(`/exams/issued/${reviewIssueId}/review`)).data,
   });
 
+  useEffect(() => {
+    if (!review.data) return;
+    const provisional = Number(review.data.result?.provisional_score_pct ?? review.data.score_pct ?? 0);
+    setReviewScore(Number.isFinite(provisional) ? provisional : 0);
+    setReviewNotes(String(review.data.result?.review?.notes || ""));
+  }, [review.data]);
+
+  const installDefault = useMutation({
+    mutationFn: async (templateId: string) => (await api.post(`/exams/default-library/${templateId}/install`)).data,
+    onSuccess: async (data) => {
+      setSelectedExamId(Number(data.id));
+      setActiveTab("assessments");
+      await qc.invalidateQueries({ queryKey: ["provider-assessments"] });
+    },
+  });
+
+  const finalizeReview = useMutation({
+    mutationFn: async () => {
+      if (!reviewIssueId) throw new Error("Select a submission first.");
+      return (await api.post(`/exams/issued/${reviewIssueId}/review/finalize`, { score_pct: reviewScore, reviewer_notes: reviewNotes })).data;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["issued-review", reviewIssueId] });
+      await qc.invalidateQueries({ queryKey: ["issued-by-me"] });
+    },
+  });
+
   const createAssessment = useMutation({
     mutationFn: async () => {
       const assessmentType = form.assessment_type;
+      const primaryTool = assessmentType === "spreadsheet" ? "Excel" : assessmentType === "coding" ? "Coding environment" : assessmentType === "accounting" ? "Accounting workspace" : assessmentType === "tax_simulator" ? "Tax software" : "Certora assessment workspace";
       const payload = {
         title: form.title,
         assessment_type: assessmentType,
@@ -212,7 +297,7 @@ export function ProviderAssessments() {
         about: form.about,
         tools: [
           ...new Set(
-            [...selectedTools, ...form.tools.split(/\r?\n|,/).map((x) => x.trim()).filter(Boolean)].filter(Boolean),
+            [primaryTool, ...selectedTools, ...form.tools.split(/\r?\n|,/).map((x) => x.trim()).filter(Boolean)].filter(Boolean),
           ),
         ],
         topics: form.topics.split(/\r?\n|,/).map((x) => x.trim()).filter(Boolean),
@@ -230,6 +315,16 @@ export function ProviderAssessments() {
       };
       const created = (await api.post("/exams", payload)).data;
       if (assessmentType !== "mcq") {
+        const normalizedCheckpoints = checkpoints
+          .filter((checkpoint) => checkpoint.label.trim() && checkpoint.source.trim() && checkpoint.weight > 0)
+          .map((checkpoint) => {
+            const expected = checkpoint.comparator === "numeric" && checkpoint.expected.trim() !== ""
+              ? Number(checkpoint.expected)
+              : ["contains_all", "set_contains_all"].includes(checkpoint.comparator)
+                ? checkpoint.expected.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean)
+                : checkpoint.expected;
+            return { ...checkpoint, expected };
+          });
         const attachments = form.attachment_links
           .split(/\r?\n|,/)
           .map((value) => value.trim())
@@ -243,7 +338,7 @@ export function ProviderAssessments() {
           marks: Number(form.task_marks),
           metadata: { attachments, answer_format: form.answer_format },
           expected_output: {},
-          grading_config: { manual_review_required: form.manual_review },
+          grading_config: { evaluation_mode: "deterministic", manual_review_required: form.manual_review, checkpoints: normalizedCheckpoints },
         };
         if (assessmentType === "coding") {
           const testCases = form.test_cases.split(/\r?\n/).map((line, index) => {
@@ -254,16 +349,16 @@ export function ProviderAssessments() {
             ...baseTask,
             metadata: { ...baseTask.metadata, language: form.coding_language, starter_code: form.starter_code },
             expected_output: { test_cases: testCases },
-            grading_config: { manual_review_required: form.manual_review, auto_grading_enabled: !form.manual_review },
+            grading_config: { evaluation_mode: "deterministic_static_review", manual_review_required: true, checkpoints: normalizedCheckpoints },
           });
-        } else if (assessmentType === "tax_simulator") {
+        } else if (assessmentType === "tax_simulator" || assessmentType === "accounting") {
           const expectedFormValues = Object.fromEntries(form.expected_values.split(/\r?\n/).map((line) => {
             const separator = line.indexOf("=");
             return separator > 0 ? [line.slice(0, separator).trim(), line.slice(separator + 1).trim()] : null;
           }).filter((entry): entry is [string, string] => Boolean(entry)));
           await api.put(`/exams/${created.id}/task`, {
             ...baseTask,
-            metadata: { ...baseTask.metadata, workspace: "tax", form_fields: Object.keys(expectedFormValues) },
+            metadata: { ...baseTask.metadata, workspace: assessmentType === "tax_simulator" ? "tax" : "accounting", form_fields: [...new Set(normalizedCheckpoints.filter((item) => String(item.source).startsWith("field:")).map((item) => String(item.source).split(":", 2)[1]))] },
             expected_output: {
               expected_form_values: expectedFormValues,
               red_flags: form.red_flags.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean),
@@ -272,7 +367,7 @@ export function ProviderAssessments() {
         } else if (assessmentType === "case_study") {
           await api.put(`/exams/${created.id}/task`, {
             ...baseTask,
-            grading_config: { manual_review_required: true, rubric: form.grading_rubric },
+            grading_config: { evaluation_mode: "deterministic_with_review", manual_review_required: true, rubric: form.grading_rubric, checkpoints: normalizedCheckpoints },
             expected_output: { rubric: form.grading_rubric },
           });
         } else if (assessmentType === "spreadsheet") {
@@ -300,14 +395,11 @@ export function ProviderAssessments() {
             attachments,
             answer_format: "spreadsheet",
           },
-          expected_output: {
-            expected_final_values: { B4: 49000, B5: 0.392 },
-            expected_formulas: { B4: "=B2-B3", B5: "=ROUND(B4/B2,3)" },
-          },
+          expected_output: {},
           grading_config: {
             auto_grading_enabled: true,
-            scoring: "value_formula_tolerance",
-            numeric_tolerance: 0.01,
+            evaluation_mode: "deterministic",
+            checkpoints: normalizedCheckpoints,
           },
         });
         }
@@ -409,25 +501,25 @@ export function ProviderAssessments() {
   );
   const publishedCount = assessmentRows.filter((x) => x.status === "published").length;
   const draftCount = assessmentRows.filter((x) => x.status !== "published").length;
-  const activeIssueCount = issuedRows.filter((row) => row.status !== "completed").length;
-  const completedIssueCount = issuedRows.filter((row) => row.status === "completed").length;
+  const activeIssueCount = issuedRows.filter((row) => !["review_pending", "reviewed", "completed"].includes(row.status)).length;
+  const completedIssueCount = issuedRows.filter((row) => ["review_pending", "reviewed", "completed"].includes(row.status)).length;
   const scoredResults = issuedRows.filter((row) => row.score_pct != null);
   const passedResults = scoredResults.filter((row) => row.passed === true);
   const averageScore = scoredResults.length ? scoredResults.reduce((sum, row) => sum + Number(row.score_pct || 0), 0) / scoredResults.length : 0;
   const passRate = scoredResults.length ? (passedResults.length / scoredResults.length) * 100 : 0;
-  const pendingReviewCount = issuedRows.filter((row) => row.status === "completed" && row.score_pct == null).length;
+  const pendingReviewCount = issuedRows.filter((row) => row.status === "review_pending").length;
   const resultRows = issuedRows.filter((row) => {
     const assessmentMatches = resultAssessmentFilter === "all" || String(row.exam_id) === resultAssessmentFilter;
     const statusMatches = resultStatusFilter === "all"
       || (resultStatusFilter === "passed" && row.passed === true)
       || (resultStatusFilter === "failed" && row.passed === false)
-      || (resultStatusFilter === "review" && row.status === "completed" && row.score_pct == null)
+      || (resultStatusFilter === "review" && row.status === "review_pending")
       || row.status === resultStatusFilter;
     return assessmentMatches && statusMatches;
   });
   const assessmentMetrics = assessmentRows.map((assessment) => {
     const attempts = issuedRows.filter((row) => row.exam_id === assessment.exam_id);
-    const completed = attempts.filter((row) => row.status === "completed");
+    const completed = attempts.filter((row) => ["review_pending", "reviewed", "completed"].includes(row.status));
     const scored = completed.filter((row) => row.score_pct != null);
     const average = scored.length ? scored.reduce((sum, row) => sum + Number(row.score_pct || 0), 0) / scored.length : 0;
     const passed = scored.filter((row) => row.passed === true).length;
@@ -435,11 +527,16 @@ export function ProviderAssessments() {
   }).filter((metric) => metric.attempts > 0);
   const validQuestionOptions = options.filter((option) => option.option_text.trim());
   const isMcqForm = form.assessment_type === "mcq";
+  const checkpointWeight = checkpoints.reduce((sum, checkpoint) => sum + Number(checkpoint.weight || 0), 0);
+  const checkpointsAreComplete = checkpoints.length > 0 && checkpoints.every((checkpoint) => checkpoint.label.trim() && checkpoint.source.trim() && checkpoint.expected.trim() && checkpoint.weight > 0);
   const canCreateAssessment = form.title.trim().length >= 3
+    && form.instructions.trim().length >= 3
+    && form.about.trim().length >= 3
+    && form.topics.trim().length >= 2
     && form.duration_minutes > 0
-    && form.pass_score >= 0
+    && form.pass_score >= 70
     && form.pass_score <= 100
-    && (isMcqForm || (form.task_prompt.trim().length >= 10 && form.task_marks > 0));
+    && (isMcqForm || (form.task_prompt.trim().length >= 10 && form.task_marks > 0 && checkpointsAreComplete && checkpointWeight === 100));
   const canAddQuestion = questionText.trim().length >= 5 && validQuestionOptions.length >= 2 && validQuestionOptions.some((option) => option.is_correct);
   const canIssueAssessment = Boolean(issueExamId && candidateName.trim().length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail.trim()));
 
@@ -553,10 +650,10 @@ export function ProviderAssessments() {
                   >
                     <div>
                       <strong>{assessment.title}</strong>
-                      <small>{assessment.assessment_type}</small>
+                      <small>{assessment.assessment_type}{assessment.is_certora_default ? ` | Certora default v${assessment.template_version}` : ""}</small>
                     </div>
                     <StatusBadge value={assessment.status} />
-                    <span>{assessment.question_count} questions</span>
+                    <span>{assessment.assessment_type === "mcq" ? `${assessment.question_count} questions` : `${assessment.checkpoint_count || 0} checkpoints`}</span>
                   </button>
                 ))}
                 {!exams.isLoading && !exams.isError && filteredAssessments.length === 0 && (
@@ -657,90 +754,68 @@ export function ProviderAssessments() {
               </div>
             )}
 
-            <section className="workspace-surface">
-              <div className="workspace-surface-head">
-                <div>
-                  <h3>Create new assessment</h3>
-                  <p>Define assessment rules, timing, and attached tools before publishing.</p>
-                </div>
+            <section className="workspace-surface default-library">
+              <div className="workspace-surface-head"><div><h3>Certora default assessments</h3><p>Ready-to-issue, difficult assessments with answer keys and auditable scoring checkpoints.</p></div></div>
+              <div className="default-assessment-grid">
+                {(defaultAssessments.data || []).map((template) => (
+                  <article className="default-assessment-card" key={template.id}>
+                    <div className="default-assessment-card-head"><StatusBadge value={template.assessment_type.replaceAll("_", " ")} /><span>{template.duration_minutes} min</span></div>
+                    <h4>{template.title}</h4><p>{template.summary}</p>
+                    <div className="default-assessment-meta"><span>{template.checkpoint_count} scored checks</span><span>{template.pass_score}% pass mark</span></div>
+                    <div className="default-assessment-actions"><button type="button" className="secondary-btn" onClick={() => setPreviewDefaultId((current) => current === template.id ? null : template.id)}>View scoring key</button><button type="button" onClick={() => installDefault.mutate(template.id)} disabled={installDefault.isPending}>Use this assessment</button></div>
+                  </article>
+                ))}
               </div>
-              <div className="workspace-form-grid">
-                <label className="field-stack">
-                  <span>Title</span>
-                  <input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Assessment title" />
-                </label>
-                <label className="field-stack">
-                  <span>Assessment type</span>
-                  <select value={form.assessment_type} onChange={(e) => setForm((p) => ({ ...p, assessment_type: e.target.value as typeof form.assessment_type }))}>
-                    <option value="mcq">MCQ Assessment</option>
-                    <option value="spreadsheet">Excel Assessment</option>
-                    <option value="coding">Coding Assessment</option>
-                    <option value="tax_simulator">Accounting & Tax</option>
-                    <option value="case_study">Case Study</option>
-                  </select>
-                </label>
-                <label className="field-stack workspace-span-2">
-                  <span>Instructions</span>
-                  <textarea rows={3} value={form.instructions} onChange={(e) => setForm((p) => ({ ...p, instructions: e.target.value }))} placeholder="What the candidate should know before starting" />
-                </label>
-                <label className="field-stack workspace-span-2">
-                  <span>Internal description</span>
-                  <input value={form.about} onChange={(e) => setForm((p) => ({ ...p, about: e.target.value }))} placeholder="Purpose, role, or hiring stage" />
-                </label>
-                <label className="field-stack">
-                  <span>Topics</span>
-                  <input value={form.topics} onChange={(e) => setForm((p) => ({ ...p, topics: e.target.value }))} placeholder="Topic list" />
-                </label>
-                <label className="field-stack">
-                  <span>Duration</span>
-                  <div className="input-with-suffix"><input type="number" min="1" value={form.duration_minutes} onChange={(e) => setForm((p) => ({ ...p, duration_minutes: Number(e.target.value) }))} /><span>minutes</span></div>
-                </label>
-                <label className="field-stack">
-                  <span>Pass score</span>
-                  <div className="input-with-suffix"><input type="number" min="0" max="100" value={form.pass_score} onChange={(e) => setForm((p) => ({ ...p, pass_score: Number(e.target.value) }))} /><span>%</span></div>
-                </label>
-                <label className="field-stack">
-                  <span>Max attempts</span>
-                  <input type="number" min="1" value={form.max_attempts} onChange={(e) => setForm((p) => ({ ...p, max_attempts: Number(e.target.value) }))} />
-                </label>
-                {isMcqForm ? (
-                  <>
-                    <label className="field-stack"><span>Timing mode</span><select value={form.timing_mode} onChange={(e) => setForm((p) => ({ ...p, timing_mode: e.target.value as "question" | "assessment" }))}><option value="question">Time per question</option><option value="assessment">Time for entire assessment</option></select></label>
-                    {form.timing_mode === "question" && <label className="field-stack"><span>Time per question</span><div className="input-with-suffix"><input type="number" min="10" value={form.time_per_question_seconds} onChange={(e) => setForm((p) => ({ ...p, time_per_question_seconds: Number(e.target.value) }))} /><span>seconds</span></div></label>}
-                    <label className="field-stack"><span>Questions per attempt</span><input type="number" min="1" value={form.questions_per_attempt} onChange={(e) => setForm((p) => ({ ...p, questions_per_attempt: Number(e.target.value) }))} /></label>
-                    <label className="checkbox-stack workspace-span-2"><input type="checkbox" checked={form.negative_marking} onChange={(e) => setForm((p) => ({ ...p, negative_marking: e.target.checked }))} /><div><strong>Negative marking</strong><span>Apply question-level negative marks to incorrect answers.</span></div></label>
-                  </>
-                ) : (
-                  <>
-                    <div className="workspace-form-divider workspace-span-2"><strong>Task setup</strong><span>Shown to the candidate inside the assessment workspace.</span></div>
-                    <label className="field-stack workspace-span-2"><span>Question or task prompt</span><textarea rows={5} value={form.task_prompt} onChange={(e) => setForm((p) => ({ ...p, task_prompt: e.target.value }))} placeholder="Describe the work the candidate must complete, required outputs, and constraints." /></label>
-                    <label className="field-stack"><span>Total marks</span><input type="number" min="1" value={form.task_marks} onChange={(e) => setForm((p) => ({ ...p, task_marks: Number(e.target.value) }))} /></label>
-                    {form.assessment_type !== "spreadsheet" && <label className="field-stack"><span>Response format</span><select value={form.answer_format} onChange={(e) => setForm((p) => ({ ...p, answer_format: e.target.value as typeof form.answer_format }))}><option value="long_text">Written response</option><option value="file_or_text">Written response or file link</option>{form.assessment_type === "coding" && <option value="code">Code editor</option>}</select></label>}
-                    <label className="field-stack workspace-span-2"><span>Attachments or reference links</span><textarea rows={3} value={form.attachment_links} onChange={(e) => setForm((p) => ({ ...p, attachment_links: e.target.value }))} placeholder="One accessible URL per line. Supabase Storage uploads can replace these links after connection." /></label>
-                    {form.assessment_type === "coding" && <>
-                      <label className="field-stack"><span>Programming language</span><select value={form.coding_language} onChange={(e) => setForm((p) => ({ ...p, coding_language: e.target.value }))}><option value="javascript">JavaScript</option><option value="typescript">TypeScript</option><option value="python">Python</option><option value="java">Java</option><option value="sql">SQL</option></select></label>
-                      <label className="checkbox-stack"><input type="checkbox" checked={form.manual_review} onChange={(e) => setForm((p) => ({ ...p, manual_review: e.target.checked }))} /><div><strong>Manual review</strong><span>Recruiter reviews code and execution output.</span></div></label>
-                      <label className="field-stack workspace-span-2"><span>Starter code</span><textarea className="code-input" rows={6} value={form.starter_code} onChange={(e) => setForm((p) => ({ ...p, starter_code: e.target.value }))} placeholder="Optional starter code" /></label>
-                      {!form.manual_review && <label className="field-stack workspace-span-2"><span>Test cases</span><textarea rows={4} value={form.test_cases} onChange={(e) => setForm((p) => ({ ...p, test_cases: e.target.value }))} placeholder={'One per line: Test name | expected output'} /></label>}
-                    </>}
-                    {form.assessment_type === "case_study" && <label className="field-stack workspace-span-2"><span>Review rubric</span><textarea rows={5} value={form.grading_rubric} onChange={(e) => setForm((p) => ({ ...p, grading_rubric: e.target.value }))} placeholder="Define evidence, reasoning, accuracy, communication, and mark allocation." /></label>}
-                    {form.assessment_type === "tax_simulator" && <>
-                      <label className="field-stack workspace-span-2"><span>Expected field values</span><textarea rows={4} value={form.expected_values} onChange={(e) => setForm((p) => ({ ...p, expected_values: e.target.value }))} placeholder={'One per line, for example:\nTaxable income=75000\nTax due=8200'} /></label>
-                      <label className="field-stack workspace-span-2"><span>Expected red flags</span><input value={form.red_flags} onChange={(e) => setForm((p) => ({ ...p, red_flags: e.target.value }))} placeholder="Missing W-9, duplicate expense, incorrect filing status" /></label>
-                    </>}
-                  </>
-                )}
+              {previewDefaultId && defaultAssessmentDetail.data && <div className="default-key-preview"><div className="workspace-surface-head"><div><strong>{defaultAssessmentDetail.data.title}</strong><p>Answer key and scoring checkpoints</p></div><button type="button" className="workspace-icon-btn" aria-label="Close scoring key" onClick={() => setPreviewDefaultId(null)}>x</button></div>
+                {defaultAssessmentDetail.data.questions ? <ol>{defaultAssessmentDetail.data.questions.map((question, questionIndex) => <li key={`${question.question_text}-${questionIndex}`}><strong>{question.question_text}</strong><span>{question.options.find((option) => option.is_correct)?.option_text || "No answer configured"}</span></li>)}</ol> : <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.task?.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>{checkpoint.source} = {JSON.stringify(checkpoint.expected)}</small></div>)}</div>}
+              </div>}
+              {defaultAssessments.isLoading && <div className="workspace-loading">Loading default assessments...</div>}
+              {installDefault.isError && <div className="workspace-error">{apiErrorMessage(installDefault.error, "The default assessment could not be added.")}</div>}
+            </section>
+
+            <section className="workspace-surface assessment-builder-v2">
+              <div className="workspace-surface-head"><div><h3>Build a custom assessment</h3><p>Four focused steps. Candidates are always reviewed before results become final.</p></div></div>
+              <div className="builder-stepper" aria-label="Assessment builder progress">
+                {["Basics", "Candidate task", "Answer key", "Review"].map((label, stepIndex) => <button type="button" key={label} className={builderStep === stepIndex + 1 ? "active" : builderStep > stepIndex + 1 ? "complete" : ""} onClick={() => setBuilderStep(stepIndex + 1)}><span>{stepIndex + 1}</span>{label}</button>)}
               </div>
-              <div className="workspace-form-footer">
-                <div className="workspace-selection-summary">
-                  <strong>Attached tools</strong>
-                  <span>{selectedTools.length ? selectedTools.join(", ") : "No tool selected"}</span>
-                </div>
-                <button onClick={() => createAssessment.mutate()} disabled={createAssessment.isPending || !canCreateAssessment}>
-                  {createAssessment.isPending ? "Creating..." : "Create assessment"}
-                </button>
-              </div>
-              {!canCreateAssessment && <div className="workspace-form-note">Add a title, valid duration and score{isMcqForm ? "." : ", plus a task prompt and marks."}</div>}
+
+              {builderStep === 1 && <div className="builder-stage workspace-form-grid">
+                <label className="field-stack"><span>Assessment title</span><input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Senior accountant practical" /></label>
+                <label className="field-stack"><span>Format</span><select value={form.assessment_type} onChange={(e) => setForm((p) => ({ ...p, assessment_type: e.target.value as typeof form.assessment_type }))}><option value="mcq">Multiple choice</option><option value="spreadsheet">Excel</option><option value="coding">Coding</option><option value="accounting">Accounting</option><option value="tax_simulator">Tax</option><option value="case_study">Case study</option></select></label>
+                <label className="field-stack workspace-span-2"><span>Internal purpose</span><input value={form.about} onChange={(e) => setForm((p) => ({ ...p, about: e.target.value }))} placeholder="Role, seniority, and what this assessment should prove" /></label>
+                <label className="field-stack"><span>Topics</span><input value={form.topics} onChange={(e) => setForm((p) => ({ ...p, topics: e.target.value }))} placeholder="Close, reconciliations, controls" /></label>
+                <label className="field-stack"><span>Duration</span><div className="input-with-suffix"><input type="number" min="1" value={form.duration_minutes} onChange={(e) => setForm((p) => ({ ...p, duration_minutes: Number(e.target.value) }))} /><span>minutes</span></div></label>
+              </div>}
+
+              {builderStep === 2 && <div className="builder-stage workspace-form-grid">
+                <label className="field-stack workspace-span-2"><span>Candidate instructions</span><textarea rows={3} value={form.instructions} onChange={(e) => setForm((p) => ({ ...p, instructions: e.target.value }))} placeholder="What the candidate should know before starting" /></label>
+                {isMcqForm ? <div className="builder-info workspace-span-2"><strong>Question builder comes next</strong><span>Create this assessment, then add the 25 or more scored questions from its assessment setup page.</span></div> : <label className="field-stack workspace-span-2"><span>Task brief</span><textarea rows={7} value={form.task_prompt} onChange={(e) => setForm((p) => ({ ...p, task_prompt: e.target.value }))} placeholder="State the facts, required outputs, constraints, and acceptable assumptions." /></label>}
+                {!isMcqForm && <label className="field-stack workspace-span-2"><span>Reference links</span><textarea rows={2} value={form.attachment_links} onChange={(e) => setForm((p) => ({ ...p, attachment_links: e.target.value }))} placeholder="One URL per line" /></label>}
+                {form.assessment_type === "coding" && <><label className="field-stack"><span>Language</span><select value={form.coding_language} onChange={(e) => setForm((p) => ({ ...p, coding_language: e.target.value }))}><option value="python">Python</option><option value="javascript">JavaScript</option><option value="typescript">TypeScript</option><option value="java">Java</option><option value="sql">SQL</option></select></label><label className="field-stack workspace-span-2"><span>Starter code</span><textarea className="code-input" rows={5} value={form.starter_code} onChange={(e) => setForm((p) => ({ ...p, starter_code: e.target.value }))} /></label></>}
+              </div>}
+
+              {builderStep === 3 && <div className="builder-stage">
+                {isMcqForm ? <div className="builder-info"><strong>MCQ answer keys are set per question</strong><span>Correct options and marks are configured while adding each question.</span></div> : <>
+                  <div className="checkpoint-heading"><div><strong>Deterministic checkpoints</strong><span>Each check compares submitted evidence with the answer key. Weights must total 100.</span></div><strong className={checkpointWeight === 100 ? "weight-valid" : "weight-invalid"}>{checkpointWeight}%</strong></div>
+                  <div className="checkpoint-list">{checkpoints.map((checkpoint, checkpointIndex) => <article className="checkpoint-row" key={checkpoint.id}>
+                    <label className="field-stack"><span>Checkpoint</span><input value={checkpoint.label} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, label: event.target.value } : item))} /></label>
+                    <label className="field-stack"><span>Evidence source</span><input value={checkpoint.source} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, source: event.target.value } : item))} placeholder={form.assessment_type === "spreadsheet" ? "spreadsheet_value:B12" : form.assessment_type === "coding" ? "code" : "field:taxable_income"} /></label>
+                    <label className="field-stack"><span>Compare as</span><select value={checkpoint.comparator} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, comparator: event.target.value as BuilderCheckpoint["comparator"] } : item))}><option value="numeric">Number</option><option value="exact">Exact value</option><option value="contains">Contains text</option><option value="contains_all">Contains all</option><option value="regex">Pattern</option><option value="set_contains_all">Selected items</option></select></label>
+                    <label className="field-stack"><span>Correct answer</span><input value={checkpoint.expected} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, expected: event.target.value } : item))} /></label>
+                    <label className="field-stack"><span>Weight</span><input type="number" min="1" max="100" value={checkpoint.weight} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, weight: Number(event.target.value) } : item))} /></label>
+                    <button type="button" className="checkpoint-remove" aria-label="Remove checkpoint" onClick={() => setCheckpoints((items) => items.filter((_, indexValue) => indexValue !== checkpointIndex))}>Remove</button>
+                  </article>)}</div>
+                  <button type="button" className="secondary-btn" onClick={() => setCheckpoints((items) => [...items, { id: `checkpoint-${Date.now()}`, label: "", source: "", comparator: "numeric", expected: "", weight: 0, tolerance: 0.01 }])}>Add checkpoint</button>
+                </>}
+              </div>}
+
+              {builderStep === 4 && <div className="builder-stage builder-review">
+                <div><span>Assessment</span><strong>{form.title || "Untitled assessment"}</strong></div><div><span>Format</span><strong>{form.assessment_type.replaceAll("_", " ")}</strong></div><div><span>Duration</span><strong>{form.duration_minutes} minutes</strong></div><div><span>Scoring</span><strong>{isMcqForm ? "Per-question key" : `${checkpoints.length} checkpoints / ${checkpointWeight}%`}</strong></div>
+                <details className="builder-advanced"><summary>Advanced settings</summary><div className="workspace-form-grid compact"><label className="field-stack"><span>Pass score</span><input type="number" min="70" max="100" value={form.pass_score} onChange={(e) => setForm((p) => ({ ...p, pass_score: Number(e.target.value) }))} /></label><label className="field-stack"><span>Maximum attempts</span><input type="number" min="1" max="3" value={form.max_attempts} onChange={(e) => setForm((p) => ({ ...p, max_attempts: Number(e.target.value) }))} /></label></div></details>
+              </div>}
+
+              <div className="workspace-form-footer builder-footer"><button type="button" className="secondary-btn" disabled={builderStep === 1} onClick={() => setBuilderStep((step) => Math.max(1, step - 1))}>Back</button>{builderStep < 4 ? <button type="button" onClick={() => setBuilderStep((step) => Math.min(4, step + 1))}>Next</button> : <button onClick={() => createAssessment.mutate()} disabled={createAssessment.isPending || !canCreateAssessment}>{createAssessment.isPending ? "Creating..." : "Create draft"}</button>}</div>
+              {!canCreateAssessment && builderStep === 4 && <div className="workspace-form-note">Complete the required fields{isMcqForm ? "." : " and make checkpoint weights total 100%."}</div>}
               {createAssessment.isError && <div className="workspace-error">{apiErrorMessage(createAssessment.error, "The assessment could not be created. Review the fields and try again.")}</div>}
             </section>
 
@@ -803,7 +878,7 @@ export function ProviderAssessments() {
                     <option value="">Select assessment</option>
                     {filteredAssessments.map((x) => (
                       <option key={x.exam_id} value={x.exam_id}>
-                        {x.title} ({x.status}) Q:{x.question_count}
+                        {x.title} ({x.status}) {x.assessment_type === "mcq" ? `${x.question_count} questions` : `${x.checkpoint_count || 0} checkpoints`}
                       </option>
                     ))}
                   </select>
@@ -811,10 +886,18 @@ export function ProviderAssessments() {
                 {selectedExam && (
                   <div className="workspace-selection-summary workspace-span-2">
                     <strong>{selectedExam.title}</strong>
-                    <span>{selectedExam.assessment_type} | {selectedExam.status} | duration {selectedExam.duration_minutes} min</span>
+                    <span>{selectedExam.assessment_type} | {selectedExam.status} | duration {selectedExam.duration_minutes} min{selectedExam.is_certora_default ? ` | Certora default v${selectedExam.template_version}` : ""}</span>
                   </div>
                 )}
               </div>
+
+              {selectedExam?.task && (
+                <div className="assessment-definition">
+                  <div><span>Practical task</span><strong>{selectedExam.task.title}</strong><p>{selectedExam.task.description}</p></div>
+                  <div className="assessment-definition-stats"><span><strong>{Object.keys((selectedExam.task.metadata?.initial_spreadsheet_data as Record<string, unknown>) || {}).length}</strong> workbook cells</span><span><strong>{selectedExam.checkpoint_count || 0}</strong> scored checkpoints</span><span><strong>{selectedExam.task.marks}</strong> total marks</span></div>
+                  <details><summary>View answer key and checkpoints</summary><div className="key-checkpoint-list">{(selectedExam.task.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>{checkpoint.source} = {JSON.stringify(checkpoint.expected)}</small></div>)}</div></details>
+                </div>
+              )}
 
               {selectedExam && selectedExam.status !== "published" && selectedExam.assessment_type === "mcq" && (
                 <div className="workspace-builder-panel">
@@ -1062,7 +1145,7 @@ export function ProviderAssessments() {
                   <span>{formatResultDate(row.completed_at)}</span>
                   <span>{formatDuration(row.time_taken_seconds)}</span>
                   <strong className="result-score">{row.score_pct == null ? "Pending" : `${Number(row.score_pct).toFixed(1)}%`}</strong>
-                  {row.score_pct == null && row.status === "completed" ? <StatusBadge value="Needs review" /> : row.passed === true ? <StatusBadge value="Passed" /> : row.passed === false ? <StatusBadge value="Failed" /> : <StatusBadge value={row.status} />}
+                  {row.status === "review_pending" ? <StatusBadge value="Needs review" /> : row.passed === true ? <StatusBadge value="Passed" /> : row.passed === false ? <StatusBadge value="Failed" /> : <StatusBadge value={row.status} />}
                   <button type="button" className="secondary-btn" onClick={() => setReviewIssueId(row.issued_id)}>View result</button>
                 </div>
               ))}
@@ -1074,15 +1157,22 @@ export function ProviderAssessments() {
             <section className="workspace-surface result-detail-panel">
               <div className="workspace-surface-head"><div><h3>{review.data.candidate_name || review.data.candidate_email}</h3><p>{review.data.assessment_title} · Candidate result detail</p></div><button type="button" className="workspace-icon-btn" aria-label="Close result detail" onClick={() => setReviewIssueId(null)}>×</button></div>
               <div className="result-detail-summary">
-                <div><span>Score</span><strong>{review.data.score_pct == null ? "Pending" : `${Number(review.data.score_pct).toFixed(1)}%`}</strong></div>
-                <div><span>Outcome</span><strong>{review.data.passed == null ? "Manual review" : review.data.passed ? "Passed" : "Failed"}</strong></div>
+                <div><span>Provisional score</span><strong>{review.data.result?.provisional_score_pct == null ? "Manual" : `${Number(review.data.result.provisional_score_pct).toFixed(1)}%`}</strong></div>
+                <div><span>Review status</span><strong>{review.data.status === "reviewed" ? "Finalized" : "Awaiting decision"}</strong></div>
                 <div><span>Time taken</span><strong>{formatDuration(review.data.submission?.time_taken_seconds)}</strong></div>
                 <div><span>Submitted</span><strong>{formatResultDate(review.data.submission?.submitted_at)}</strong></div>
               </div>
               <div className="review-panels">
-                <div className="review-panel"><strong>Scoring breakdown</strong><pre>{JSON.stringify(review.data.result?.detail || review.data.result || {}, null, 2)}</pre></div>
+                <div className="review-panel checkpoint-review"><strong>Checkpoint evidence</strong>{Array.isArray(review.data.result?.detail?.checkpoints) ? review.data.result.detail.checkpoints.map((checkpoint: { id: string; label: string; matched: boolean; earned_weight: number; weight: number; actual: unknown; expected: unknown }) => <div className={`checkpoint-review-row ${checkpoint.matched ? "matched" : "missed"}`} key={checkpoint.id}><div><strong>{checkpoint.label}</strong><small>{checkpoint.matched ? "Matched" : "Needs review"}</small></div><span>{checkpoint.earned_weight}/{checkpoint.weight}</span><small>Submitted: {JSON.stringify(checkpoint.actual)} | Key: {JSON.stringify(checkpoint.expected)}</small></div>) : <pre>{JSON.stringify(review.data.result?.detail || review.data.result || {}, null, 2)}</pre>}</div>
                 <div className="review-panel"><strong>Candidate submission</strong><pre>{JSON.stringify(review.data.submission?.submitted_data || {}, null, 2)}</pre></div>
                 <div className="review-panel"><strong>Activity and proctoring</strong><pre>{JSON.stringify(review.data.submission?.proctoring_events || [], null, 2)}</pre></div>
+              </div>
+              <div className="review-decision">
+                <div><strong>Recruiter decision</strong><span>Confirm or adjust the provisional score. Candidates do not receive this result from the assessment session.</span></div>
+                <label className="field-stack"><span>Final score</span><div className="input-with-suffix"><input type="number" min="0" max="100" value={reviewScore} onChange={(event) => setReviewScore(Number(event.target.value))} /><span>%</span></div></label>
+                <label className="field-stack review-notes"><span>Private review notes</span><textarea rows={3} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} placeholder="Evidence, concerns, or reason for adjustment" /></label>
+                <button type="button" onClick={() => finalizeReview.mutate()} disabled={finalizeReview.isPending}>{finalizeReview.isPending ? "Finalizing..." : review.data.status === "reviewed" ? "Update final review" : "Finalize review"}</button>
+                {finalizeReview.isError && <div className="workspace-error">{apiErrorMessage(finalizeReview.error, "The review could not be finalized.")}</div>}
               </div>
             </section>
           )}

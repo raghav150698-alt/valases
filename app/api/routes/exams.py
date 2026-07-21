@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 
 import random
+import re
 import secrets
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -36,6 +37,7 @@ from app.models.entities import (
 )
 from app.schemas import AssessmentSubmissionIn, AssessmentTaskIn, ExamCreate, ExamOut, ExamRuleUpdate, ExamUpdate, QuestionCreate
 from app.services.ai_review import upsert_ai_review
+from app.services.default_assessments import install_default_assessment_for_provider, seed_default_assessment_templates
 from app.services.notifications import send_email
 from app.services.rule_engine import evaluate_exam_rules
 
@@ -154,6 +156,11 @@ class IssuedCandidateConsentRequest(BaseModel):
     recording: bool = False
 
 
+class AssessmentReviewFinalizeRequest(BaseModel):
+    score_pct: float = Field(ge=0, le=100)
+    reviewer_notes: str = Field(default="", max_length=4000)
+
+
 def _create_issued_candidate_token(issue_id: int, session_token: str) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
@@ -269,6 +276,83 @@ def _values_match(actual, expected, tolerance: float = 0.0) -> bool:
     return str(actual).strip() == str(expected).strip()
 
 
+def _checkpoint_source_value(source: str, submitted_data: dict):
+    if source == "code":
+        return submitted_data.get("code") or ""
+    if source == "identified_red_flags":
+        return submitted_data.get("identified_red_flags") or []
+    if source.startswith("field:"):
+        return (submitted_data.get("entered_form_values") or {}).get(source.split(":", 1)[1])
+    if source.startswith("spreadsheet_value:"):
+        cell = source.split(":", 1)[1]
+        calculated = submitted_data.get("calculated_values_json") or {}
+        final_sheet = submitted_data.get("final_sheet_json") or {}
+        qualified = cell if "!" in cell else f"Assessment!{cell}"
+        return calculated.get(cell, calculated.get(qualified, final_sheet.get(cell, final_sheet.get(qualified))))
+    if source.startswith("spreadsheet_formula:"):
+        cell = source.split(":", 1)[1]
+        formulas = submitted_data.get("formulas_json") or {}
+        final_sheet = submitted_data.get("final_sheet_json") or {}
+        qualified = cell if "!" in cell else f"Assessment!{cell}"
+        return formulas.get(cell, formulas.get(qualified, final_sheet.get(cell, final_sheet.get(qualified))))
+    return submitted_data.get(source)
+
+
+def _checkpoint_matches(actual, checkpoint: dict) -> tuple[bool, str]:
+    expected = checkpoint.get("expected")
+    comparator = str(checkpoint.get("comparator") or "exact")
+    if comparator == "numeric":
+        matched = _values_match(actual, expected, float(checkpoint.get("tolerance") or 0))
+    elif comparator == "contains":
+        matched = str(expected).casefold() in str(actual or "").casefold()
+    elif comparator == "contains_all":
+        haystack = str(actual or "").casefold()
+        matched = all(str(item).casefold() in haystack for item in (expected or []))
+    elif comparator == "regex":
+        try:
+            matched = bool(re.search(str(expected or ""), str(actual or ""), flags=re.IGNORECASE | re.MULTILINE))
+        except re.error:
+            matched = False
+    elif comparator == "set_contains_all":
+        actual_set = {str(item).strip().casefold() for item in (actual or [])}
+        matched = all(str(item).strip().casefold() in actual_set for item in (expected or []))
+    else:
+        matched = _values_match(actual, expected, float(checkpoint.get("tolerance") or 0))
+    return matched, "Matched" if matched else "Not matched"
+
+
+def _evaluate_checkpoints(task: AssessmentTask, submitted_data: dict) -> tuple[float | None, dict] | None:
+    grading = task.grading_config_json or {}
+    checkpoints = grading.get("checkpoints") if isinstance(grading, dict) else None
+    if not isinstance(checkpoints, list) or not checkpoints:
+        return None
+    total_weight = sum(max(0.0, float(item.get("weight") or 0)) for item in checkpoints if isinstance(item, dict))
+    if total_weight <= 0:
+        return None
+    earned_weight = 0.0
+    results = []
+    for index, checkpoint in enumerate(checkpoints):
+        if not isinstance(checkpoint, dict):
+            continue
+        weight = max(0.0, float(checkpoint.get("weight") or 0))
+        actual = _checkpoint_source_value(str(checkpoint.get("source") or ""), submitted_data)
+        matched, explanation = _checkpoint_matches(actual, checkpoint)
+        if matched:
+            earned_weight += weight
+        results.append({
+            "id": checkpoint.get("id") or f"checkpoint-{index + 1}",
+            "label": checkpoint.get("label") or f"Checkpoint {index + 1}",
+            "weight": weight,
+            "earned_weight": weight if matched else 0,
+            "matched": matched,
+            "actual": actual,
+            "expected": checkpoint.get("expected"),
+            "explanation": explanation,
+        })
+    score = round((earned_weight / total_weight) * float(task.marks or 0), 2)
+    return score, {"evaluation_mode": grading.get("evaluation_mode") or "deterministic", "earned_weight": earned_weight, "total_weight": total_weight, "checkpoints": results}
+
+
 def _score_spreadsheet_submission(task: AssessmentTask, submitted_data: dict) -> tuple[float, dict]:
     total_marks = float(task.marks or 0)
     expected = task.expected_output_json or {}
@@ -311,28 +395,17 @@ def _score_task_submission(task: AssessmentTask, submitted_data: dict) -> tuple[
     expected = task.expected_output_json or {}
     grading = task.grading_config_json or {}
     task_type = str(task.type or "")
+    checkpoint_result = _evaluate_checkpoints(task, submitted_data)
+    if checkpoint_result:
+        score, detail = checkpoint_result
+        manual_required = bool(grading.get("manual_review_required", False))
+        return score, ("manual_review" if manual_required else "auto_scored"), detail
     if task_type == AssessmentType.CODING.value:
-        results = submitted_data.get("test_case_results")
-        if isinstance(results, list) and results:
-            passed = sum(1 for r in results if bool(r.get("passed")))
-            score = round((passed / len(results)) * total_marks, 2)
-            return score, "auto_scored", {"passed_tests": passed, "total_tests": len(results)}
-        tests = expected.get("test_cases") if isinstance(expected, dict) else []
-        if isinstance(tests, list) and tests:
-            code = str(submitted_data.get("code") or "")
-            mock_results = []
-            for test in tests:
-                marker = str(test.get("expected_output") or "").strip()
-                passed = bool(marker and marker in code)
-                mock_results.append({"name": test.get("name") or "test", "passed": passed})
-            passed = sum(1 for r in mock_results if r["passed"])
-            score = round((passed / len(mock_results)) * total_marks, 2)
-            return score, "auto_scored", {"mock": True, "test_case_results": mock_results}
-        return 0.0, "auto_scored", {"mock": True, "message": "No test cases configured"}
+        return None, "manual_review", {"message": "No trusted deterministic coding checkpoints are configured"}
     if task_type == AssessmentType.SPREADSHEET.value:
         score, detail = _score_spreadsheet_submission(task, submitted_data)
         return score, "auto_scored", detail
-    if task_type == AssessmentType.TAX_SIMULATOR.value:
+    if task_type in {AssessmentType.ACCOUNTING.value, AssessmentType.TAX_SIMULATOR.value}:
         entered = submitted_data.get("entered_form_values") or {}
         expected_values = expected.get("expected_form_values") or {}
         value_score, value_detail = _score_expected_mapping(entered, expected_values, total_marks * 0.65)
@@ -450,6 +523,67 @@ def _safe_send_assessment_issue_email(
         return send_email(to_email, subject, body, html_body=html_body)
     except Exception as exc:
         return {"sent": False, "reason": str(exc)}
+
+
+@router.get("/default-library")
+def default_assessment_library(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    del current_user
+    output = []
+    for template_row in seed_default_assessment_templates(db):
+        template = template_row.definition_json or {}
+        task = template.get("task") or {}
+        checkpoints = (task.get("grading_config") or {}).get("checkpoints") or []
+        output.append({
+            "id": template["id"],
+            "title": template["title"],
+            "summary": template["summary"],
+            "assessment_type": template["assessment_type"],
+            "duration_minutes": template["duration_minutes"],
+            "pass_score": template["pass_score"],
+            "topics": template["topics"],
+            "checkpoint_count": len(checkpoints) or len(template.get("questions") or []),
+            "question_count": len(template.get("questions") or []),
+            "review_required": bool((task.get("grading_config") or {}).get("manual_review_required", False)),
+            "version": template_row.version,
+            "storage": "database",
+        })
+    db.commit()
+    return output
+
+
+@router.get("/default-library/{template_id}")
+def get_default_assessment_detail(
+    template_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    del current_user
+    template_row = next((row for row in seed_default_assessment_templates(db) if row.template_key == template_id and row.is_active), None)
+    if not template_row:
+        raise HTTPException(status_code=404, detail="Default assessment not found")
+    db.commit()
+    return {**(template_row.definition_json or {}), "version": template_row.version, "storage": "database"}
+
+
+@router.post("/default-library/{template_id}/install", status_code=status.HTTP_201_CREATED)
+def install_default_assessment(
+    template_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    profile = _provider_profile_or_404(db, current_user.id)
+    try:
+        exam, template = install_default_assessment_for_provider(db, profile, template_id)
+        return {"id": exam.id, "title": exam.title, "assessment_type": exam.assessment_type, "status": exam.status, "installed_from": template.template_key, "template_version": template.version}
+    except KeyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Default assessment not found") from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to install default assessment: {exc.__class__.__name__}") from exc
 
 
 @router.post("", response_model=ExamOut, status_code=status.HTTP_201_CREATED)
@@ -1073,6 +1207,50 @@ def review_issued_assessment_attempt(
     }
 
 
+@router.post("/issued/{issue_id}/review/finalize")
+def finalize_issued_assessment_review(
+    issue_id: int,
+    payload: AssessmentReviewFinalizeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    issue = db.get(AssessmentIssue, issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issued assessment not found")
+    if current_user.role != UserRole.ADMIN and int(issue.issuer_user_id) != int(current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    exam = db.get(Exam, issue.exam_id)
+    submission = db.scalar(
+        select(AssessmentSubmission)
+        .where(AssessmentSubmission.issue_id == issue.id)
+        .order_by(AssessmentSubmission.id.desc()),
+    )
+    if not exam or not submission:
+        raise HTTPException(status_code=409, detail="No candidate submission is available for review")
+    score_pct = round(float(payload.score_pct), 2)
+    total_marks = float(exam.total_marks or 0)
+    final_marks = round((score_pct / 100.0) * total_marks, 2) if total_marks > 0 else None
+    submission.manual_score = final_marks
+    submission.score = final_marks
+    submission.status = "reviewed"
+    issue.score_pct = score_pct
+    issue.passed = score_pct >= float(exam.pass_score or 70)
+    issue.status = "reviewed"
+    result = issue.result_json if isinstance(issue.result_json, dict) else {}
+    result["review"] = {
+        "reviewer_user_id": current_user.id,
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+        "score_pct": score_pct,
+        "passed": issue.passed,
+        "notes": payload.reviewer_notes.strip(),
+    }
+    issue.result_json = result
+    db.add(submission)
+    db.add(issue)
+    db.commit()
+    return {"status": issue.status, "score_pct": issue.score_pct, "passed": issue.passed}
+
+
 @router.get("/catalog/published")
 def list_published_assessment_catalog(
     q: str = Query(default="", max_length=120),
@@ -1114,7 +1292,7 @@ def list_published_assessment_catalog(
             select(AssessmentIssue.exam_id, func.count(AssessmentIssue.id).label("count"))
             .where(
                 AssessmentIssue.issuer_user_id == current_user.id,
-                AssessmentIssue.status == "completed",
+                AssessmentIssue.status.in_(["completed", "manual_review", "review_pending", "reviewed"]),
             )
             .group_by(AssessmentIssue.exam_id),
         ).all()
@@ -1176,7 +1354,7 @@ def issued_candidate_login_by_key(access_key: str, payload: IssuedCandidateLogin
     now = datetime.now(timezone.utc)
     if _is_expired(issue.access_expires_at):
         raise HTTPException(status_code=401, detail="Credentials expired. Ask issuer for re-issue.")
-    if issue.credential_used_at and issue.status in {"completed", "manual_review"}:
+    if issue.credential_used_at and issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
         raise HTTPException(status_code=401, detail="Credentials already used. Ask issuer for re-issue.")
     session_token = secrets.token_urlsafe(32)
     issue.credential_used_at = issue.credential_used_at or now
@@ -1200,8 +1378,8 @@ def issued_candidate_get_assessment(
     exam = db.get(Exam, issue.exam_id)
     if not exam:
         raise HTTPException(status_code=404, detail="Assessment not found")
-    if issue.status in {"completed", "manual_review"}:
-        return {"status": "completed", "score_pct": issue.score_pct, "passed": issue.passed}
+    if issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
+        return {"status": "submitted", "message": "Your assessment has been submitted for recruiter review."}
     assessment_type = str(exam.assessment_type or AssessmentType.MCQ.value)
     task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == exam.id)) if assessment_type != AssessmentType.MCQ.value else None
     questions = _questions_for_issued_attempt(db, issue, exam) if assessment_type == AssessmentType.MCQ.value else []
@@ -1242,7 +1420,7 @@ def issued_candidate_consent(
     db: Session = Depends(get_db),
 ):
     issue = _issued_issue_from_bearer_token(authorization, db)
-    if issue.status in {"completed", "manual_review", "terminated"}:
+    if issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
         raise HTTPException(status_code=409, detail="Assessment is no longer active")
     state = _issued_proctoring_state(issue)
     state["consent"] = {
@@ -1272,7 +1450,7 @@ def issued_candidate_proctor_event(
     The fifth warning terminates the attempt and forces manual review.
     """
     issue = _issued_issue_from_bearer_token(authorization, db)
-    if issue.status in {"completed", "manual_review", "terminated"}:
+    if issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
         return {"warning_count": 0, "should_terminate": True, "status": issue.status}
 
     severity = str(payload.severity or "warning").strip().lower()
@@ -1311,7 +1489,7 @@ def issued_candidate_submit(
     db: Session = Depends(get_db),
 ):
     issue = _issued_issue_from_bearer_token(authorization, db)
-    if issue.status in {"completed", "manual_review"}:
+    if issue.status in {"completed", "manual_review", "review_pending", "reviewed"}:
         raise HTTPException(status_code=409, detail="Assessment already submitted")
     proctoring_state = _issued_proctoring_state(issue)
     forced_manual_review = bool(proctoring_state.get("terminated"))
@@ -1332,10 +1510,8 @@ def issued_candidate_submit(
         submitted_data = payload.submitted_data or {}
         auto_score, submission_status, score_detail = _score_task_submission(task, submitted_data)
         score_pct = round((float(auto_score or 0) / float(task.marks or 1)) * 100.0, 2) if auto_score is not None and float(task.marks or 0) > 0 else None
-        passed = bool(score_pct is not None and score_pct >= float(exam.pass_score or 70)) if submission_status != "manual_review" else None
         if forced_manual_review:
             submission_status = "manual_review"
-            passed = None
         submission = AssessmentSubmission(
             assessment_id=exam.id,
             candidate_id=issue.candidate_user_id,
@@ -1345,34 +1521,31 @@ def issued_candidate_submit(
             score=auto_score,
             auto_score=auto_score,
             manual_score=None,
-            status=submission_status,
+            status="review_pending",
             started_at=issue.started_at,
             submitted_at=submitted_at,
             time_taken_seconds=payload.time_taken_seconds,
             proctoring_events_json=recorded_events,
         )
         db.add(submission)
-        issue.status = "manual_review" if forced_manual_review else ("completed" if submission_status != "manual_review" else "manual_review")
-        issue.score_pct = score_pct
-        issue.passed = passed
+        issue.status = "review_pending"
+        issue.score_pct = None
+        issue.passed = None
         issue.completed_at = submitted_at
         issue.result_json = {
             "assessment_type": assessment_type,
-            "score": auto_score,
-            "score_pct": score_pct,
-            "status": submission_status,
+            "provisional_score": auto_score,
+            "provisional_score_pct": score_pct,
+            "status": "review_pending",
+            "automatic_status": submission_status,
             "detail": score_detail,
             "proctoring": proctoring_state,
         }
         db.add(issue)
         db.commit()
         return {
-            "status": issue.status,
-            "score_pct": score_pct,
-            "passed": passed,
-            "score": auto_score,
-            "manual_review": submission_status == "manual_review" or forced_manual_review,
-            "detail": score_detail,
+            "status": "submitted",
+            "message": "Your assessment has been submitted for recruiter review.",
         }
 
     questions = _questions_for_issued_attempt(db, issue, exam)
@@ -1398,12 +1571,11 @@ def issued_candidate_submit(
             awarded_marks -= float(q.negative_marks or 0)
 
     percentage = round((awarded_marks / total_marks) * 100.0, 2) if total_marks > 0 else 0.0
-    passed = bool(percentage >= float(exam.pass_score or 70))
-    issue.status = "manual_review" if forced_manual_review else "completed"
-    issue.score_pct = percentage
-    issue.passed = None if forced_manual_review else passed
+    issue.status = "review_pending"
+    issue.score_pct = None
+    issue.passed = None
     issue.completed_at = submitted_at
-    issue.result_json = {"correct_count": correct_count, "question_count": len(questions), "awarded_marks": awarded_marks, "total_marks": total_marks, "proctoring": proctoring_state}
+    issue.result_json = {"provisional_score_pct": percentage, "detail": {"correct_count": correct_count, "question_count": len(questions), "awarded_marks": awarded_marks, "total_marks": total_marks}, "proctoring": proctoring_state}
     db.add(
         AssessmentSubmission(
             assessment_id=exam.id,
@@ -1413,7 +1585,7 @@ def issued_candidate_submit(
             submitted_data_json={"answers": payload.answers or {}},
             score=awarded_marks,
             auto_score=awarded_marks,
-            status="manual_review" if forced_manual_review else "auto_scored",
+            status="review_pending",
             started_at=issue.started_at,
             submitted_at=submitted_at,
             time_taken_seconds=payload.time_taken_seconds,
@@ -1424,11 +1596,7 @@ def issued_candidate_submit(
     db.commit()
 
     return {
-        "status": issue.status,
-        "score_pct": percentage,
-        "passed": None if forced_manual_review else passed,
-        "manual_review": forced_manual_review,
-        "correct_count": correct_count,
-        "question_count": len(questions),
+        "status": "submitted",
+        "message": "Your assessment has been submitted for recruiter review.",
     }
 

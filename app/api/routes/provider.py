@@ -16,6 +16,7 @@ from app.db.session import get_db
 from app.models.entities import (
     ApprovalStatus,
     AssessmentIssue,
+    AssessmentTemplate,
     Certificate,
     Course,
     CourseComment,
@@ -34,6 +35,7 @@ from app.models.entities import (
     ProviderDocument,
     ProviderCourseDraft,
     ProviderProfile,
+    ProviderAssessmentTemplateInstall,
     ProviderType,
     Question,
     Resource,
@@ -63,6 +65,8 @@ from app.schemas import (
 )
 from app.live_ws import signal_manager
 from app.services.certificates import ensure_certificate_pdf, safe_certificate_verification_url
+from app.services.default_assessments import ensure_provider_default_assessments
+from app.services.default_assessments import SUPERSEDED_TEMPLATE_PREFIX
 from app.services.identity_verification import verify_identity_via_api
 from app.services.media_storage import (
     delete_storage_reference,
@@ -1079,10 +1083,12 @@ def provider_assessments(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     provider = _provider_or_404(db, current_user.id)
+    ensure_provider_default_assessments(db, provider)
     query = select(Exam, Course).join(Course, Course.id == Exam.course_id)
     if current_user.role != UserRole.ADMIN:
         query = query.where(Course.provider_id == provider.id)
     rows = db.execute(query).all()
+    rows = [(exam, course) for exam, course in rows if not str(exam.assessment_about or "").startswith(SUPERSEDED_TEMPLATE_PREFIX)]
     question_counts = {
         exam_id: count
         for exam_id, count in db.execute(
@@ -1099,7 +1105,7 @@ def provider_assessments(
         int(exam_id): int(count)
         for exam_id, count in db.execute(
             select(AssessmentIssue.exam_id, func.count(AssessmentIssue.id))
-            .where(AssessmentIssue.status.in_(["completed", "manual_review"]))
+            .where(AssessmentIssue.status.in_(["completed", "manual_review", "review_pending", "reviewed"]))
             .group_by(AssessmentIssue.exam_id),
         ).all()
     }
@@ -1107,6 +1113,22 @@ def provider_assessments(
         task.assessment_id: task
         for task in db.scalars(select(AssessmentTask).where(AssessmentTask.assessment_id.in_([exam.id for exam, _ in rows]))).all()
     } if rows else {}
+    template_installs = {
+        install.exam_id: install
+        for install in db.scalars(
+            select(ProviderAssessmentTemplateInstall).where(
+                ProviderAssessmentTemplateInstall.provider_id == provider.id,
+            ),
+        ).all()
+    }
+    templates_by_id = {
+        template.id: template
+        for template in db.scalars(
+            select(AssessmentTemplate).where(
+                AssessmentTemplate.id.in_([install.template_id for install in template_installs.values()]),
+            ),
+        ).all()
+    } if template_installs else {}
     return [
         {
             "exam_id": exam.id,
@@ -1129,6 +1151,10 @@ def provider_assessments(
             "questions_per_attempt": exam.questions_per_attempt,
             "total_marks": exam.total_marks,
             "question_count": int(question_counts.get(exam.id, 0)),
+            "checkpoint_count": len((task_by_exam[exam.id].grading_config_json or {}).get("checkpoints") or []) if exam.id in task_by_exam else 0,
+            "is_certora_default": exam.id in template_installs,
+            "template_key": templates_by_id.get(template_installs[exam.id].template_id).template_key if exam.id in template_installs and templates_by_id.get(template_installs[exam.id].template_id) else None,
+            "template_version": template_installs[exam.id].template_version if exam.id in template_installs else None,
             "issued_count": int(issued_counts.get(exam.id, 0)),
             "taken_count": int(taken_counts.get(exam.id, 0)),
             "task": (

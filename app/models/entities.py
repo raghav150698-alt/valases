@@ -47,6 +47,7 @@ class AssessmentType(StrEnum):
     MCQ = "mcq"
     CODING = "coding"
     SPREADSHEET = "spreadsheet"
+    ACCOUNTING = "accounting"
     TAX_SIMULATOR = "tax_simulator"
     CASE_STUDY = "case_study"
 
@@ -524,6 +525,32 @@ class AssessmentTask(Base):
     grading_config_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AssessmentTemplate(Base):
+    __tablename__ = "assessment_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    template_key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    title: Mapped[str] = mapped_column(String(255), index=True)
+    assessment_type: Mapped[str] = mapped_column(String(30), index=True)
+    definition_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ProviderAssessmentTemplateInstall(Base):
+    __tablename__ = "provider_assessment_template_installs"
+    __table_args__ = (UniqueConstraint("provider_id", "template_id", name="uq_provider_assessment_template_install"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    provider_id: Mapped[int] = mapped_column(ForeignKey("providers.id"), index=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("assessment_templates.id"), index=True)
+    template_version: Mapped[int] = mapped_column(Integer, default=1)
+    exam_id: Mapped[int] = mapped_column(ForeignKey("exams.id"), index=True)
+    installed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class AssessmentSubmission(Base):

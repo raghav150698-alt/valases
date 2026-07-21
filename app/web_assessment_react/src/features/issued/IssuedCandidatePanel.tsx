@@ -207,11 +207,11 @@ export function IssuedCandidatePanel() {
       ? (excelSubmission || { final_sheet_json: {}, formulas_json: {}, calculated_values_json: {}, activity_log: [] })
       : paper.assessment_type === "coding"
         ? { code: taskResponse, attachment_url: taskFileLink }
-        : paper.assessment_type === "tax_simulator"
+        : paper.assessment_type === "tax_simulator" || paper.assessment_type === "accounting"
           ? { entered_form_values: taxValues, identified_red_flags: identifiedFlags.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean), notes: taskResponse, attachment_url: taskFileLink }
           : { response_text: taskResponse, attachment_url: taskFileLink };
     try {
-      const response = await issuedApi<{ passed: boolean; score_pct: number; status: string }>("POST", "/exams/issued/submit", {
+      const response = await issuedApi<{ status: string; message: string }>("POST", "/exams/issued/submit", {
         answers: Object.fromEntries(Object.entries(answers).map(([qid, selected]) => [qid, selected])),
         submitted_data: submittedData,
         proctoring_events: proctorEvents,
@@ -226,7 +226,7 @@ export function IssuedCandidatePanel() {
             ? "Your session ended after the assessment integrity warning limit was reached. Your work was sent for review."
             : endReason === "manual"
               ? "You ended this assessment. Your completed work was submitted for review."
-          : `Thank you. Your assessment was submitted successfully with status: ${response.status}.`,
+          : response.message || "Thank you. Your assessment was submitted successfully for recruiter review.",
       });
     } catch {
       if (endReason) {
@@ -525,13 +525,19 @@ export function IssuedCandidatePanel() {
                   </div>
                 )}
               </div>
-              {paper.assessment_type === "tax_simulator" && Array.isArray(paper.task.metadata?.form_fields) && (
+              {["tax_simulator", "accounting"].includes(paper.assessment_type) && Array.isArray(paper.task.metadata?.form_fields) && (
                 <div className="task-response-panel">
-                  <strong>Form values</strong>
+                  <strong>{paper.assessment_type === "accounting" ? "Close outputs" : "Return values"}</strong>
                   <div className="workspace-form-grid compact">
                     {(paper.task.metadata.form_fields as string[]).map((field) => <label key={field} className="field-stack"><span>{field}</span><input value={taxValues[field] || ""} onChange={(event) => setTaxValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}
                   </div>
-                  <label className="field-stack"><span>Red flags identified</span><textarea rows={3} value={identifiedFlags} onChange={(event) => setIdentifiedFlags(event.target.value)} placeholder="One item per line" /></label>
+                  {Array.isArray(paper.task.metadata?.red_flag_options) ? <fieldset className="task-flag-options"><legend>Exceptions identified</legend>{(paper.task.metadata.red_flag_options as string[]).map((flag) => {
+                    const selected = identifiedFlags.split(/\r?\n/).includes(flag);
+                    return <label key={flag}><input type="checkbox" checked={selected} onChange={(event) => {
+                      const currentFlags = identifiedFlags.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+                      setIdentifiedFlags((event.target.checked ? [...currentFlags, flag] : currentFlags.filter((value) => value !== flag)).join("\n"));
+                    }} /><span>{flag}</span></label>;
+                  })}</fieldset> : <label className="field-stack"><span>Red flags identified</span><textarea rows={3} value={identifiedFlags} onChange={(event) => setIdentifiedFlags(event.target.value)} placeholder="One item per line" /></label>}
                 </div>
               )}
               <div className="task-response-panel">

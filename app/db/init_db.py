@@ -3,6 +3,7 @@ from sqlalchemy import text
 from app.db.session import SessionLocal, engine
 from app.models.entities import Base, ProctorDatasetSource
 from app.services.account_rules import sync_existing_accounts
+from app.services.default_assessments import seed_default_assessment_templates
 
 
 def _migrate_proctor_training_feedback_nullable_attempt_id(conn) -> None:
@@ -525,6 +526,8 @@ def init_db() -> None:
     # Backfill and normalize existing accounts to current role/approval rules, then sync Firebase claims.
     db = SessionLocal()
     try:
+        seed_default_assessment_templates(db)
+        db.commit()
         default_source = db.query(ProctorDatasetSource).filter(ProctorDatasetSource.name == "oep_video_features").first()
         if not default_source:
             db.add(

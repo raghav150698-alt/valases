@@ -1,5 +1,5 @@
 import { useForm } from "react-hook-form";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { api } from "../../lib/api";
@@ -38,6 +38,9 @@ function humanizeAuthError(err: unknown) {
   const responseDetail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
   const message = responseDetail || (err instanceof Error ? err.message : "Unable to sign in.");
   const normalized = String(message).toLowerCase();
+  if (normalized.includes("invalid login credentials") || normalized.includes("invalid email or password")) {
+    return "Invalid email or password. If this account was created with Google, use Continue with Google.";
+  }
   if (
     normalized.includes("winerror 10013") ||
     normalized.includes("err_blocked_by_client") ||
@@ -53,16 +56,41 @@ export function AuthPanel() {
   const { register, handleSubmit, formState } = useForm<Form>({ resolver: zodResolver(schema) });
   const setSession = useSessionStore((s) => s.setSession);
   const [error, setError] = useState("");
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+
+  const completeSupabaseSession = async (accessToken: string) => {
+    const context = await api.get("/auth/me/context", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    setSession(accessToken, context.data.role);
+  };
+
+  useEffect(() => {
+    if (!supabaseConfigured || !supabase) return;
+    let active = true;
+    void supabase.auth.getSession().then(async ({ data, error: sessionError }) => {
+      if (!active || sessionError || !data.session?.access_token) return;
+      try {
+        await completeSupabaseSession(data.session.access_token);
+      } catch (sessionCompletionError) {
+        if (active) setError(humanizeAuthError(sessionCompletionError));
+      }
+    });
+    return () => { active = false; };
+  }, []);
 
   const onSubmit = async (values: Form) => {
     setError("");
     try {
       if (supabaseConfigured && supabase) {
-        const { data } = await api.post("/auth/login", values);
-        const context = await api.get("/auth/me/context", {
-          headers: { Authorization: `Bearer ${data.access_token}` },
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
+          email: values.email.trim(),
+          password: values.password,
         });
-        setSession(data.access_token, context.data.role);
+        if (signInError || !data.session?.access_token) {
+          throw new Error(signInError?.message || "Supabase did not return a session.");
+        }
+        await completeSupabaseSession(data.session.access_token);
         return;
       }
 
@@ -101,6 +129,23 @@ export function AuthPanel() {
       setSession(data.access_token, data.role);
     } catch (err) {
       setError(humanizeAuthError(err));
+    }
+  };
+
+  const signInWithGoogle = async () => {
+    if (!supabaseConfigured || !supabase) return;
+    setError("");
+    setIsGoogleLoading(true);
+    try {
+      const redirectTo = `${window.location.origin}/assessment/`;
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo },
+      });
+      if (oauthError) throw oauthError;
+    } catch (oauthError) {
+      setError(humanizeAuthError(oauthError));
+      setIsGoogleLoading(false);
     }
   };
 
@@ -144,6 +189,13 @@ export function AuthPanel() {
               {formState.isSubmitting ? "Signing In..." : "Sign In"}
             </button>
           </div>
+          {supabaseConfigured && <>
+            <div className="auth-divider"><span>or</span></div>
+            <button className="auth-google-btn" type="button" onClick={() => void signInWithGoogle()} disabled={isGoogleLoading || formState.isSubmitting}>
+              <span className="google-mark" aria-hidden="true">G</span>
+              {isGoogleLoading ? "Opening Google..." : "Continue with Google"}
+            </button>
+          </>}
           {error && <div className="inline-error">{error}</div>}
         </form>
         <div className="auth-legal-links">
