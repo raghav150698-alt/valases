@@ -29,15 +29,6 @@ MEDIA_DIR = Path(settings.resolved_media_dir)
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 rate_limiter = InMemoryRateLimiter()
 
-if settings.cors_origins_list:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
 if settings.trusted_hosts_list:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts_list)
 
@@ -275,4 +266,16 @@ def assessment_frontend_routes(path: str):
         ),
         media_type="text/plain",
         status_code=503,
+    )
+
+
+# Keep CORS outside FastAPI's error middleware so server errors and rate-limit
+# responses remain readable by the separate candidate portal.
+if settings.cors_origins_list:
+    app = CORSMiddleware(
+        app=app,
+        allow_origins=settings.cors_origins_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
