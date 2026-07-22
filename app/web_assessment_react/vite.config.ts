@@ -18,6 +18,8 @@ export default defineConfig(({ mode }) => {
       "/student": apiTarget,
       "/provider": apiTarget,
       "/exams": apiTarget,
+      "/admin": apiTarget,
+      "/proctoring": apiTarget,
       "/tools": apiTarget,
     },
   },

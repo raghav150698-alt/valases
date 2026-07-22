@@ -65,6 +65,7 @@ function isSupabaseNetworkError(err: unknown): boolean {
 }
 
 export function AuthPanel() {
+  const legalBase = `${import.meta.env.BASE_URL}legal`;
   const { register, handleSubmit, formState } = useForm<Form>({ resolver: zodResolver(schema) });
   const setSession = useSessionStore((s) => s.setSession);
   const [error, setError] = useState("");
@@ -174,17 +175,17 @@ export function AuthPanel() {
   return (
     <section className="auth-panel">
       <div className="auth-panel-copy">
-        <span className="auth-eyebrow">Recruiter sign in</span>
-        <h1>Welcome back</h1>
-        <p>Access assessments, candidate invites, and review workflows from one secure workspace.</p>
+        <span className="auth-context-label">Recruiter workspace</span>
+        <h1>Sign in to Valases</h1>
+        <p>Manage assessments, candidate invitations, and completed submissions.</p>
         <div className="auth-trust-row">
           <div className="auth-trust-item">
-            <strong>Assessment operations</strong>
-            <span>Create and manage technical, spreadsheet, and task-based evaluations.</span>
+            <strong>Assessment delivery</strong>
+            <span>Create, issue, and monitor role-specific evaluations.</span>
           </div>
           <div className="auth-trust-item">
-            <strong>Controlled candidate access</strong>
-            <span>Candidates join through issued links instead of the recruiter login page.</span>
+            <strong>Candidate review</strong>
+            <span>Review scores, checkpoints, and integrity evidence in one place.</span>
           </div>
         </div>
       </div>
@@ -193,7 +194,7 @@ export function AuthPanel() {
         <div className="auth-card-head">
           <div>
             <strong>Sign in</strong>
-            <small>Use your recruiter workspace credentials</small>
+            <small>Use your work account</small>
           </div>
         </div>
         <form onSubmit={handleSubmit(onSubmit)} className="auth-form-grid">
@@ -221,8 +222,8 @@ export function AuthPanel() {
           {error && <div className="inline-error">{error}</div>}
         </form>
         <div className="auth-legal-links">
-          <a href="/legal/privacy-policy" target="_blank" rel="noreferrer">Privacy</a>
-          <a href="/legal/data-retention-and-deletion" target="_blank" rel="noreferrer">Data retention</a>
+          <a href={`${legalBase}/privacy-policy.html`} target="_blank" rel="noreferrer">Privacy</a>
+          <a href={`${legalBase}/data-retention-and-deletion.html`} target="_blank" rel="noreferrer">Data retention</a>
         </div>
       </div>
     </section>

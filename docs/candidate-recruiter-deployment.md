@@ -18,9 +18,13 @@ VITE_CANDIDATE_APP_URL=https://<candidate-project>.vercel.app
 DATABASE_URL=<Supabase Postgres connection string>
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<publishable key>
+SUPABASE_SECRET_KEY=<server-only secret or service-role key>
+ADMIN_EMAILS=admin@valases.com
 VITE_SUPABASE_URL=https://<project-ref>.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=<publishable key>
 ```
+
+Keep `SUPABASE_SECRET_KEY` on the recruiter/API Vercel project only. Never add it to the candidate project or prefix it with `VITE_`.
 
 Keep SMTP and other existing server-only variables on this project. Never add `DATABASE_URL`, SMTP credentials, or a Supabase secret/service-role key to the candidate project.
 

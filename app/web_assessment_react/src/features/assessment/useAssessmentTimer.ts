@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createInitialTimerState, ensureQuestionSeconds, formatClock, type TimerState, type TimingMode } from "./assessmentRuntime";
+
+import { createInitialTimerState, ensureQuestionSeconds, formatClock } from "./assessmentRuntime";
+import type { TimerState, TimingMode } from "./assessmentRuntime";
 
 type Params = {
   timingMode: TimingMode;
@@ -23,17 +25,17 @@ export function useAssessmentTimer(params: Params) {
 
   useEffect(() => {
     if (!enabled) return;
-    const id = window.setInterval(() => {
-      setState((prev) => {
+    const intervalId = window.setInterval(() => {
+      setState((previous) => {
         const next: TimerState = {
-          remainingAssessmentSec: prev.remainingAssessmentSec,
-          questionRemainingByIndex: { ...prev.questionRemainingByIndex },
-          questionTimedOutByIndex: { ...prev.questionTimedOutByIndex },
+          remainingAssessmentSec: previous.remainingAssessmentSec,
+          questionRemainingByIndex: { ...previous.questionRemainingByIndex },
+          questionTimedOutByIndex: { ...previous.questionTimedOutByIndex },
         };
         if (timingMode === "question") {
-          const left = ensureQuestionSeconds(next, questionIndex, timePerQuestionSeconds) - 1;
-          next.questionRemainingByIndex[questionIndex] = Math.max(0, left);
-          if (left <= 0 && !questionFiredRef.current[questionIndex]) {
+          const remaining = ensureQuestionSeconds(next, questionIndex, timePerQuestionSeconds) - 1;
+          next.questionRemainingByIndex[questionIndex] = Math.max(0, remaining);
+          if (remaining <= 0 && !questionFiredRef.current[questionIndex]) {
             questionFiredRef.current[questionIndex] = true;
             next.questionTimedOutByIndex[questionIndex] = true;
             queueMicrotask(onQuestionTimeUp);
@@ -41,23 +43,19 @@ export function useAssessmentTimer(params: Params) {
           return next;
         }
         next.remainingAssessmentSec = Math.max(0, next.remainingAssessmentSec - 1);
-        if (next.remainingAssessmentSec <= 0) {
-          queueMicrotask(onAssessmentTimeUp);
-        }
+        if (next.remainingAssessmentSec <= 0) queueMicrotask(onAssessmentTimeUp);
         return next;
       });
     }, 1000);
-    return () => window.clearInterval(id);
+    return () => window.clearInterval(intervalId);
   }, [enabled, onAssessmentTimeUp, onQuestionTimeUp, questionIndex, timePerQuestionSeconds, timingMode]);
 
   const display = useMemo(() => {
     if (timingMode === "question") {
-      const left = state.questionRemainingByIndex[questionIndex] ?? timePerQuestionSeconds;
-      return formatClock(left);
+      return formatClock(state.questionRemainingByIndex[questionIndex] ?? timePerQuestionSeconds);
     }
     return formatClock(state.remainingAssessmentSec);
   }, [questionIndex, state.questionRemainingByIndex, state.remainingAssessmentSec, timePerQuestionSeconds, timingMode]);
 
   return { timerState: state, timerDisplay: display };
 }
-

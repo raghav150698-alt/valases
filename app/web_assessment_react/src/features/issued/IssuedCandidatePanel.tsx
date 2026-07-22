@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useCandidateGazeProctor } from "../assessment/useCandidateGazeProctor";
 import { useAssessmentSession } from "../assessment/useAssessmentSession";
-import { useAssessmentTimer } from "../student/useAssessmentTimer";
+import { useAssessmentTimer } from "../assessment/useAssessmentTimer";
 import { ExcelAssessmentSubmission, ExcelSimulator } from "../tools/ExcelSimulator";
 import { BrandLogo } from "../../components/BrandLogo";
 
@@ -31,6 +31,7 @@ type IssuedExam = {
 };
 
 export function IssuedCandidatePanel() {
+  const legalBase = `${import.meta.env.BASE_URL}legal`;
   const [token, setToken] = useState<string>("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -90,7 +91,7 @@ export function IssuedCandidatePanel() {
     const me = response.data;
     if (me.status === "completed") {
       setPaper(null);
-      setStatus(`Already completed. Score ${Number(me.score_pct || 0).toFixed(2)}%`);
+      setStatus("This assessment has already been submitted. Results are shared only by the recruiting organization.");
       return;
     }
     setPaper(me);
@@ -412,7 +413,6 @@ export function IssuedCandidatePanel() {
                   <button type="button" className="candidate-audio-button" disabled={briefingState === "playing"} onClick={playWelcomeBriefing}>
                     {briefingState === "playing" ? "Audio briefing playing..." : briefingState === "completed" ? "Replay audio briefing" : "Play audio briefing"}
                   </button>
-                  <small>The Next button appears only after the audio finishes.</small>
                   {briefingError && <small className="candidate-login-status" role="alert">{briefingError}</small>}
                 </div>
               </div>
@@ -435,9 +435,9 @@ export function IssuedCandidatePanel() {
               <p>Your answers, submitted work, timestamps, and assessment activity are collected to administer, score, secure, and review this assessment.</p>
               <p>This session uses browser security checks and on-device camera analysis for attention and prohibited-object signals, including mobile phones. Camera frames are processed in the browser and are not recorded by this flow. Leaving fullscreen closes the assessment. Automated signals require recruiter review and are not a final employment decision.</p>
               <div className="candidate-policy-links">
-                <a href="/legal/privacy-policy" target="_blank" rel="noreferrer">Privacy policy</a>
-                <a href="/legal/data-retention-and-deletion" target="_blank" rel="noreferrer">Retention and deletion</a>
-                <a href="/legal/candidate-consent" target="_blank" rel="noreferrer">Full consent notice</a>
+                <a href={`${legalBase}/privacy-policy.html`} target="_blank" rel="noreferrer">Privacy policy</a>
+                <a href={`${legalBase}/data-retention-and-deletion.html`} target="_blank" rel="noreferrer">Retention and deletion</a>
+                <a href={`${legalBase}/candidate-consent.html`} target="_blank" rel="noreferrer">Full consent notice</a>
               </div>
               <label className="candidate-consent-check">
                 <input type="checkbox" checked={consentAccepted} disabled={isAcceptingConsent} onChange={(event) => { if (event.target.checked) { void requestFullscreen(); void acceptConsent(); } }} />

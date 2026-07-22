@@ -22,7 +22,7 @@ from app.models.entities import (
 )
 
 
-TEMPLATE_CATALOG_VERSION = 5
+TEMPLATE_CATALOG_VERSION = 6
 STANDALONE_ASSESSMENT_CATEGORY = "__standalone_assessment__"
 SUPERSEDED_TEMPLATE_PREFIX = "__platform_superseded__"
 
@@ -56,6 +56,53 @@ MCQ_QUESTIONS = [
 ]
 
 
+US_BOOKKEEPING_COMPETENCIES = [
+    {"id": "accounting-cycle", "label": "Accounting cycle and general ledger", "weight": 20, "threshold": 70},
+    {"id": "receivables-payables", "label": "Receivables, payables, and cut-off", "weight": 20, "threshold": 70},
+    {"id": "cash-controls", "label": "Cash, bank reconciliation, and controls", "weight": 20, "threshold": 70},
+    {"id": "payroll-compliance", "label": "Payroll and U.S. compliance", "weight": 20, "threshold": 70},
+    {"id": "close-reporting", "label": "Month-end close and U.S. GAAP reporting", "weight": 20, "threshold": 70},
+]
+
+
+US_BOOKKEEPING_QUESTIONS = [
+    ("accounting-cycle", "A business buys equipment for $24,000, pays $4,000 cash, and signs a note for the balance. Which entry is correct?", ["Dr Equipment 24,000; Cr Cash 4,000; Cr Notes payable 20,000", "Dr Equipment 20,000; Dr Interest expense 4,000; Cr Notes payable 24,000", "Dr Equipment 24,000; Cr Accounts payable 24,000", "Dr Cash 4,000; Dr Notes receivable 20,000; Cr Equipment 24,000"], 0, "medium"),
+    ("accounting-cycle", "A $1,250 utility bill for December is received and paid in January. Under accrual accounting, what December adjustment is required?", ["Dr Utilities expense; Cr Utilities payable", "Dr Prepaid utilities; Cr Cash", "Dr Utilities payable; Cr Utilities expense", "No December entry is required"], 0, "medium"),
+    ("accounting-cycle", "The bookkeeper posts a $900 debit to Repairs expense as $90. The credit to Cash was posted correctly. What is the trial balance difference?", ["Debits exceed credits by $810", "Credits exceed debits by $810", "Credits exceed debits by $900", "The trial balance remains balanced"], 1, "hard"),
+    ("accounting-cycle", "Which account is closed to retained earnings at year end?", ["Accounts receivable", "Accumulated depreciation", "Service revenue", "Prepaid insurance"], 2, "medium"),
+    ("accounting-cycle", "A customer deposit is received before any service is performed. How should it initially be recorded?", ["Revenue", "Unearned revenue", "Accounts receivable", "Owner contribution"], 1, "medium"),
+    ("accounting-cycle", "A reversing entry is most useful for which prior-period adjustment?", ["Purchasing equipment", "Recording an accrued payroll liability", "Issuing common stock", "Writing off a receivable"], 1, "hard"),
+
+    ("receivables-payables", "An invoice dated March 29 is FOB shipping point and the goods ship March 30 but arrive April 3. In which period should the buyer record inventory and the payable?", ["March", "April", "When the invoice is paid", "When the goods are inspected"], 0, "hard"),
+    ("receivables-payables", "Terms are 2/10, net 30 on a $15,000 invoice. The buyer pays within the discount period. What cash amount settles the invoice?", ["$14,700", "$14,850", "$15,000", "$12,000"], 0, "medium"),
+    ("receivables-payables", "A customer returns $800 of goods from a credit sale. Under a perpetual inventory system, which revenue-side entry is required?", ["Dr Sales returns and allowances 800; Cr Accounts receivable 800", "Dr Accounts receivable 800; Cr Sales revenue 800", "Dr Inventory 800; Cr Cash 800", "Dr Bad debt expense 800; Cr Allowance 800"], 0, "medium"),
+    ("receivables-payables", "Which combination most strongly indicates a duplicate vendor invoice?", ["Same vendor, invoice number, amount, and date", "Same amount from different vendors", "Same vendor with different invoice numbers", "Recurring monthly rent"], 0, "easy"),
+    ("receivables-payables", "The allowance for doubtful accounts has a $2,000 credit balance before adjustment. Required ending allowance is $7,500. What bad debt expense is recorded?", ["$5,500", "$7,500", "$9,500", "$2,000"], 0, "hard"),
+    ("receivables-payables", "A vendor statement includes an invoice that is absent from the AP ledger. What should the bookkeeper do first?", ["Pay it immediately", "Verify purchase authorization and receipt, then record it if valid", "Ignore it until the next statement", "Charge it to miscellaneous expense"], 1, "medium"),
+
+    ("cash-controls", "The bank statement balance is $52,400. Outstanding checks total $4,100 and deposits in transit total $2,700. What is the adjusted bank balance?", ["$51,000", "$55,200", "$45,600", "$53,800"], 0, "medium"),
+    ("cash-controls", "The bank collected a $6,000 customer note and charged a $50 fee. Neither item is in the books. What is the net increase to book cash?", ["$5,950", "$6,000", "$6,050", "$50"], 0, "medium"),
+    ("cash-controls", "A check for $1,260 was recorded in the cash disbursements journal as $1,620. How is book cash corrected?", ["Decrease cash by $360", "Increase cash by $360", "Increase cash by $1,260", "No correction is needed"], 1, "hard"),
+    ("cash-controls", "Which arrangement provides the strongest segregation of duties over cash receipts?", ["The cashier opens mail, records receipts, and prepares the deposit", "One employee opens mail and lists checks, another deposits, and accounting posts from the independent list", "The controller receives cash and reconciles the bank", "The AR clerk receives cash and approves credit memos"], 1, "medium"),
+    ("cash-controls", "A stale outstanding check remains on bank reconciliations for nine months. What is the best action?", ["Delete it from the reconciliation", "Investigate the payee and applicable unclaimed-property rules before voiding or reissuing", "Record miscellaneous income immediately", "Leave it outstanding indefinitely"], 1, "hard"),
+    ("cash-controls", "Which document should be compared directly with the daily bank deposit to test completeness of cash receipts?", ["The approved mailroom receipt listing or point-of-sale close report", "The vendor master file", "The fixed asset register", "The payroll register"], 0, "medium"),
+
+    ("payroll-compliance", "An employee earns $2,000 gross pay. Employee deductions are $153 FICA and $220 federal withholding. What is net pay before other deductions?", ["$1,627", "$1,780", "$1,847", "$2,373"], 0, "medium"),
+    ("payroll-compliance", "Which payroll tax is generally imposed on both the employee and employer?", ["Federal unemployment tax", "Social Security and Medicare tax", "Federal income tax withholding", "State income tax withholding"], 1, "medium"),
+    ("payroll-compliance", "Which worker payment most commonly requires Form 1099-NEC reporting, assuming the reporting threshold and other requirements are met?", ["Wages paid to an employee", "Nonemployee compensation paid to an independent contractor", "Inventory purchased from a corporation", "A customer refund"], 1, "medium"),
+    ("payroll-compliance", "Why should Form W-9 be obtained before paying a new U.S. independent contractor?", ["To authorize overtime", "To document taxpayer name, classification, and TIN for information reporting", "To calculate employee benefits", "To establish workers compensation coverage"], 1, "medium"),
+    ("payroll-compliance", "A company collected $8,400 of sales tax from customers. Which account is credited when the tax is collected?", ["Sales tax expense", "Sales tax payable", "Sales revenue", "Accounts receivable"], 1, "easy"),
+    ("payroll-compliance", "An employee is incorrectly classified as a contractor. Which risk is most direct?", ["Inventory will be overstated", "Payroll tax, wage, benefit, and reporting liabilities may be understated", "Accounts receivable will be understated", "Depreciation expense will be overstated"], 1, "hard"),
+
+    ("close-reporting", "A company pays $12,000 on October 1 for twelve months of insurance and initially records Prepaid insurance. What insurance expense is recognized through December 31?", ["$3,000", "$4,000", "$9,000", "$12,000"], 0, "medium"),
+    ("close-reporting", "Equipment costing $60,000 has a five-year life, no residual value, and was placed in service July 1. Straight-line depreciation for the first calendar year is?", ["$6,000", "$12,000", "$5,000", "$30,000"], 0, "medium"),
+    ("close-reporting", "Inventory cost is $42,000 and net realizable value is $39,500. Under U.S. GAAP lower-of-cost-and-NRV guidance for applicable inventory, what amount is reported?", ["$39,500", "$40,750", "$42,000", "$2,500"], 0, "medium"),
+    ("close-reporting", "A $7,200 annual software subscription paid December 1 was fully expensed. What adjusting entry is needed at December 31?", ["Dr Prepaid expense 6,600; Cr Software expense 6,600", "Dr Software expense 6,600; Cr Prepaid expense 6,600", "Dr Cash 7,200; Cr Revenue 7,200", "No adjustment is required"], 0, "hard"),
+    ("close-reporting", "A loan payment includes $4,500 principal and $500 interest. How does the payment affect the income statement?", ["Expense of $5,000", "Expense of $500", "Expense of $4,500", "No expense"], 1, "medium"),
+    ("close-reporting", "Which close control best supports the completeness of recorded liabilities?", ["Review unmatched receiving reports and subsequent cash disbursements", "Recalculate depreciation only", "Compare sales orders with advertising expense", "Review the fixed asset tag sequence"], 0, "hard"),
+]
+
+
 DEFAULT_ASSESSMENTS = [
     {
         "id": "financial-controls-core",
@@ -72,6 +119,39 @@ DEFAULT_ASSESSMENTS = [
             {"question_text": text, "question_type": "mcq_single_correct", "marks": 4, "negative_marks": 1,
              "options": [{"option_text": option, "is_correct": index == answer, "position": index + 1} for index, option in enumerate(options)]}
             for text, options, answer in MCQ_QUESTIONS
+        ],
+    },
+    {
+        "id": "us-accounting-bookkeeping",
+        "title": "US Accounting - Bookkeeping",
+        "summary": "Advanced U.S. bookkeeping assessment covering the general ledger, transaction cycles, controls, payroll compliance, and month-end close.",
+        "assessment_type": "mcq",
+        "duration_minutes": 60,
+        "pass_score": 75,
+        "topics": [item["label"] for item in US_BOOKKEEPING_COMPETENCIES],
+        "tools": ["Question workspace"],
+        "instructions": "Select the single best answer. Apply accrual accounting, U.S. bookkeeping conventions, and the control facts stated in each question.",
+        "about": "Rigorous bookkeeping assessment for U.S. accounting operations roles.",
+        "scoring": {
+            "method": "weighted_mcq_with_competency_checkpoints",
+            "overall_pass_score": 75,
+            "negative_marking": 0.75,
+            "checkpoints": US_BOOKKEEPING_COMPETENCIES,
+        },
+        "questions": [
+            {
+                "question_text": text,
+                "question_type": "mcq_single_correct",
+                "marks": 3,
+                "negative_marks": 0.75,
+                "competency": competency,
+                "difficulty": difficulty,
+                "options": [
+                    {"option_text": option, "is_correct": index == answer, "position": index + 1}
+                    for index, option in enumerate(options)
+                ],
+            }
+            for competency, text, options, answer, difficulty in US_BOOKKEEPING_QUESTIONS
         ],
     },
     {
@@ -308,6 +388,8 @@ def _create_exam_from_template(
                 question_type=qtype.name,
                 marks=float(question_data.get("marks") or 0),
                 negative_marks=float(question_data.get("negative_marks") or 0),
+                difficulty_tag=str(question_data.get("difficulty") or "") or None,
+                competency_tag=str(question_data.get("competency") or "") or None,
             )
             db.add(question)
             db.flush()

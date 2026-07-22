@@ -250,6 +250,7 @@ def _migrate_exam_schema_sqlite(conn) -> None:
 
     _sqlite_add_column_if_missing(conn, "questions", "negative_marks", "FLOAT DEFAULT 0")
     _sqlite_add_column_if_missing(conn, "questions", "difficulty_tag", "TEXT")
+    _sqlite_add_column_if_missing(conn, "questions", "competency_tag", "TEXT")
 
     _sqlite_add_column_if_missing(conn, "exam_rules", "min_questions", "INTEGER DEFAULT 25")
     _sqlite_add_column_if_missing(conn, "exam_rules", "min_pass_score", "FLOAT DEFAULT 60")
@@ -340,6 +341,8 @@ def _migrate_exam_schema_postgres(conn) -> None:
         "ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS assigned_question_ids JSON",
         "ALTER TABLE questions ADD COLUMN IF NOT EXISTS negative_marks FLOAT DEFAULT 0",
         "ALTER TABLE questions ADD COLUMN IF NOT EXISTS difficulty_tag VARCHAR(20)",
+        "ALTER TABLE questions ADD COLUMN IF NOT EXISTS competency_tag VARCHAR(80)",
+        "CREATE INDEX IF NOT EXISTS ix_questions_competency_tag ON questions(competency_tag)",
         "ALTER TABLE exam_rules ADD COLUMN IF NOT EXISTS min_questions INTEGER DEFAULT 25",
         "ALTER TABLE exam_rules ADD COLUMN IF NOT EXISTS min_pass_score FLOAT DEFAULT 60",
         "ALTER TABLE exam_rules ADD COLUMN IF NOT EXISTS max_easy_ratio FLOAT DEFAULT 0.70",

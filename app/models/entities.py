@@ -408,6 +408,7 @@ class Question(Base):
     marks: Mapped[float] = mapped_column(Float, default=1)
     negative_marks: Mapped[float] = mapped_column(Float, default=0)
     difficulty_tag: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    competency_tag: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
 
     options: Mapped[list["Option"]] = relationship(back_populates="question", cascade="all, delete-orphan")
 
@@ -551,6 +552,26 @@ class ProviderAssessmentTemplateInstall(Base):
     template_version: Mapped[int] = mapped_column(Integer, default=1)
     exam_id: Mapped[int] = mapped_column(ForeignKey("exams.id"), index=True)
     installed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProviderBillingAccount(Base):
+    __tablename__ = "provider_billing_accounts"
+    __table_args__ = (UniqueConstraint("provider_id", name="uq_provider_billing_account_provider"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    provider_id: Mapped[int] = mapped_column(ForeignKey("providers.id"), unique=True, index=True)
+    plan_code: Mapped[str] = mapped_column(String(40), default="trial", index=True)
+    status: Mapped[str] = mapped_column(String(30), default="trialing", index=True)
+    currency: Mapped[str] = mapped_column(String(8), default="USD")
+    monthly_price: Mapped[float] = mapped_column(Float, default=0)
+    included_assessments: Mapped[int] = mapped_column(Integer, default=25)
+    overage_price: Mapped[float] = mapped_column(Float, default=0)
+    billing_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class AssessmentSubmission(Base):

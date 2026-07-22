@@ -76,3 +76,40 @@ def verify_supabase_token(token: str | None, settings: Settings) -> dict[str, An
         "name": metadata.get("full_name") or metadata.get("name") or str(data["email"]).split("@", 1)[0],
         "role": app_metadata.get("role") or metadata.get("role") or "provider",
     }
+
+
+def ensure_supabase_user(
+    *,
+    email: str,
+    password: str,
+    full_name: str,
+    role: str,
+    settings: Settings,
+) -> dict[str, Any]:
+    """Create an auth identity when the Supabase secret key is configured."""
+    if not settings.supabase_url or not settings.supabase_secret_key:
+        return {"configured": False, "created": False, "reason": "Supabase admin provisioning is not configured."}
+    secret = settings.supabase_secret_key
+    response = httpx.post(
+        f"{settings.supabase_url.rstrip('/')}/auth/v1/admin/users",
+        headers={"apikey": secret, "Authorization": f"Bearer {secret}"},
+        json={
+            "email": email,
+            "password": password,
+            "email_confirm": True,
+            "user_metadata": {"full_name": full_name},
+            "app_metadata": {"role": role},
+        },
+        timeout=15,
+    )
+    if response.status_code in {200, 201}:
+        data = response.json()
+        return {"configured": True, "created": True, "user_id": data.get("id")}
+    try:
+        data = response.json()
+        detail = str(data.get("msg") or data.get("message") or data.get("error_description") or "")
+    except Exception:
+        detail = response.text
+    if response.status_code in {400, 422} and any(term in detail.lower() for term in {"already", "registered", "exists"}):
+        return {"configured": True, "created": False, "existing": True}
+    raise ValueError(detail or f"Supabase user provisioning failed with status {response.status_code}.")

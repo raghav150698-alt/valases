@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "../components/BrandLogo";
 import { AuthPanel } from "../features/auth/AuthPanel";
+import { AdminConsole } from "../features/admin/AdminConsole";
 import { useAssessmentSession } from "../features/assessment/useAssessmentSession";
 import { ProviderAssessments } from "../features/provider/ProviderAssessments";
 import { CodingEnv } from "../features/tools/CodingEnv";
@@ -131,7 +132,7 @@ export function App() {
   const embedded = params.get("embedded") === "1";
   const tool = String(params.get("tool") || "").trim().toLowerCase();
   const issuedAccessKey = String(params.get("issued_key") || "").trim();
-  const recruiterAuthenticated = role === "provider" || role === "admin";
+  const recruiterAuthenticated = role === "provider";
   const handleToolSubmit = useCallback(() => {
     if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
     window.dispatchEvent(new CustomEvent("valases:assessment-completed"));
@@ -186,6 +187,10 @@ export function App() {
 
   if (issuedAccessKey) {
     return <CandidatePortalRedirect accessKey={issuedAccessKey} />;
+  }
+
+  if (role === "admin") {
+    return <AdminConsole />;
   }
 
   if (!recruiterAuthenticated) {

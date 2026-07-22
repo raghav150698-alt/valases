@@ -587,7 +587,11 @@ def default_assessment_library(
     for template_row in seed_default_assessment_templates(db):
         template = template_row.definition_json or {}
         task = template.get("task") or {}
-        checkpoints = (task.get("grading_config") or {}).get("checkpoints") or []
+        checkpoints = (
+            (template.get("scoring") or {}).get("checkpoints")
+            or (task.get("grading_config") or {}).get("checkpoints")
+            or []
+        )
         output.append({
             "id": template["id"],
             "title": template["title"],
@@ -596,7 +600,7 @@ def default_assessment_library(
             "duration_minutes": template["duration_minutes"],
             "pass_score": template["pass_score"],
             "topics": template["topics"],
-            "checkpoint_count": len(checkpoints) or len(template.get("questions") or []),
+            "checkpoint_count": len(checkpoints),
             "question_count": len(template.get("questions") or []),
             "review_required": bool((task.get("grading_config") or {}).get("manual_review_required", False)),
             "version": template_row.version,
@@ -910,6 +914,8 @@ def list_questions(
                 "question_type": q.question_type,
                 "marks": q.marks,
                 "negative_marks": q.negative_marks,
+                "difficulty_tag": q.difficulty_tag,
+                "competency_tag": q.competency_tag,
                 "options": [
                     {"option_id": o.id, "option_text": o.option_text, "is_correct": o.is_correct, "position": o.position}
                     for o in options
@@ -1629,8 +1635,17 @@ def issued_candidate_submit(
     total_marks = 0.0
     awarded_marks = 0.0
     correct_count = 0
+    competency_totals: dict[str, float] = {}
+    competency_earned: dict[str, float] = {}
+    competency_correct: dict[str, int] = {}
+    competency_questions: dict[str, int] = {}
     for q in questions:
-        total_marks += float(q.marks or 0)
+        question_marks = float(q.marks or 0)
+        total_marks += question_marks
+        competency = str(q.competency_tag or "").strip()
+        if competency:
+            competency_totals[competency] = competency_totals.get(competency, 0.0) + question_marks
+            competency_questions[competency] = competency_questions.get(competency, 0) + 1
         selected_raw = payload.answers.get(str(q.id))
         selected_ids: list[int] = []
         if isinstance(selected_raw, int):
@@ -1640,10 +1655,16 @@ def issued_candidate_submit(
         correct_ids = [int(x) for x in db.scalars(select(Option.id).where(Option.question_id == q.id, Option.is_correct.is_(True))).all()]
         is_correct = set(selected_ids) == set(correct_ids) and len(correct_ids) > 0
         if is_correct:
-            awarded_marks += float(q.marks or 0)
+            awarded_marks += question_marks
             correct_count += 1
-        elif bool(exam.negative_marking):
-            awarded_marks -= float(q.negative_marks or 0)
+            if competency:
+                competency_earned[competency] = competency_earned.get(competency, 0.0) + question_marks
+                competency_correct[competency] = competency_correct.get(competency, 0) + 1
+        elif selected_ids and bool(exam.negative_marking):
+            penalty = float(q.negative_marks or 0)
+            awarded_marks -= penalty
+            if competency:
+                competency_earned[competency] = competency_earned.get(competency, 0.0) - penalty
 
     raw_percentage = round((awarded_marks / total_marks) * 100.0, 2) if total_marks > 0 else 0.0
     percentage = _integrity_adjusted_score(raw_percentage, proctoring_state) or 0.0
@@ -1651,11 +1672,40 @@ def issued_candidate_submit(
     issue.score_pct = None
     issue.passed = None
     issue.completed_at = submitted_at
+    competency_labels = {
+        "accounting-cycle": "Accounting cycle and general ledger",
+        "receivables-payables": "Receivables, payables, and cut-off",
+        "cash-controls": "Cash, bank reconciliation, and controls",
+        "payroll-compliance": "Payroll and U.S. compliance",
+        "close-reporting": "Month-end close and U.S. GAAP reporting",
+    }
+    competency_checkpoints = []
+    for competency, competency_total in competency_totals.items():
+        earned = max(0.0, competency_earned.get(competency, 0.0))
+        competency_pct = round((earned / competency_total) * 100.0, 2) if competency_total > 0 else 0.0
+        checkpoint_weight = round((competency_total / total_marks) * 100.0, 2) if total_marks > 0 else 0.0
+        competency_checkpoints.append({
+            "id": competency,
+            "label": competency_labels.get(competency, competency.replace("-", " ").title()),
+            "matched": competency_pct >= 70.0,
+            "actual": competency_pct,
+            "expected": 70.0,
+            "earned_weight": round(checkpoint_weight * competency_pct / 100.0, 2),
+            "weight": checkpoint_weight,
+            "correct_count": competency_correct.get(competency, 0),
+            "question_count": competency_questions.get(competency, 0),
+        })
     issue.result_json = {
         "raw_provisional_score_pct": raw_percentage,
         "integrity_penalty_pct": float(proctoring_state.get("integrity_penalty_pct") or 0),
         "provisional_score_pct": percentage,
-        "detail": {"correct_count": correct_count, "question_count": len(questions), "awarded_marks": awarded_marks, "total_marks": total_marks},
+        "detail": {
+            "correct_count": correct_count,
+            "question_count": len(questions),
+            "awarded_marks": awarded_marks,
+            "total_marks": total_marks,
+            "checkpoints": competency_checkpoints,
+        },
         "proctoring": proctoring_state,
     }
     db.add(

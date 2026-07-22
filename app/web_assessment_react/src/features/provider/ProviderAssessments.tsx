@@ -78,12 +78,14 @@ type DefaultAssessment = {
   pass_score: number;
   topics: string[];
   checkpoint_count: number;
+  question_count: number;
   review_required: boolean;
 };
 
 type DefaultAssessmentDetail = DefaultAssessment & {
   task?: { expected_output?: Record<string, unknown>; grading_config?: { checkpoints?: BuilderCheckpoint[] } };
-  questions?: Array<{ question_text: string; options: Array<{ option_text: string; is_correct: boolean }> }>;
+  scoring?: { checkpoints?: Array<{ id: string; label: string; weight: number; threshold: number }> };
+  questions?: Array<{ question_text: string; competency?: string; difficulty?: string; options: Array<{ option_text: string; is_correct: boolean }> }>;
 };
 
 type BuilderCheckpoint = {
@@ -267,6 +269,15 @@ export function ProviderAssessments() {
     setReviewNotes(String(review.data.result?.review?.notes || ""));
   }, [review.data]);
 
+  useEffect(() => {
+    if (!reviewIssueId) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setReviewIssueId(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [reviewIssueId]);
+
   const installDefault = useMutation({
     mutationFn: async (templateId: string) => (await api.post(`/exams/default-library/${templateId}/install`)).data,
     onSuccess: async (data) => {
@@ -312,7 +323,7 @@ export function ProviderAssessments() {
         shuffle_questions: false,
         shuffle_options: false,
         max_attempts: Number(form.max_attempts),
-        certificate_enabled: true,
+        certificate_enabled: false,
       };
       const created = (await api.post("/exams", payload)).data;
       if (assessmentType !== "mcq") {
@@ -762,13 +773,14 @@ export function ProviderAssessments() {
                   <article className="default-assessment-card" key={template.id}>
                     <div className="default-assessment-card-head"><StatusBadge value={template.assessment_type.replaceAll("_", " ")} /><span>{template.duration_minutes} min</span></div>
                     <h4>{template.title}</h4><p>{template.summary}</p>
-                    <div className="default-assessment-meta"><span>{template.checkpoint_count} scored checks</span><span>{template.pass_score}% pass mark</span></div>
+                    <div className="default-assessment-meta"><span>{template.question_count ? `${template.question_count} questions` : `${template.checkpoint_count} checkpoints`}</span><span>{template.checkpoint_count ? `${template.checkpoint_count} competency checks` : `${template.pass_score}% pass mark`}</span></div>
                     <div className="default-assessment-actions"><button type="button" className="secondary-btn" onClick={() => setPreviewDefaultId((current) => current === template.id ? null : template.id)}>View scoring key</button><button type="button" onClick={() => installDefault.mutate(template.id)} disabled={installDefault.isPending}>Use this assessment</button></div>
                   </article>
                 ))}
               </div>
               {previewDefaultId && defaultAssessmentDetail.data && <div className="default-key-preview"><div className="workspace-surface-head"><div><strong>{defaultAssessmentDetail.data.title}</strong><p>Answer key and scoring checkpoints</p></div><button type="button" className="workspace-icon-btn" aria-label="Close scoring key" onClick={() => setPreviewDefaultId(null)}>x</button></div>
-                {defaultAssessmentDetail.data.questions ? <ol>{defaultAssessmentDetail.data.questions.map((question, questionIndex) => <li key={`${question.question_text}-${questionIndex}`}><strong>{question.question_text}</strong><span>{question.options.find((option) => option.is_correct)?.option_text || "No answer configured"}</span></li>)}</ol> : <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.task?.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>{checkpoint.source} = {JSON.stringify(checkpoint.expected)}</small></div>)}</div>}
+                {(defaultAssessmentDetail.data.scoring?.checkpoints || []).length > 0 && <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.scoring?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>Minimum checkpoint score: {checkpoint.threshold}%</small></div>)}</div>}
+                {defaultAssessmentDetail.data.questions ? <ol>{defaultAssessmentDetail.data.questions.map((question, questionIndex) => <li key={`${question.question_text}-${questionIndex}`}><strong>{question.question_text}</strong><span>{question.options.find((option) => option.is_correct)?.option_text || "No answer configured"}</span>{question.competency && <small>{question.competency}{question.difficulty ? ` | ${question.difficulty}` : ""}</small>}</li>)}</ol> : <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.task?.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>{checkpoint.source} = {JSON.stringify(checkpoint.expected)}</small></div>)}</div>}
               </div>}
               {defaultAssessments.isLoading && <div className="workspace-loading">Loading default assessments...</div>}
               {installDefault.isError && <div className="workspace-error">{apiErrorMessage(installDefault.error, "The default assessment could not be added.")}</div>}
@@ -1026,55 +1038,6 @@ export function ProviderAssessments() {
               {issueNotice && <div className="workspace-success">{issueNotice}</div>}
             </section>
 
-            <section className="workspace-surface">
-              <div className="workspace-surface-head">
-                <div>
-                  <h3>Issued results</h3>
-                  <p>Track active assessments and open the review surface for completed submissions.</p>
-                </div>
-              </div>
-              <div className="issued-review-list">
-                {filteredIssued.map((row) => (
-                  <article key={`${row.internal_id}-${row.candidate_email}`} className="issued-review-card">
-                    <div>
-                      <strong>{row.assessment_title}</strong>
-                      <small>{row.candidate_email}</small>
-                    </div>
-                    <div className="issued-review-meta">
-                      <span>{row.internal_id}</span>
-                      <span>{row.status}</span>
-                      {row.score_pct != null && <span>{Number(row.score_pct).toFixed(2)}% | {row.passed ? "PASS" : "FAIL"}</span>}
-                    </div>
-                    <button type="button" onClick={() => setReviewIssueId(row.issued_id)}>Review</button>
-                  </article>
-                ))}
-              </div>
-              {review.data && (
-                <section className="review-surface">
-                  <div className="review-surface-head">
-                    <strong>Recruiter review: {review.data.assessment_title}</strong>
-                    <small>
-                      {review.data.candidate_email} | {review.data.status} | Score{" "}
-                      {review.data.score_pct == null ? "Pending" : `${Number(review.data.score_pct).toFixed(2)}%`}
-                    </small>
-                  </div>
-                  <div className="review-panels">
-                    <div className="review-panel">
-                      <strong>Scoring detail</strong>
-                      <pre>{JSON.stringify(review.data.result?.detail || {}, null, 2)}</pre>
-                    </div>
-                    <div className="review-panel">
-                      <strong>Final sheet</strong>
-                      <pre>{JSON.stringify(review.data.submission?.submitted_data?.calculated_values_json || review.data.submission?.submitted_data?.final_sheet_json || {}, null, 2)}</pre>
-                    </div>
-                    <div className="review-panel">
-                      <strong>Activity log</strong>
-                      <pre>{JSON.stringify((review.data.submission?.submitted_data?.activity_log || []).slice(-20), null, 2)}</pre>
-                    </div>
-                  </div>
-                </section>
-              )}
-            </section>
           </div>
 
           <aside className="workspace-side-column">
@@ -1153,10 +1116,11 @@ export function ProviderAssessments() {
             </div> : <EmptyState title="No matching candidates" detail="Change the filters or issue an assessment to a candidate." />}
           </section>
 
-          {review.isLoading && <div className="workspace-loading">Loading candidate result...</div>}
-          {review.data && reviewIssueId && (
-            <section className="workspace-surface result-detail-panel">
-              <div className="workspace-surface-head"><div><h3>{review.data.candidate_name || review.data.candidate_email}</h3><p>{review.data.assessment_title} · Candidate result detail</p></div><button type="button" className="workspace-icon-btn" aria-label="Close result detail" onClick={() => setReviewIssueId(null)}>×</button></div>
+          {reviewIssueId && (
+            <div className="result-review-backdrop" role="presentation" onMouseDown={() => setReviewIssueId(null)}>
+            {review.isLoading ? <section className="result-review-drawer workspace-loading" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>Loading candidate result...</section> : review.data ? (
+            <section className="workspace-surface result-detail-panel result-review-drawer" role="dialog" aria-modal="true" aria-labelledby="candidate-result-title" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="workspace-surface-head"><div><h3 id="candidate-result-title">{review.data.candidate_name || review.data.candidate_email}</h3><p>{review.data.assessment_title} | Candidate result detail</p></div><button type="button" className="workspace-icon-btn" aria-label="Close result detail" onClick={() => setReviewIssueId(null)}>x</button></div>
               <div className="result-detail-summary">
                 <div><span>Provisional score</span><strong>{review.data.result?.provisional_score_pct == null ? "Manual" : `${Number(review.data.result.provisional_score_pct).toFixed(1)}%`}</strong></div>
                 <div><span>Raw checkpoint score</span><strong>{review.data.result?.raw_provisional_score_pct == null ? "--" : `${Number(review.data.result.raw_provisional_score_pct).toFixed(1)}%`}</strong></div>
@@ -1179,6 +1143,8 @@ export function ProviderAssessments() {
                 {finalizeReview.isError && <div className="workspace-error">{apiErrorMessage(finalizeReview.error, "The review could not be finalized.")}</div>}
               </div>
             </section>
+            ) : <section className="result-review-drawer workspace-error" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>The candidate result could not be loaded.<button type="button" onClick={() => setReviewIssueId(null)}>Close</button></section>}
+            </div>
           )}
         </section>
       )}
@@ -1187,7 +1153,7 @@ export function ProviderAssessments() {
           <section className="workspace-settings-modal" role="dialog" aria-modal="true" aria-labelledby="workspace-settings-title" onMouseDown={(event) => event.stopPropagation()}>
             <div className="workspace-surface-head">
               <div><h3 id="workspace-settings-title">Workspace settings</h3><p>Organization defaults will be stored in Supabase when it is connected.</p></div>
-              <button type="button" className="workspace-icon-btn" aria-label="Close settings" onClick={() => setShowSettings(false)}>×</button>
+              <button type="button" className="workspace-icon-btn" aria-label="Close settings" onClick={() => setShowSettings(false)}>x</button>
             </div>
             <div className="workspace-form-grid compact">
               <label className="field-stack"><span>Workspace name</span><input defaultValue="Valases Recruiting" /></label>

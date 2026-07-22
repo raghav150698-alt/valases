@@ -1,8 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import csv
 import io
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.orm import Session
 
@@ -12,6 +14,8 @@ from app.models.entities import (
     AuditLog,
     BannedIdentity,
     ApprovalStatus,
+    AssessmentIssue,
+    AssessmentSubmission,
     Certificate,
     ComplaintItem,
     Course,
@@ -21,8 +25,8 @@ from app.models.entities import (
     ExamStatus,
     ModerationStatus,
     ProviderDocument,
+    ProviderBillingAccount,
     ProviderProfile,
-    UserIdentityVerification,
     ProviderType,
     ReportItem,
     Result,
@@ -41,8 +45,31 @@ from app.schemas import (
 )
 from app.services.notifications import send_email
 from app.services.account_rules import sync_existing_accounts
+from app.services.supabase_auth import ensure_supabase_user
+from app.core.config import get_settings
+from app.core.security import hash_password
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+class AdminUserCreate(BaseModel):
+    full_name: str = Field(min_length=2, max_length=200)
+    email: EmailStr
+    company_name: str = Field(min_length=2, max_length=200)
+    temporary_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class BillingAccountUpdate(BaseModel):
+    plan_code: str = Field(default="trial", max_length=40)
+    status: str = Field(default="trialing", max_length=30)
+    currency: str = Field(default="USD", max_length=8)
+    monthly_price: float = Field(default=0, ge=0)
+    included_assessments: int = Field(default=25, ge=0)
+    overage_price: float = Field(default=0, ge=0)
+    billing_email: EmailStr | None = None
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 def _audit(db: Session, actor_user_id: int | None, action: str, target_type: str, target_id: int | None, details: dict):
@@ -62,6 +89,265 @@ def _safe_send_email(to_email: str, subject: str, body: str) -> dict:
         return send_email(to_email, subject, body)
     except Exception as exc:
         return {"sent": False, "reason": str(exc)}
+
+
+def _billing_payload(account: ProviderBillingAccount | None, provider: ProviderProfile) -> dict:
+    return {
+        "provider_id": provider.id,
+        "plan_code": account.plan_code if account else "trial",
+        "status": account.status if account else "trialing",
+        "currency": account.currency if account else "USD",
+        "monthly_price": float(account.monthly_price or 0) if account else 0.0,
+        "included_assessments": int(account.included_assessments or 0) if account else 25,
+        "overage_price": float(account.overage_price or 0) if account else 0.0,
+        "billing_email": account.billing_email if account else None,
+        "current_period_start": account.current_period_start if account else None,
+        "current_period_end": account.current_period_end if account else None,
+        "notes": account.notes if account else None,
+    }
+
+
+@router.get("/workspace/overview")
+def admin_workspace_overview(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    del current_user
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    provider_users = int(db.scalar(select(func.count(User.id)).where(User.role == UserRole.PROVIDER)) or 0)
+    active_users = int(db.scalar(select(func.count(User.id)).where(User.role == UserRole.PROVIDER, User.is_active.is_(True))) or 0)
+    companies = int(db.scalar(select(func.count(ProviderProfile.id))) or 0)
+    issued_total = int(db.scalar(select(func.count(AssessmentIssue.id))) or 0)
+    issued_30d = int(db.scalar(select(func.count(AssessmentIssue.id)).where(AssessmentIssue.issued_at >= since)) or 0)
+    completed_total = int(db.scalar(select(func.count(AssessmentIssue.id)).where(AssessmentIssue.status.in_(["completed", "review_pending", "reviewed"]))) or 0)
+    pending_review = int(db.scalar(select(func.count(AssessmentIssue.id)).where(AssessmentIssue.status == "review_pending")) or 0)
+    unique_candidates = int(db.scalar(select(func.count(func.distinct(AssessmentIssue.candidate_email)))) or 0)
+    monthly_revenue = float(
+        db.scalar(
+            select(func.coalesce(func.sum(ProviderBillingAccount.monthly_price), 0)).where(
+                ProviderBillingAccount.status.in_(["active", "trialing"]),
+            ),
+        )
+        or 0
+    )
+    completion_rate = round((completed_total / issued_total) * 100.0, 1) if issued_total else 0.0
+    return {
+        "companies": companies,
+        "provider_users": provider_users,
+        "active_users": active_users,
+        "issued_total": issued_total,
+        "issued_30d": issued_30d,
+        "completed_total": completed_total,
+        "pending_review": pending_review,
+        "unique_candidates": unique_candidates,
+        "completion_rate": completion_rate,
+        "monthly_recurring_revenue": monthly_revenue,
+        "currency": "USD",
+    }
+
+
+@router.get("/workspace/companies")
+def admin_workspace_companies(
+    q: str = Query(default="", max_length=120),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    del current_user
+    needle = q.strip().lower()
+    rows = db.execute(
+        select(ProviderProfile, User)
+        .join(User, User.id == ProviderProfile.user_id)
+        .order_by(ProviderProfile.created_at.desc()),
+    ).all()
+    items = []
+    for provider, owner in rows:
+        if needle and needle not in f"{provider.display_name} {owner.full_name} {owner.email}".lower():
+            continue
+        issued_count = int(db.scalar(select(func.count(AssessmentIssue.id)).where(AssessmentIssue.issuer_user_id == owner.id)) or 0)
+        completed_count = int(
+            db.scalar(
+                select(func.count(AssessmentIssue.id)).where(
+                    AssessmentIssue.issuer_user_id == owner.id,
+                    AssessmentIssue.status.in_(["completed", "review_pending", "reviewed"]),
+                ),
+            )
+            or 0
+        )
+        billing = db.scalar(select(ProviderBillingAccount).where(ProviderBillingAccount.provider_id == provider.id))
+        items.append({
+            "provider_id": provider.id,
+            "company_name": provider.display_name,
+            "owner_user_id": owner.id,
+            "owner_name": owner.full_name,
+            "owner_email": owner.email,
+            "account_state": owner.account_state or "active",
+            "is_active": bool(owner.is_active),
+            "approval_status": provider.approval_status.value if hasattr(provider.approval_status, "value") else str(provider.approval_status),
+            "issued_count": issued_count,
+            "completed_count": completed_count,
+            "created_at": provider.created_at,
+            "billing": _billing_payload(billing, provider),
+        })
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/workspace/users")
+def admin_workspace_users(
+    q: str = Query(default="", max_length=120),
+    state: str = Query(default="all", max_length=30),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    del current_user
+    query = select(User).where(User.role.in_([UserRole.PROVIDER, UserRole.ADMIN])).order_by(User.created_at.desc())
+    users = db.scalars(query).all()
+    needle = q.strip().lower()
+    items = []
+    for user in users:
+        provider = db.scalar(select(ProviderProfile).where(ProviderProfile.user_id == user.id))
+        account_state = str(user.account_state or "active")
+        if state != "all" and account_state != state:
+            continue
+        if needle and needle not in f"{user.full_name} {user.email} {provider.display_name if provider else ''}".lower():
+            continue
+        issued_count = int(db.scalar(select(func.count(AssessmentIssue.id)).where(AssessmentIssue.issuer_user_id == user.id)) or 0)
+        items.append({
+            "user_id": user.id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "role": user.role.value,
+            "company_name": provider.display_name if provider else "Valases",
+            "provider_id": provider.id if provider else None,
+            "is_active": bool(user.is_active),
+            "account_state": account_state,
+            "issued_count": issued_count,
+            "created_at": user.created_at,
+        })
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/workspace/users", status_code=201)
+def admin_workspace_create_user(
+    payload: AdminUserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    email = str(payload.email).strip().lower()
+    if db.scalar(select(User.id).where(func.lower(func.trim(User.email)) == email)):
+        raise HTTPException(status_code=409, detail="A user with this email already exists.")
+    temporary_password = payload.temporary_password or secrets.token_urlsafe(12)
+    try:
+        auth_result = ensure_supabase_user(
+            email=email,
+            password=temporary_password,
+            full_name=payload.full_name.strip(),
+            role=UserRole.PROVIDER.value,
+            settings=get_settings(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=f"Supabase user provisioning failed: {exc}") from exc
+    user = User(
+        email=email,
+        full_name=payload.full_name.strip(),
+        password_hash=hash_password(temporary_password),
+        role=UserRole.PROVIDER,
+        is_active=True,
+        account_state="active",
+    )
+    db.add(user)
+    db.flush()
+    provider = ProviderProfile(
+        user_id=user.id,
+        provider_type=ProviderType.BUSINESS,
+        display_name=payload.company_name.strip(),
+        description="Valases recruiter organization",
+        approval_status=ApprovalStatus.APPROVED,
+        reviewed_by_admin_id=current_user.id,
+        reviewed_at=datetime.now(timezone.utc),
+    )
+    db.add(provider)
+    db.add(UserApproval(
+        user_id=user.id,
+        status=ApprovalStatus.APPROVED,
+        reviewed_by_admin_id=current_user.id,
+        reviewed_at=datetime.now(timezone.utc),
+    ))
+    db.flush()
+    db.add(ProviderBillingAccount(
+        provider_id=provider.id,
+        plan_code="trial",
+        status="trialing",
+        billing_email=email,
+        current_period_start=datetime.now(timezone.utc),
+        current_period_end=datetime.now(timezone.utc) + timedelta(days=14),
+    ))
+    _audit(db, current_user.id, "provider_user_created", "user", user.id, {"email": email, "company": provider.display_name})
+    db.commit()
+    return {
+        "user_id": user.id,
+        "provider_id": provider.id,
+        "email": email,
+        "temporary_password": temporary_password,
+        "supabase": auth_result,
+    }
+
+
+@router.get("/workspace/usage")
+def admin_workspace_usage(
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    del current_user
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = db.execute(select(ProviderProfile, User).join(User, User.id == ProviderProfile.user_id)).all()
+    items = []
+    for provider, owner in rows:
+        issued = int(db.scalar(select(func.count(AssessmentIssue.id)).where(AssessmentIssue.issuer_user_id == owner.id, AssessmentIssue.issued_at >= since)) or 0)
+        completed = int(db.scalar(select(func.count(AssessmentIssue.id)).where(AssessmentIssue.issuer_user_id == owner.id, AssessmentIssue.completed_at >= since)) or 0)
+        candidates = int(db.scalar(select(func.count(func.distinct(AssessmentIssue.candidate_email))).where(AssessmentIssue.issuer_user_id == owner.id, AssessmentIssue.issued_at >= since)) or 0)
+        submissions = int(
+            db.scalar(
+                select(func.count(AssessmentSubmission.id))
+                .join(AssessmentIssue, AssessmentIssue.id == AssessmentSubmission.issue_id)
+                .where(AssessmentIssue.issuer_user_id == owner.id, AssessmentSubmission.submitted_at >= since),
+            )
+            or 0
+        )
+        items.append({
+            "provider_id": provider.id,
+            "company_name": provider.display_name,
+            "owner_email": owner.email,
+            "issued": issued,
+            "completed": completed,
+            "submissions": submissions,
+            "unique_candidates": candidates,
+            "completion_rate": round((completed / issued) * 100.0, 1) if issued else 0.0,
+        })
+    items.sort(key=lambda item: item["issued"], reverse=True)
+    return {"days": days, "items": items}
+
+
+@router.put("/workspace/companies/{provider_id}/billing")
+def admin_workspace_update_billing(
+    provider_id: int,
+    payload: BillingAccountUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    provider = db.get(ProviderProfile, provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Company not found.")
+    account = db.scalar(select(ProviderBillingAccount).where(ProviderBillingAccount.provider_id == provider.id))
+    if not account:
+        account = ProviderBillingAccount(provider_id=provider.id)
+    for key, value in payload.model_dump().items():
+        setattr(account, key, value)
+    db.add(account)
+    _audit(db, current_user.id, "billing_account_updated", "provider", provider.id, payload.model_dump(mode="json"))
+    db.commit()
+    db.refresh(account)
+    return _billing_payload(account, provider)
 
 
 @router.post("/accounts/sync-rules")

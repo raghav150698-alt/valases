@@ -29,6 +29,7 @@ export function App() {
 }
 
 function CandidatePortalFrame({ children }: { children: ReactNode }) {
+  const legalBase = `${import.meta.env.BASE_URL}legal`;
   return (
     <div className="candidate-portal-shell">
       <header className="candidate-portal-header">
@@ -39,9 +40,9 @@ function CandidatePortalFrame({ children }: { children: ReactNode }) {
       <footer className="candidate-portal-footer">
         <span>Valases Assessments</span>
         <nav aria-label="Legal information">
-          <a href="/legal/privacy-policy">Privacy</a>
-          <a href="/legal/candidate-consent">Consent</a>
-          <a href="/legal/data-retention-and-deletion">Data retention</a>
+          <a href={`${legalBase}/privacy-policy.html`}>Privacy</a>
+          <a href={`${legalBase}/candidate-consent.html`}>Consent</a>
+          <a href={`${legalBase}/data-retention-and-deletion.html`}>Data retention</a>
         </nav>
       </footer>
     </div>
