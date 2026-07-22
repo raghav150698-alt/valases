@@ -46,6 +46,9 @@ def verify_supabase_token(token: str | None, settings: Settings) -> dict[str, An
         # endpoint while still exposing their signed access-token keys. Verify
         # the token against the project JWKS as a secure fallback.
         header = jwt.get_unverified_header(token)
+        algorithm = str(header.get("alg") or "").upper()
+        if algorithm not in {"RS256", "ES256"}:
+            raise ValueError("Supabase session uses an unsupported signing algorithm")
         jwks_response = httpx.get(f"{base_url}/auth/v1/.well-known/jwks.json", timeout=10)
         jwks_response.raise_for_status()
         keys = jwks_response.json().get("keys") or []
@@ -55,7 +58,7 @@ def verify_supabase_token(token: str | None, settings: Settings) -> dict[str, An
         data = jwt.decode(
             token,
             signing_key,
-            algorithms=[str(header.get("alg") or "RS256")],
+            algorithms=[algorithm],
             audience="authenticated",
             issuer=f"{base_url}/auth/v1",
         )
@@ -74,7 +77,9 @@ def verify_supabase_token(token: str | None, settings: Settings) -> dict[str, An
         **data,
         "uid": data.get("id"),
         "name": metadata.get("full_name") or metadata.get("name") or str(data["email"]).split("@", 1)[0],
-        "role": app_metadata.get("role") or metadata.get("role") or "provider",
+        # app_metadata is administrator-controlled; user_metadata is editable by
+        # the account holder and must never grant an application role.
+        "role": app_metadata.get("role") or "",
     }
 
 

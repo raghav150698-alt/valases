@@ -8,7 +8,11 @@ from app.core.config import get_settings
 
 # Use pbkdf2_sha256 as primary for cross-platform stability.
 # Keep bcrypt in the context so existing bcrypt hashes remain verifiable.
-pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["pbkdf2_sha256", "bcrypt"],
+    deprecated="auto",
+    pbkdf2_sha256__default_rounds=600_000,
+)
 
 
 def hash_password(password: str) -> str:
@@ -25,3 +29,8 @@ def create_access_token(subject: str, role: str) -> str:
     expire = datetime.now(timezone.utc) + expires_delta
     payload: dict[str, Any] = {"sub": subject, "role": role, "exp": expire}
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_access_token(token: str) -> dict[str, Any]:
+    settings = get_settings()
+    return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])

@@ -55,7 +55,7 @@ def _provider_or_404(db: Session, user_id: int) -> ProviderProfile:
         return profile
     except SQLAlchemyError as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Recruiter profile bootstrap failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Recruiter profile bootstrap failed") from exc
 
 
 @router.get("/workspace/assessments")

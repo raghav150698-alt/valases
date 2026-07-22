@@ -1,150 +1,122 @@
-import os
 import unittest
+from datetime import datetime, timedelta, timezone
 
-from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
-
-os.environ["AUTH_MODE"] = "dummy"
-os.environ["DATABASE_URL"] = "sqlite:///./certora.db"
-
-from app.main import app  # noqa: E402
-
-
-def _h(role: str, user_id: int) -> dict[str, str]:
-    return {
-        "X-Dummy-Role": role,
-        "X-Dummy-User-Id": str(user_id),
-        "X-Dummy-Email": f"{role}{user_id}@e2e.local",
-        "X-Dummy-Name": f"E2E {role.title()} {user_id}",
-    }
+from app.api.routes.exams import (
+    IssuedCandidateLoginRequest,
+    IssuedCandidateSubmitRequest,
+    issued_candidate_get_assessment,
+    issued_candidate_login_by_key,
+    issued_candidate_submit,
+)
+from app.core.security import hash_password
+from app.models.entities import (
+    AssessmentIssue,
+    Base,
+    Course,
+    Exam,
+    ExamStatus,
+    Option,
+    ProviderProfile,
+    ProviderType,
+    Question,
+    QuestionType,
+    User,
+    UserRole,
+)
 
 
 class AssessmentWorkflowE2ETest(unittest.TestCase):
     def setUp(self) -> None:
-        self.client = TestClient(app)
-        self.provider_headers = _h("provider", 9101)
-        self.student_headers = _h("student", 9201)
-
-    def test_complete_assessment_workflow_provider_to_result(self) -> None:
-        create_payload = {
-            "course_id": 0,
-            "title": "E2E Standalone Assessment",
-            "assessment_type": "mcq",
-            "instructions": "Answer all questions.",
-            "about": "E2E test assessment",
-            "tools": ["calculator"],
-            "topics": ["tax", "compliance", "audit"],
-            "duration_minutes": 25,
-            "timing_mode": "question",
-            "time_per_question_seconds": 25,
-            "questions_per_attempt": 25,
-            "pass_score": 70,
-            "negative_marking": False,
-            "shuffle_questions": False,
-            "shuffle_options": False,
-            "max_attempts": 3,
-            "certificate_enabled": True,
-        }
-        create_res = self.client.post("/exams", json=create_payload, headers=self.provider_headers)
-        self.assertEqual(create_res.status_code, 201, create_res.text)
-        exam_id = int(create_res.json()["id"])
-
-        for i in range(25):
-            q_payload = {
-                "question_text": f"E2E Question {i + 1}",
-                "question_type": "mcq_single_correct",
-                "marks": 1,
-                "negative_marks": 0,
-                "options": [
-                    {"option_text": f"Q{i+1} Option A", "is_correct": True, "position": 1},
-                    {"option_text": f"Q{i+1} Option B", "is_correct": False, "position": 2},
-                    {"option_text": f"Q{i+1} Option C", "is_correct": False, "position": 3},
-                    {"option_text": f"Q{i+1} Option D", "is_correct": False, "position": 4},
-                ],
-            }
-            q_res = self.client.post(f"/exams/{exam_id}/questions", json=q_payload, headers=self.provider_headers)
-            self.assertEqual(q_res.status_code, 200, q_res.text)
-
-        publish_res = self.client.post(f"/exams/{exam_id}/publish", headers=self.provider_headers)
-        self.assertEqual(publish_res.status_code, 200, publish_res.text)
-
-        issue_payload = {
-            "candidate_name": "Issued Candidate",
-            "candidate_email": "issued.candidate.e2e@example.com",
-        }
-        issue_res = self.client.post(f"/exams/{exam_id}/issue", json=issue_payload, headers=self.provider_headers)
-        self.assertEqual(issue_res.status_code, 200, issue_res.text)
-        issue_data = issue_res.json()
-        temp_password = str(issue_data["temporary_password"])
-
-        issued_login_res = self.client.post(
-            "/exams/issued/login",
-            json={"email": issue_payload["candidate_email"], "password": temp_password},
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
         )
-        self.assertEqual(issued_login_res.status_code, 200, issued_login_res.text)
-        issued_token = issued_login_res.json()["token"]
+        Base.metadata.create_all(self.engine)
+        self.db = Session(self.engine)
 
-        issued_me_res = self.client.get("/exams/issued/me", headers={"Authorization": f"Bearer {issued_token}"})
-        self.assertEqual(issued_me_res.status_code, 200, issued_me_res.text)
-        issued_me = issued_me_res.json()
-        self.assertEqual(issued_me["assessment_type"], "mcq")
-        self.assertTrue(len(issued_me["questions"]) > 0)
+    def tearDown(self) -> None:
+        self.db.close()
+        self.engine.dispose()
 
-        issued_answers = {}
-        for q in issued_me["questions"]:
-            first_option_id = int(q["options"][0]["id"])
-            issued_answers[str(q["question_id"])] = [first_option_id]
-        issued_submit_res = self.client.post(
-            "/exams/issued/submit",
-            headers={"Authorization": f"Bearer {issued_token}"},
-            json={
-                "answers": issued_answers,
-                "submitted_data": {},
-                "time_taken_seconds": 120,
-                "proctoring_events": [],
-            },
+    def test_current_issued_assessment_flow_hides_candidate_score(self) -> None:
+        provider_user = User(
+            email="provider@example.com",
+            full_name="Provider",
+            password_hash="supabase",
+            role=UserRole.PROVIDER,
+            is_active=True,
         )
-        self.assertEqual(issued_submit_res.status_code, 200, issued_submit_res.text)
-        self.assertIn("score_pct", issued_submit_res.json())
+        self.db.add(provider_user)
+        self.db.flush()
+        provider = ProviderProfile(
+            user_id=provider_user.id,
+            provider_type=ProviderType.BUSINESS,
+            display_name="Example Company",
+        )
+        self.db.add(provider)
+        self.db.flush()
+        course = Course(provider_id=provider.id, title="Assessments", description="", category="assessment")
+        self.db.add(course)
+        self.db.flush()
+        exam = Exam(
+            course_id=course.id,
+            title="Accounting controls",
+            assessment_type="mcq",
+            duration_minutes=30,
+            questions_per_attempt=1,
+            pass_score=70,
+            status=ExamStatus.PUBLISHED,
+        )
+        self.db.add(exam)
+        self.db.flush()
+        question = Question(
+            exam_id=exam.id,
+            question_text="Which control is strongest?",
+            question_type=QuestionType.MCQ_SINGLE,
+            marks=10,
+        )
+        self.db.add(question)
+        self.db.flush()
+        correct = Option(question_id=question.id, option_text="Independent reconciliation", is_correct=True, position=1)
+        self.db.add(correct)
+        self.db.flush()
 
-        catalog_res = self.client.get("/student/assessments/catalog", headers=self.student_headers)
-        self.assertEqual(catalog_res.status_code, 200, catalog_res.text)
-        catalog = catalog_res.json()
-        row = next((r for r in catalog if int(r["exam_id"]) == exam_id), None)
-        self.assertIsNotNone(row)
-        self.assertEqual(row["status"], "available")
+        password = "temporary-candidate-password"
+        issue = AssessmentIssue(
+            exam_id=exam.id,
+            issuer_user_id=provider_user.id,
+            candidate_name="Candidate",
+            candidate_email="candidate@example.com",
+            candidate_password_hash=hash_password(password),
+            access_key="issued-access-key-with-sufficient-entropy",
+            access_expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+            status="issued",
+        )
+        self.db.add(issue)
+        self.db.commit()
 
-        start_res = self.client.post(f"/student/exams/{exam_id}/attempts/start", headers=self.student_headers)
-        self.assertEqual(start_res.status_code, 201, start_res.text)
-        attempt_id = int(start_res.json()["attempt_id"])
+        login = issued_candidate_login_by_key(
+            issue.access_key,
+            IssuedCandidateLoginRequest(password=password),
+            self.db,
+        )
+        authorization = f"Bearer {login['token']}"
+        paper = issued_candidate_get_assessment(authorization, self.db)
+        self.assertNotIn("is_correct", paper["questions"][0]["options"][0])
 
-        paper_res = self.client.get(f"/student/attempts/{attempt_id}/paper", headers=self.student_headers)
-        self.assertEqual(paper_res.status_code, 200, paper_res.text)
-        paper = paper_res.json()
-        self.assertTrue(len(paper["questions"]) > 0)
-
-        for idx, q in enumerate(paper["questions"]):
-            save_res = self.client.post(
-                f"/student/attempts/{attempt_id}/answers",
-                headers=self.student_headers,
-                json={"question_id": q["question_id"], "selected_option_ids": [int(q["options"][0]["option_id"])]},
-            )
-            self.assertEqual(save_res.status_code, 200, save_res.text)
-            event_res = self.client.post(
-                f"/student/attempts/{attempt_id}/events",
-                headers=self.student_headers,
-                json={
-                    "event_type": "answer_saved",
-                    "payload": {"question_index": idx, "question_id": q["question_id"]},
-                },
-            )
-            self.assertEqual(event_res.status_code, 200, event_res.text)
-
-        submit_res = self.client.post(f"/student/attempts/{attempt_id}/submit", headers=self.student_headers)
-        self.assertEqual(submit_res.status_code, 200, submit_res.text)
-        result = submit_res.json()
-        self.assertIn("percentage", result)
-        self.assertIn("passed", result)
+        submitted = issued_candidate_submit(
+            IssuedCandidateSubmitRequest(answers={str(question.id): [correct.id]}, time_taken_seconds=60),
+            authorization,
+            self.db,
+        )
+        self.assertEqual(submitted["status"], "submitted")
+        self.assertNotIn("score", submitted)
+        self.assertNotIn("passed", submitted)
 
 
 if __name__ == "__main__":

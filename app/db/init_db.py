@@ -1,9 +1,34 @@
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from app.db.session import SessionLocal, engine
 from app.models.entities import Base, ProctorDatasetSource
 from app.services.account_rules import sync_existing_accounts
 from app.services.default_assessments import seed_default_assessment_templates
+
+
+_REQUIRED_PRODUCTION_TABLES = {
+    "users",
+    "user_approvals",
+    "providers",
+    "courses",
+    "exams",
+    "questions",
+    "assessment_issues",
+    "assessment_submissions",
+    "assessment_templates",
+    "proctor_sessions",
+    "proctor_events",
+    "audit_logs",
+}
+
+
+def verify_database_schema() -> None:
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    existing = set(inspect(engine).get_table_names())
+    missing = sorted(_REQUIRED_PRODUCTION_TABLES - existing)
+    if missing:
+        raise RuntimeError("Database schema is not initialized; missing required tables: " + ", ".join(missing))
 
 
 def _migrate_proctor_training_feedback_nullable_attempt_id(conn) -> None:

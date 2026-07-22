@@ -13,6 +13,7 @@ app/web_assessment_react/node_modules/
 app/web_assessment_react/.vite/
 app/web_assessment_react/dist/
 app/web_assessment_react/dist-candidate/
+app/web_assessment_react/public/vendor/mediapipe/
 _credivo_export_*/
 _credivo_export_path.txt
 deploy/.env.production

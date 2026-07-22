@@ -458,14 +458,14 @@ class ProctorSessionStartRequest(BaseModel):
 
 
 class ProctorEventCreate(BaseModel):
-    event_type: str
-    severity: str = "info"  # info | warning | critical
-    confidence: float | None = None
-    details: dict = {}
+    event_type: str = Field(min_length=2, max_length=120)
+    severity: str = Field(default="info", pattern="^(info|warning|critical)$")
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    details: dict = Field(default_factory=dict, max_length=50)
 
 
 class ProctorFinalizeRequest(BaseModel):
-    ended_reason: str | None = None
+    ended_reason: str | None = Field(default=None, max_length=200)
 
 
 class ProctorReviewRequest(BaseModel):

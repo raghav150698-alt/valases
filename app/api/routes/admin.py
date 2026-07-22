@@ -47,7 +47,6 @@ from app.services.notifications import send_email
 from app.services.account_rules import sync_existing_accounts
 from app.services.supabase_auth import ensure_supabase_user
 from app.core.config import get_settings
-from app.core.security import hash_password
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -56,13 +55,13 @@ class AdminUserCreate(BaseModel):
     full_name: str = Field(min_length=2, max_length=200)
     email: EmailStr
     company_name: str = Field(min_length=2, max_length=200)
-    temporary_password: str | None = Field(default=None, min_length=10, max_length=128)
+    temporary_password: str | None = Field(default=None, min_length=12, max_length=128)
 
 
 class AdminCompanyCreate(BaseModel):
     business_name: str = Field(min_length=2, max_length=200)
     email: EmailStr
-    password: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=12, max_length=128)
 
 
 class BillingAccountUpdate(BaseModel):
@@ -151,7 +150,9 @@ def _create_company_account(
     user = User(
         email=email,
         full_name=owner_name,
-        password_hash=hash_password(password),
+        # Supabase is the credential authority. Do not retain a second reusable
+        # password verifier in the application database.
+        password_hash="supabase",
         role=UserRole.PROVIDER,
         is_active=True,
         account_state="active",

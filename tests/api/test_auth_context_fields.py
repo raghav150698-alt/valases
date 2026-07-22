@@ -1,42 +1,65 @@
-import os
 import unittest
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
-from app.core.config import get_settings
-
-os.environ.setdefault("DATABASE_URL", "sqlite:///./certora.db")
-get_settings.cache_clear()
-
-from app.main import app  # noqa: E402
+from app.api.routes.auth import me_context
+from app.core.config import Settings
+from app.models.entities import ApprovalStatus, Base, User, UserApproval, UserRole
 
 
 class AuthContextFieldsTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.client = TestClient(app)
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(self.engine)
+        self.db = Session(self.engine)
+        user = User(
+            email="ctx.user.001@example.com",
+            phone_number="+919876543210",
+            full_name="Context User",
+            password_hash="firebase",
+            role=UserRole.PROVIDER,
+            is_active=True,
+        )
+        self.db.add(user)
+        self.db.flush()
+        self.db.add(UserApproval(user_id=user.id, status=ApprovalStatus.APPROVED))
+        self.db.commit()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.engine.dispose()
 
     @patch("app.api.routes.auth._safe_sync_claims")
-    @patch("app.api.routes.auth.verify_firebase_token")
-    def test_me_context_returns_phone_number_and_full_name(self, mock_verify, _mock_sync) -> None:
-        mock_verify.return_value = {
+    @patch("app.api.routes.auth.verify_supabase_token")
+    @patch("app.api.routes.auth.get_settings")
+    def test_me_context_returns_provisioned_account_fields(self, settings_mock, verify_mock, _sync_mock) -> None:
+        settings_mock.return_value = Settings(
+            _env_file=None,
+            auth_mode="supabase",
+            supabase_url="https://project.supabase.co",
+            supabase_publishable_key="publishable-key",
+            allow_self_service_signup=False,
+        )
+        verify_mock.return_value = {
             "uid": "ctx-user-001",
             "email": "ctx.user.001@example.com",
             "phone_number": "+919876543210",
             "name": "Context User",
-            "role": "student",
-            "approval_status": "approved",
+            "role": "provider",
         }
-        res = self.client.get(
-            "/auth/me/context",
-            headers={"Authorization": "Bearer fake-id-token"},
-        )
-        self.assertEqual(res.status_code, 200, res.text)
-        payload = res.json()
-        self.assertIn("full_name", payload)
-        self.assertIn("phone_number", payload)
-        self.assertEqual(payload.get("full_name"), "Context User")
-        self.assertEqual(payload.get("phone_number"), "+919876543210")
+
+        payload = me_context(token="token", db=self.db)
+
+        self.assertEqual(payload["full_name"], "Context User")
+        self.assertEqual(payload["phone_number"], "+919876543210")
+        self.assertEqual(payload["approval_status"], ApprovalStatus.APPROVED)
 
 
 if __name__ == "__main__":

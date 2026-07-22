@@ -1,11 +1,15 @@
 from datetime import datetime, timedelta, timezone
 from html import escape
 
+import hashlib
+import hmac
+import json
 import logging
 import random
 import re
 import secrets
 from urllib.parse import urlsplit
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import delete, func, select, text
@@ -87,7 +91,7 @@ def _provider_profile_or_404(db: Session, user_id: int) -> ProviderProfile:
             db.refresh(profile)
         except SQLAlchemyError as exc:
             db.rollback()
-            raise HTTPException(status_code=500, detail=f"Provider profile bootstrap failed: {exc}")
+            raise HTTPException(status_code=500, detail="Provider profile bootstrap failed") from exc
     return profile
 
 
@@ -139,16 +143,16 @@ class IssuedCandidateLoginRequest(BaseModel):
 
 
 class IssuedCandidateSubmitRequest(BaseModel):
-    answers: dict[str, list[int] | int | None] = Field(default_factory=dict)
-    submitted_data: dict = Field(default_factory=dict)
-    time_taken_seconds: int | None = None
-    proctoring_events: list | dict | None = None
+    answers: dict[str, list[int] | int | None] = Field(default_factory=dict, max_length=200)
+    submitted_data: dict[str, Any] = Field(default_factory=dict, max_length=2_000)
+    time_taken_seconds: int | None = Field(default=None, ge=0, le=172_800)
+    proctoring_events: list[dict[str, Any]] | dict[str, Any] | None = None
 
 
 class IssuedCandidateProctorEventRequest(BaseModel):
     event_type: str = Field(min_length=2, max_length=120)
-    severity: str = "warning"
-    details: dict = Field(default_factory=dict)
+    severity: Literal["info", "warning", "critical"] = "warning"
+    details: dict[str, Any] = Field(default_factory=dict, max_length=50)
 
 
 class IssuedCandidateConsentRequest(BaseModel):
@@ -177,6 +181,37 @@ def _create_issued_candidate_token(issue_id: int, session_token: str) -> str:
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
+def _session_token_digest(session_token: str) -> str:
+    return "sha256:" + hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+
+
+def _session_token_matches(stored_token: str | None, presented_token: str) -> bool:
+    stored = str(stored_token or "")
+    expected = _session_token_digest(presented_token) if stored.startswith("sha256:") else presented_token
+    return bool(stored and hmac.compare_digest(stored, expected))
+
+
+def _json_size_bytes(value: Any) -> int:
+    return len(json.dumps(value, separators=(",", ":"), ensure_ascii=True).encode("utf-8"))
+
+
+def _bounded_candidate_events(value: list[dict[str, Any]] | dict[str, Any] | None) -> list[dict[str, Any]]:
+    rows = [value] if isinstance(value, dict) else list(value or [])
+    bounded: list[dict[str, Any]] = []
+    for row in rows[-100:]:
+        if not isinstance(row, dict):
+            continue
+        event = {
+            "event_type": str(row.get("event_type") or "client_event")[:120],
+            "severity": str(row.get("severity") or "info")[:16],
+            "recorded_at": str(row.get("recorded_at") or "")[:80],
+            "details": row.get("details") if isinstance(row.get("details"), dict) else {},
+        }
+        if _json_size_bytes(event) <= 32_000:
+            bounded.append(event)
+    return bounded
+
+
 def _decode_issued_candidate_token(token: str) -> tuple[int, str]:
     settings = get_settings()
     try:
@@ -202,8 +237,10 @@ def _issued_issue_from_bearer_token(authorization: str | None, db: Session) -> A
     issue = db.get(AssessmentIssue, issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issued assessment not found")
-    if str(issue.active_session_token or "") != session_token:
+    if not _session_token_matches(issue.active_session_token, session_token):
         raise HTTPException(status_code=409, detail="This assessment is already open in another session. Use the latest opened session or ask the recruiter to re-issue.")
+    if _is_expired(issue.access_expires_at):
+        raise HTTPException(status_code=401, detail="Issued assessment credentials have expired")
     return issue
 
 
@@ -788,10 +825,7 @@ def update_exam_rule(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
-    profile = _provider_profile_or_404(db, current_user.id)
-    exam = db.get(Exam, exam_id)
-    if not exam:
-        raise HTTPException(status_code=404, detail="Exam not found")
+    profile, exam, _ = _provider_exam_or_403(db, exam_id, current_user)
     course = db.get(Course, exam.course_id)
     if not course or course.provider_id != profile.id:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -888,9 +922,10 @@ def add_question(
                 return _insert_question_and_options()
             except IntegrityError as retry_exc:
                 db.rollback()
-                retry_detail = str(getattr(retry_exc, "orig", retry_exc))
-                raise HTTPException(status_code=400, detail=f"Failed to add question after sequence sync: {retry_detail}") from retry_exc
-        raise HTTPException(status_code=400, detail=f"Failed to add question: {detail}") from exc
+                request_logger.warning("question_insert_retry_failed", extra={"request_log": {"exam_id": exam.id}})
+                raise HTTPException(status_code=400, detail="Failed to add question after database sequence recovery") from retry_exc
+        request_logger.warning("question_insert_integrity_error", extra={"request_log": {"exam_id": exam.id}})
+        raise HTTPException(status_code=400, detail="Failed to add question because its data conflicts with an existing record") from exc
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to add question: {exc.__class__.__name__}") from exc
@@ -1109,9 +1144,7 @@ def syllabus_map(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
-    exam = db.get(Exam, exam_id)
-    if not exam:
-        raise HTTPException(status_code=404, detail="Exam not found")
+    _, exam, _ = _provider_exam_or_403(db, exam_id, current_user)
     modules = list(db.scalars(select(CourseModule).where(CourseModule.course_id == exam.course_id)).all())
     questions = list(db.scalars(select(Question).where(Question.exam_id == exam.id)).all())
     result = []
@@ -1147,7 +1180,7 @@ def issue_assessment_to_candidate(
 
     candidate_email = str(payload.candidate_email).strip().lower()
     candidate_name = str(payload.candidate_name).strip()
-    temp_password = secrets.token_urlsafe(8)
+    temp_password = secrets.token_urlsafe(16)
     issue = AssessmentIssue(
         exam_id=exam.id,
         issuer_user_id=current_user.id,
@@ -1413,6 +1446,8 @@ def issued_candidate_login(payload: IssuedCandidateLoginRequest, db: Session = D
 
 @router.post("/issued/key/{access_key}/login")
 def issued_candidate_login_by_key(access_key: str, payload: IssuedCandidateLoginRequest, db: Session = Depends(get_db)):
+    if len(access_key) < 20 or len(access_key) > 120:
+        raise HTTPException(status_code=401, detail="Invalid issued assessment credentials")
     issue = db.scalar(select(AssessmentIssue).where(AssessmentIssue.access_key == access_key))
     if not issue or not verify_password(payload.password, issue.candidate_password_hash):
         raise HTTPException(status_code=401, detail="Invalid issued assessment credentials")
@@ -1423,7 +1458,7 @@ def issued_candidate_login_by_key(access_key: str, payload: IssuedCandidateLogin
         raise HTTPException(status_code=401, detail="Credentials already used. Ask issuer for re-issue.")
     session_token = secrets.token_urlsafe(32)
     issue.credential_used_at = issue.credential_used_at or now
-    issue.active_session_token = session_token
+    issue.active_session_token = _session_token_digest(session_token)
     issue.active_session_started_at = now
     if issue.status == "issued":
         issue.status = "started"
@@ -1530,8 +1565,8 @@ def issued_candidate_proctor_event(
         return {"warning_count": 0, "should_terminate": True, "status": issue.status}
 
     severity = str(payload.severity or "warning").strip().lower()
-    if severity not in {"info", "warning", "critical"}:
-        raise HTTPException(status_code=400, detail="Invalid proctor event severity")
+    if _json_size_bytes(payload.details) > 32_000:
+        raise HTTPException(status_code=413, detail="Proctor event details are too large")
     state = _issued_proctoring_state(issue)
     normalized_event_type = str(payload.event_type or "").strip().lower()
     _apply_issued_integrity_event(state, normalized_event_type)
@@ -1571,10 +1606,12 @@ def issued_candidate_submit(
         raise HTTPException(status_code=409, detail="Assessment already submitted")
     proctoring_state = _issued_proctoring_state(issue)
     forced_manual_review = bool(proctoring_state.get("terminated"))
-    submitted_events = payload.proctoring_events or []
-    if isinstance(submitted_events, dict):
-        submitted_events = [submitted_events]
-    recorded_events = [*(proctoring_state.get("events") or []), *submitted_events]
+    if _json_size_bytes(payload.submitted_data) > 3_000_000:
+        raise HTTPException(status_code=413, detail="Assessment submission is too large")
+    if _json_size_bytes(payload.answers) > 250_000:
+        raise HTTPException(status_code=413, detail="Assessment answers are too large")
+    submitted_events = _bounded_candidate_events(payload.proctoring_events)
+    recorded_events = [*(proctoring_state.get("events") or [])[-100:], *submitted_events][-200:]
     exam = db.get(Exam, issue.exam_id)
     if not exam:
         raise HTTPException(status_code=404, detail="Assessment not found")

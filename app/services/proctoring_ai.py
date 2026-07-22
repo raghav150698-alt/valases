@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +53,8 @@ except Exception:
 
 _FACE_MESH_CACHE = None
 _FACE_LANDMARKER_CACHE = None
+_LOGGER = logging.getLogger(__name__)
+_SUPERVISED_BUNDLE_SHA256 = "0d2a1682a7e3b6e3e043f87695c5736db459b8eec94fb75d389b81badb5d79b7"
 
 
 def _face_landmarker_asset_path() -> Path:
@@ -136,6 +141,17 @@ def _cache_key_for_path(name: str, path: Path) -> str:
         return f"{name}:missing"
 
 
+def _file_matches_sha256(path: Path, expected_digest: str) -> bool:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return False
+    return hmac.compare_digest(digest.hexdigest(), expected_digest.lower())
+
+
 def _load_rules() -> dict[str, Any]:
     path = Path("data/proctoring/models/supervised/deduction_rules.json")
     key = _cache_key_for_path("rules", path)
@@ -179,6 +195,10 @@ def _load_bundle() -> dict[str, Any] | None:
         _MODEL_CACHE[key] = None
         return None
     if not path.exists():
+        _MODEL_CACHE[key] = None
+        return None
+    if get_settings().is_production and not _file_matches_sha256(path, _SUPERVISED_BUNDLE_SHA256):
+        _LOGGER.critical("Refusing to load the proctor model because its integrity check failed")
         _MODEL_CACHE[key] = None
         return None
     try:

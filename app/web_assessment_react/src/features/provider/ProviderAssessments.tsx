@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "../../components/BrandLogo";
 import { api } from "../../lib/api";
 import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
-import { CodingEnv } from "../tools/CodingEnv";
 import { ExcelAssessmentSubmission, ExcelSimulator } from "../tools/ExcelSimulator";
 import { RemoteDesktopTool } from "../tools/RemoteDesktopTool";
+
+const CodingEnv = lazy(() => import("../tools/CodingEnv"));
 
 function apiErrorMessage(error: unknown, fallback: string): string {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -763,7 +764,11 @@ export function ProviderAssessments() {
             </section>
 
             {activeTool === "Excel" && <ExcelSimulator />}
-            {activeTool === "Coding Env" && <CodingEnv />}
+            {activeTool === "Coding Env" && (
+              <Suspense fallback={<div className="tool-loading-state" role="status">Loading coding workspace...</div>}>
+                <CodingEnv />
+              </Suspense>
+            )}
             {activeTool === "Desktop Accounting (GnuCash)" && (
               <RemoteDesktopTool
                 title="GnuCash Desktop Test"

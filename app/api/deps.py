@@ -1,6 +1,7 @@
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -45,13 +46,26 @@ def _dummy_user(
             is_active=True,
         )
         db.add(user)
-        db.commit()
-        db.refresh(user)
-        return user
+        try:
+            db.commit()
+            db.refresh(user)
+        except IntegrityError:
+            # Dashboard requests arrive concurrently. Another request may
+            # create the same development identity between lookup and insert.
+            db.rollback()
+            user = db.get(User, user_id)
+            if not user:
+                raise
 
     user.role = role
     user.email = email
     user.full_name = name
+    approval = db.scalar(select(UserApproval).where(UserApproval.user_id == user.id))
+    if not approval:
+        db.add(UserApproval(user_id=user.id, status=ApprovalStatus.APPROVED))
+    else:
+        approval.status = ApprovalStatus.APPROVED
+        approval.rejection_reason = None
     db.commit()
     db.refresh(user)
     return user
@@ -111,6 +125,12 @@ def get_current_user(
         if db.scalar(select(BannedIdentity.id).where(BannedIdentity.phone_number == phone_number)):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account is banned.")
     if not user:
+        configured_admin = is_configured_admin_email(email_norm, settings.admin_email_set)
+        if not configured_admin and not settings.allow_self_service_signup:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This account has not been provisioned. Contact your Valases administrator.",
+            )
         role = resolve_identity_role(
             email=email_norm,
             role_claim=role_claim,
@@ -131,7 +151,7 @@ def get_current_user(
         if not approval:
             approval = UserApproval(user_id=user.id)
             db.add(approval)
-        approval.status = ApprovalStatus.APPROVED
+        approval.status = ApprovalStatus.APPROVED if configured_admin else ApprovalStatus.PENDING
         approval.rejection_reason = None
         db.commit()
         db.refresh(user)
@@ -157,6 +177,8 @@ def get_current_user(
         db.refresh(user)
 
     state = str(user.account_state or "active").lower()
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account is inactive.")
     if state in {"banned", "deleted"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account is not allowed to access the platform.")
     if state == "frozen":
@@ -164,7 +186,7 @@ def get_current_user(
 
     approval = db.scalar(select(UserApproval).where(UserApproval.user_id == user.id))
     if not approval:
-        default_status = ApprovalStatus.APPROVED
+        default_status = ApprovalStatus.APPROVED if configured_admin else ApprovalStatus.PENDING
         db.add(
             UserApproval(
                 user_id=user.id,
@@ -174,7 +196,7 @@ def get_current_user(
         )
         db.commit()
         approval = db.scalar(select(UserApproval).where(UserApproval.user_id == user.id))
-    elif approval and approval.status != ApprovalStatus.APPROVED:
+    elif configured_admin and approval.status != ApprovalStatus.APPROVED:
         approval.status = ApprovalStatus.APPROVED
         approval.rejection_reason = None
         db.commit()
@@ -200,7 +222,7 @@ def is_user_approved(db: Session, user: User) -> tuple[bool, str | None]:
         return True, None
     approval = db.scalar(select(UserApproval).where(UserApproval.user_id == user.id))
     if not approval:
-        return True, None
+        return False, "This account has not been approved. Contact your Valases administrator."
     if approval.status == ApprovalStatus.APPROVED:
         return True, None
     if approval.status == ApprovalStatus.REJECTED:

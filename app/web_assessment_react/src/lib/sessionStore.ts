@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 type Role = "provider" | "student" | "admin" | null;
 
@@ -20,6 +20,7 @@ export const useSessionStore = create<SessionState>()(
     }),
     {
       name: "valases-session",
+      storage: createJSONStorage(() => window.sessionStorage),
       partialize: (state) => ({ token: state.token, role: state.role }),
     },
   ),

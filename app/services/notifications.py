@@ -1,4 +1,5 @@
 import smtplib
+import ssl
 from email.message import EmailMessage
 from email.utils import formataddr
 
@@ -28,7 +29,7 @@ def send_email(
         msg.add_alternative(html_body, subtype="html")
 
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-        server.starttls()
+        server.starttls(context=ssl.create_default_context())
         server.login(settings.smtp_username, settings.smtp_password)
         server.send_message(msg)
     return {"sent": True}

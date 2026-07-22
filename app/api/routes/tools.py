@@ -1,6 +1,8 @@
 import subprocess
 import sys
 import tempfile
+import shutil
+import time
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -10,6 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import require_role
+from app.core.config import get_settings
 from app.models.entities import User, UserRole
 from app.services.graph_excel import GraphExcelClient, GraphExcelError, graph_excel_status
 
@@ -83,9 +86,17 @@ PYTHON_RUNNER = (
 )
 
 PREVIEW_ROOT = Path(tempfile.gettempdir()) / "valases_coding_preview"
+PREVIEW_TTL_SECONDS = 30 * 60
+PREVIEW_MAX_TOTAL_BYTES = 2_000_000
 
 
 def _client_or_503() -> GraphExcelClient:
+    settings = get_settings()
+    if settings.is_production and not settings.enable_shared_graph_excel:
+        raise HTTPException(
+            status_code=503,
+            detail="Shared Excel credentials are disabled. Configure a tenant-scoped workbook integration.",
+        )
     try:
         return GraphExcelClient()
     except GraphExcelError as exc:
@@ -97,6 +108,18 @@ def _normalize_preview_path(raw_path: str) -> str:
     if not normalized or normalized.startswith("../") or "/../" in normalized or normalized.endswith("/.."):
         raise HTTPException(status_code=400, detail="Invalid preview path.")
     return normalized
+
+
+def _cleanup_expired_previews() -> None:
+    if not PREVIEW_ROOT.exists():
+        return
+    cutoff = time.time() - PREVIEW_TTL_SECONDS
+    for child in PREVIEW_ROOT.iterdir():
+        try:
+            if child.is_dir() and child.stat().st_mtime < cutoff:
+                shutil.rmtree(child, ignore_errors=True)
+        except OSError:
+            continue
 
 
 @router.get("/excel/graph/status")
@@ -152,6 +175,12 @@ def coding_run(
     payload: CodingRunRequest,
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    settings = get_settings()
+    if settings.is_production and not settings.enable_server_code_execution:
+        raise HTTPException(
+            status_code=503,
+            detail="Server-side code execution is disabled. Use the isolated execution service.",
+        )
     if payload.language == "python":
         try:
             with tempfile.TemporaryDirectory(prefix="valases-code-") as workdir:
@@ -229,6 +258,10 @@ def coding_preview_sync(
     payload: CodingPreviewSyncRequest,
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    total_bytes = sum(len(item.content.encode("utf-8")) for item in payload.files)
+    if total_bytes > PREVIEW_MAX_TOTAL_BYTES:
+        raise HTTPException(status_code=413, detail="Preview workspace is too large.")
+    _cleanup_expired_previews()
     PREVIEW_ROOT.mkdir(parents=True, exist_ok=True)
     session_id = uuid4().hex
     session_dir = PREVIEW_ROOT / session_id
@@ -255,11 +288,32 @@ def coding_preview_sync(
 
 @router.get("/coding/preview/{session_id}/{path:path}")
 def coding_preview_file(session_id: str, path: str):
+    if len(session_id) != 32 or any(ch not in "0123456789abcdef" for ch in session_id.lower()):
+        raise HTTPException(status_code=404, detail="Preview file not found.")
     session_dir = (PREVIEW_ROOT / session_id).resolve()
+    try:
+        if not session_dir.is_dir() or session_dir.stat().st_mtime < time.time() - PREVIEW_TTL_SECONDS:
+            shutil.rmtree(session_dir, ignore_errors=True)
+            raise HTTPException(status_code=404, detail="Preview session expired.")
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="Preview file not found.") from exc
     requested_path = _normalize_preview_path(path)
     file_path = (session_dir / requested_path).resolve()
     if session_dir not in file_path.parents and file_path != session_dir:
         raise HTTPException(status_code=404, detail="Preview file not found.")
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Preview file not found.")
-    return FileResponse(str(file_path))
+    return FileResponse(
+        str(file_path),
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Content-Security-Policy": (
+                "sandbox allow-scripts allow-forms allow-modals; default-src 'none'; "
+                "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; "
+                "connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+            ),
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

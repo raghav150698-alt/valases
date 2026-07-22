@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import logging
 from pathlib import Path
 from threading import Lock
 from uuid import uuid4
@@ -45,6 +46,28 @@ from app.services.media_storage import resolve_media_url, upload_file_to_cloud_s
 
 router = APIRouter(prefix="/proctoring", tags=["proctoring"])
 _session_start_lock = Lock()
+request_logger = logging.getLogger("valases.request")
+_EVIDENCE_MIME_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "video/webm": ".webm",
+    "video/mp4": ".mp4",
+}
+
+
+def _has_valid_media_signature(content_type: str, raw: bytes) -> bool:
+    if content_type == "image/jpeg":
+        return raw.startswith(b"\xff\xd8\xff")
+    if content_type == "image/png":
+        return raw.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/webp":
+        return len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"
+    if content_type == "video/webm":
+        return raw.startswith(b"\x1a\x45\xdf\xa3")
+    if content_type == "video/mp4":
+        return len(raw) >= 12 and raw[4:8] == b"ftyp"
+    return False
 
 
 def _is_admin(user: User) -> bool:
@@ -751,17 +774,34 @@ async def upload_evidence(
         if not event or event.session_id != item.id:
             raise HTTPException(status_code=404, detail="Linked event not found")
 
-    raw = await file.read()
+    normalized_evidence_type = str(evidence_type or "").strip().lower()
+    if normalized_evidence_type not in {"image", "video"}:
+        raise HTTPException(status_code=400, detail="Unsupported evidence type")
+    content_type = str(file.content_type or "").split(";", 1)[0].strip().lower()
+    expected_prefix = f"{normalized_evidence_type}/"
+    if content_type not in _EVIDENCE_MIME_EXTENSIONS or not content_type.startswith(expected_prefix):
+        raise HTTPException(status_code=415, detail="Unsupported evidence media type")
+
+    settings = get_settings()
+    if settings.is_production and not settings.enable_proctor_evidence_upload:
+        raise HTTPException(status_code=503, detail="Proctor evidence uploads are disabled")
+    if settings.is_production and settings.resolved_object_storage_backend != "s3":
+        raise HTTPException(status_code=503, detail="Private evidence storage is not configured")
+    max_bytes = max(1024, int(settings.max_proctor_evidence_bytes))
+    raw = await file.read(max_bytes + 1)
     if not raw:
         raise HTTPException(status_code=400, detail="Empty file")
+    if len(raw) > max_bytes:
+        raise HTTPException(status_code=413, detail="Evidence file is too large")
+    if not _has_valid_media_signature(content_type, raw):
+        raise HTTPException(status_code=415, detail="Evidence content does not match its media type")
 
     root = _media_root() / item.session_code
     root.mkdir(parents=True, exist_ok=True)
-    safe_ext = Path(file.filename or "evidence.bin").suffix or ".bin"
+    safe_ext = _EVIDENCE_MIME_EXTENSIONS[content_type]
     filename = f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{uuid4().hex}{safe_ext}"
     out_path = root / filename
     out_path.write_bytes(raw)
-    settings = get_settings()
     if settings.resolved_object_storage_backend == "local":
         rel = out_path.relative_to(Path(settings.resolved_media_dir)).as_posix()
         url = f"/media/{rel}"
@@ -770,17 +810,20 @@ async def upload_evidence(
             url = upload_file_to_cloud_storage(
                 out_path,
                 object_path=f"proctoring/{item.session_code}/{filename}",
-                content_type=file.content_type or "application/octet-stream",
+                content_type=content_type,
             )
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to upload proctor evidence: {exc}") from exc
+            out_path.unlink(missing_ok=True)
+            request_logger.exception("proctor_evidence_upload_failed", extra={"request_log": {"session_id": item.id}})
+            raise HTTPException(status_code=502, detail="Failed to store proctor evidence") from exc
+        out_path.unlink(missing_ok=True)
 
     ev = ProctorEvidence(
         session_id=item.id,
         event_id=event_id,
-        evidence_type=evidence_type,
+        evidence_type=normalized_evidence_type,
         file_url=url,
-        mime_type=file.content_type,
+        mime_type=content_type,
         size_bytes=len(raw),
     )
     db.add(ev)

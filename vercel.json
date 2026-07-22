@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "buildCommand": "npm --prefix app/web_assessment_react install --no-audit --no-fund && npm --prefix app/web_assessment_react run build",
+  "buildCommand": "pnpm --dir app/web_assessment_react install --frozen-lockfile && pnpm --dir app/web_assessment_react run build",
   "functions": {
     "api/index.py": {
       "includeFiles": "app/web_assessment_react/dist/**"

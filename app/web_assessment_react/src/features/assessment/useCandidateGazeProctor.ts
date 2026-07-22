@@ -19,9 +19,8 @@ type ObjectDetector = {
 };
 type ProctorStatus = "idle" | "starting" | "calibrating" | "active" | "error";
 
-const VISION_MODULE_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
-const VISION_WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const FACE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task";
+const VISION_WASM_URL = "/vendor/mediapipe/wasm";
+const FACE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 const OBJECT_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite";
 const GAZE_MODEL_URL = "/assets/generated/screen_gaze_model.json";
 const AWAY_WARNING_MS = 2000;
@@ -160,7 +159,7 @@ export function useCandidateGazeProctor(active: boolean) {
       await video.play();
       videoRef.current = video;
 
-      const vision = await import(/* @vite-ignore */ VISION_MODULE_URL) as {
+      const vision = await import("@mediapipe/tasks-vision") as {
         FilesetResolver: { forVisionTasks: (url: string) => Promise<unknown> };
         FaceLandmarker: { createFromOptions: (resolver: unknown, options: unknown) => Promise<FaceLandmarker> };
         ObjectDetector: { createFromOptions: (resolver: unknown, options: unknown) => Promise<ObjectDetector> };

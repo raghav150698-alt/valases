@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     auth_mode: str = "firebase"
     enable_ai_review: bool = False
     allow_dev_role_override: bool = False
+    allow_self_service_signup: bool = False
+    enable_legacy_password_auth: bool = False
+    enable_admin_recovery: bool = False
+    enable_server_code_execution: bool = False
+    enable_shared_graph_excel: bool = False
+    enable_proctor_evidence_upload: bool = False
+    enable_startup_database_management: bool = False
+    enforce_production_security: bool = True
     admin_recovery_key: str = ""
     firebase_project_id: str = ""
     firebase_service_account_path: str = ""
@@ -109,6 +117,8 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_requests_per_minute: int = 180
     rate_limit_auth_requests_per_minute: int = 35
+    max_request_body_bytes: int = 4_000_000
+    max_proctor_evidence_bytes: int = 8_000_000
     ops_enable_request_logs: bool = True
     ops_slow_request_ms: int = 1200
     microsoft_graph_tenant_id: str = ""
@@ -121,6 +131,7 @@ class Settings(BaseSettings):
         env_file=(".env", "gmail.smtp.local.env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
     @property
@@ -130,7 +141,8 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         v = (self.app_env or "").strip().lower()
-        return v in {"prod", "production"}
+        vercel_env = (os.getenv("VERCEL_ENV") or "").strip().lower()
+        return v in {"prod", "production"} or vercel_env == "production"
 
     @property
     def resolved_database_url(self) -> str:
@@ -144,6 +156,10 @@ class Settings(BaseSettings):
             # does not recognize that as a libpq connection option.
             parsed = urlsplit(raw)
             query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key.lower() != "pgbouncer"]
+            if self.is_production and not any(key.lower() == "sslmode" for key, _ in query):
+                query.append(("sslmode", "require"))
+            if self.is_production and not any(key.lower() == "connect_timeout" for key, _ in query):
+                query.append(("connect_timeout", "10"))
             raw = urlunsplit(parsed._replace(query=urlencode(query)))
         if not self.is_vercel:
             return raw
@@ -206,6 +222,64 @@ class Settings(BaseSettings):
     def trusted_hosts_list(self) -> list[str]:
         raw = [x.strip() for x in (self.trusted_hosts or "").split(",")]
         return [x for x in raw if x]
+
+    def production_security_errors(self) -> list[str]:
+        """Return fail-closed configuration errors for an internet deployment."""
+        if not self.is_production or not self.enforce_production_security:
+            return []
+
+        errors: list[str] = []
+        auth_mode = (self.auth_mode or "").strip().lower()
+        if auth_mode != "supabase":
+            errors.append("AUTH_MODE must be supabase in production")
+        if not str(self.supabase_url or "").startswith("https://"):
+            errors.append("SUPABASE_URL must be an HTTPS URL")
+        if not str(self.supabase_publishable_key or "").strip():
+            errors.append("SUPABASE_PUBLISHABLE_KEY is required")
+
+        secret = str(self.jwt_secret_key or "").strip()
+        insecure_secret_values = {"", "change_me", "replace_with_a_long_random_secret"}
+        if secret in insecure_secret_values or len(secret) < 32:
+            errors.append("JWT_SECRET_KEY must be a unique secret of at least 32 characters")
+        if (self.jwt_algorithm or "").strip().upper() not in {"HS256", "HS384", "HS512"}:
+            errors.append("JWT_ALGORITHM must be HS256, HS384, or HS512")
+
+        candidate_url = str(self.candidate_app_base_url or "").strip()
+        if not candidate_url.startswith("https://"):
+            errors.append("CANDIDATE_APP_BASE_URL must be an HTTPS URL")
+        origins = self.cors_origins_list
+        if not origins or any(origin == "*" or not origin.startswith("https://") for origin in origins):
+            errors.append("CORS_ALLOW_ORIGINS must contain explicit HTTPS origins")
+        hosts = self.trusted_hosts_list
+        if not hosts or "*" in hosts:
+            errors.append("TRUSTED_HOSTS must contain explicit host names")
+
+        database_url = str(self.database_url or "").strip().lower()
+        if not database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg://")):
+            errors.append("DATABASE_URL must use PostgreSQL in production")
+        if self.resolved_object_storage_backend == "local":
+            errors.append("OBJECT_STORAGE_BACKEND cannot be local in production")
+        if self.allow_dev_role_override:
+            errors.append("ALLOW_DEV_ROLE_OVERRIDE must be false in production")
+        if self.allow_self_service_signup:
+            errors.append("ALLOW_SELF_SERVICE_SIGNUP must be false for provision-only access")
+        if self.enable_legacy_password_auth:
+            errors.append("ENABLE_LEGACY_PASSWORD_AUTH must be false in production")
+        if self.enable_admin_recovery:
+            errors.append("ENABLE_ADMIN_RECOVERY must be false in production")
+        if self.enable_server_code_execution:
+            errors.append("ENABLE_SERVER_CODE_EXECUTION must be false in the API trust boundary")
+        if self.enable_shared_graph_excel:
+            errors.append("ENABLE_SHARED_GRAPH_EXCEL must be false until credentials are tenant-scoped")
+        if self.enable_proctor_evidence_upload and self.resolved_object_storage_backend != "s3":
+            errors.append("Proctor evidence uploads require private S3 storage in production")
+        if self.enable_startup_database_management:
+            errors.append("ENABLE_STARTUP_DATABASE_MANAGEMENT must be false in production")
+        if not self.rate_limit_enabled:
+            errors.append("RATE_LIMIT_ENABLED must be true in production")
+        if not self.admin_email_set:
+            errors.append("ADMIN_EMAILS must contain at least one platform administrator")
+        return errors
 
 
 @lru_cache

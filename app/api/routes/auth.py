@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_role
 from app.core.config import get_settings
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models.entities import ApprovalStatus, ProviderProfile, User, UserApproval, UserIdentityVerification, UserRole
 from app.schemas import AdminRecoveryRequest, AdminSetUserPasswordRequest, LoginRequest, RegisterRoleRequest, SignupRequest, TokenResponse, UserOut
@@ -143,6 +143,12 @@ def _assert_recovery_key_or_403(submitted_key: str, configured_key: str) -> None
         raise HTTPException(status_code=503, detail="Admin recovery is not configured.")
     if not hmac.compare_digest(given, expected):
         raise HTTPException(status_code=403, detail="Invalid admin recovery key.")
+
+
+def _assert_admin_recovery_enabled() -> None:
+    settings = get_settings()
+    if not settings.enable_admin_recovery or settings.auth_mode.lower() != "firebase":
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 def _normalize_country_code(value: str | None) -> str:
@@ -303,6 +309,11 @@ def _supabase_identity_or_401(token: str | None) -> tuple[str, str | None, str |
 
 @router.post("/signup", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def signup(payload: SignupRequest, db: Session = Depends(get_db)):
+    settings = get_settings()
+    if not settings.allow_self_service_signup:
+        raise HTTPException(status_code=404, detail="Not found")
+    if payload.role == UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Administrator accounts cannot be self-registered.")
     existing = db.scalar(select(User).where(User.email == payload.email))
     if existing:
         raise HTTPException(status_code=400, detail="Email already in use")
@@ -328,6 +339,21 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             role_claim = str(identity_payload.get("role") or "").strip().lower()
             identity_email = str(identity_payload.get("email") or payload.email).strip().lower()
             existing_user = db.scalar(_normalized_user_query(identity_email))
+            configured_admin = is_configured_admin_email(identity_email, settings.admin_email_set)
+            if not existing_user and not configured_admin and not settings.allow_self_service_signup:
+                raise HTTPException(
+                    status_code=403,
+                    detail="This account has not been provisioned. Contact your Valases administrator.",
+                )
+            if existing_user:
+                account_state = str(existing_user.account_state or "active").lower()
+                if not existing_user.is_active or account_state in {"frozen", "banned", "deleted"}:
+                    raise HTTPException(status_code=403, detail="This account is not allowed to sign in.")
+                approval = db.scalar(select(UserApproval).where(UserApproval.user_id == existing_user.id))
+                if existing_user.role != UserRole.ADMIN and (
+                    not approval or approval.status != ApprovalStatus.APPROVED
+                ):
+                    raise HTTPException(status_code=403, detail="This account is awaiting administrator approval.")
             role = resolve_identity_role(
                 email=identity_email,
                 role_claim=role_claim,
@@ -335,6 +361,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
                 default_role=existing_user.role if existing_user else UserRole.PROVIDER,
             )
             return TokenResponse(access_token=token, role=role)
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(status_code=401, detail=str(exc) or "Unable to sign in with Supabase.") from exc
     if settings.auth_mode.lower() == "dummy" and not settings.is_production:
@@ -348,6 +376,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         token = create_access_token("1", role.value)
         return TokenResponse(access_token=token, role=role)
 
+    if not settings.enable_legacy_password_auth:
+        raise HTTPException(status_code=404, detail="Not found")
     user = db.scalar(select(User).where(User.email == payload.email))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -366,6 +396,30 @@ def me_context(
     db: Session = Depends(get_db),
 ):
     settings = get_settings()
+    if settings.auth_mode.lower() == "dummy" and not settings.is_production:
+        try:
+            token_payload = decode_access_token(str(token or ""))
+            role_value = str(token_payload.get("role") or UserRole.ADMIN.value).strip().lower()
+            role = UserRole(role_value) if role_value in {item.value for item in UserRole} else UserRole.ADMIN
+            user_id = int(token_payload.get("sub") or 1)
+        except Exception as exc:
+            raise HTTPException(status_code=401, detail="Could not validate development credentials") from exc
+        return {
+            "setup_required": False,
+            "id": user_id,
+            "public_uid": _public_uid(user_id),
+            "email": f"dummy-{role.value}@local.test",
+            "phone_number": None,
+            "student_age": None,
+            "full_name": f"Development {role.value.title()}",
+            "role": role,
+            "account_state": "active",
+            "approval_status": ApprovalStatus.APPROVED,
+            "rejection_reason": None,
+            "verification_id_type": None,
+            "verification_country_code": None,
+            "verification_status": None,
+        }
     identity = _supabase_identity_or_401 if settings.auth_mode.lower() == "supabase" else _firebase_identity_or_401
     firebase_uid, email, phone_number, fallback_name, token_payload = identity(token)
     email_norm = str(email or "").strip().lower() or None
@@ -376,6 +430,12 @@ def me_context(
         role_from_claim = UserRole(role_claim)
     if not current_user:
         _assert_not_banned_identity(db, email=email_norm, phone_number=phone_number)
+        configured_admin = is_configured_admin_email(email_norm, settings.admin_email_set)
+        if not configured_admin and not settings.allow_self_service_signup:
+            raise HTTPException(
+                status_code=403,
+                detail="This account has not been provisioned. Contact your Valases administrator.",
+            )
         desired_role = resolve_identity_role(
             email=email_norm,
             role_claim=role_from_claim.value if role_from_claim else None,
@@ -422,7 +482,7 @@ def me_context(
             if not approval:
                 approval = UserApproval(user_id=current_user.id)
                 db.add(approval)
-            approval.status = ApprovalStatus.APPROVED
+            approval.status = ApprovalStatus.PENDING
             approval.rejection_reason = None
             db.commit()
             db.refresh(current_user)
@@ -450,13 +510,16 @@ def me_context(
             raise HTTPException(status_code=403, detail="This account is not allowed to access the platform.")
         if str(current_user.account_state or "active").lower() == "frozen":
             raise HTTPException(status_code=403, detail="This account is temporarily frozen. Contact support.")
+        if not current_user.is_active:
+            raise HTTPException(status_code=403, detail="This account is inactive. Contact support.")
         if changed:
             db.commit()
             db.refresh(current_user)
 
     approval = db.scalar(select(UserApproval).where(UserApproval.user_id == current_user.id))
+    configured_admin = is_configured_admin_email(email_norm, settings.admin_email_set)
     if not approval:
-        default_status = ApprovalStatus.APPROVED
+        default_status = ApprovalStatus.APPROVED if configured_admin else ApprovalStatus.PENDING
         approval = UserApproval(
             user_id=current_user.id,
             status=default_status,
@@ -465,7 +528,7 @@ def me_context(
         db.add(approval)
         db.commit()
         db.refresh(current_user)
-    elif approval.status != ApprovalStatus.APPROVED:
+    elif configured_admin and approval.status != ApprovalStatus.APPROVED:
         approval.status = ApprovalStatus.APPROVED
         approval.rejection_reason = None
         db.commit()
@@ -497,6 +560,8 @@ def register_role(
     token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ):
+    if not get_settings().allow_self_service_signup:
+        raise HTTPException(status_code=404, detail="Not found")
     firebase_uid, email, phone_number, fallback_name, token_payload = _firebase_identity_or_401(token)
     email_norm = str(email or "").strip().lower() or None
     settings = get_settings()
@@ -686,6 +751,7 @@ def recover_self_as_admin(
     token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ):
+    _assert_admin_recovery_enabled()
     settings = get_settings()
     _assert_recovery_key_or_403(payload.recovery_key, settings.admin_recovery_key)
     firebase_uid, email, phone_number, fallback_name, _ = _firebase_identity_or_401(token)
@@ -738,6 +804,7 @@ def admin_set_user_password(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ):
+    _assert_admin_recovery_enabled()
     settings = get_settings()
     _assert_recovery_key_or_403(payload.recovery_key, settings.admin_recovery_key)
     email_norm = str(payload.email or "").strip().lower()
@@ -761,6 +828,7 @@ def admin_breakglass_login(
     payload: LoginRequest,
     db: Session = Depends(get_db),
 ):
+    _assert_admin_recovery_enabled()
     settings = get_settings()
     _assert_recovery_key_or_403(payload.password, settings.admin_recovery_key)
     email_norm = str(payload.email or "").strip().lower()

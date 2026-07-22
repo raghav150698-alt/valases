@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "../components/BrandLogo";
 import { AuthPanel } from "../features/auth/AuthPanel";
 import { AdminConsole } from "../features/admin/AdminConsole";
 import { useAssessmentSession } from "../features/assessment/useAssessmentSession";
 import { ProviderAssessments } from "../features/provider/ProviderAssessments";
-import { CodingEnv } from "../features/tools/CodingEnv";
 import { ExcelSimulator } from "../features/tools/ExcelSimulator";
 import { AccountingTool } from "../features/tools/AccountingTool";
 import { TaxTool } from "../features/tools/TaxTool";
 import { api } from "../lib/api";
 import { useSessionStore } from "../lib/sessionStore";
+
+const CodingEnv = lazy(() => import("../features/tools/CodingEnv"));
 
 type View = "provider";
 
@@ -196,7 +197,9 @@ export function App() {
   if (embedded && ["coding", "code", "vscode", "vs-code"].includes(tool)) {
     return (
       <EmbeddedToolShell onSubmitAssessment={handleToolSubmit}>
-        <CodingEnv assessmentMode />
+        <Suspense fallback={<div className="tool-loading-state" role="status">Loading coding workspace...</div>}>
+          <CodingEnv assessmentMode />
+        </Suspense>
       </EmbeddedToolShell>
     );
   }

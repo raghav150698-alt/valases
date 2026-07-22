@@ -51,7 +51,8 @@ def sync_existing_accounts(
         user_changed = False
         email = (user.email or "").strip().lower()
 
-        if is_configured_admin_email(email, settings.admin_email_set) and user.role != UserRole.ADMIN:
+        configured_admin = is_configured_admin_email(email, settings.admin_email_set)
+        if configured_admin and user.role != UserRole.ADMIN:
             user.role = UserRole.ADMIN
             roles_updated += 1
             user_changed = True
@@ -60,7 +61,7 @@ def sync_existing_accounts(
         if not approval:
             approval = UserApproval(
                 user_id=user.id,
-                status=ApprovalStatus.APPROVED,
+                status=ApprovalStatus.APPROVED if configured_admin else ApprovalStatus.PENDING,
                 rejection_reason=None,
                 reviewed_by_admin_id=None,
                 reviewed_at=None,
@@ -68,9 +69,7 @@ def sync_existing_accounts(
             db.add(approval)
             approvals_created += 1
             user_changed = True
-        elif (
-            approval.status != ApprovalStatus.APPROVED or approval.rejection_reason
-        ):
+        elif configured_admin and (approval.status != ApprovalStatus.APPROVED or approval.rejection_reason):
             approval.status = ApprovalStatus.APPROVED
             approval.rejection_reason = None
             approvals_updated += 1

@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -15,10 +15,16 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.ops_metrics import ops_metrics
 from app.core.rate_limit import InMemoryRateLimiter, LimitRule
-from app.db.init_db import init_db
+from app.db.init_db import init_db, verify_database_schema
 
 settings = get_settings()
-app = FastAPI(title=settings.app_name, version="0.1.0")
+app = FastAPI(
+    title=settings.app_name,
+    version="0.1.0",
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
+)
 request_logger = logging.getLogger("valases.request")
 database_startup_failed = False
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -95,32 +101,48 @@ async def apply_security_headers(request: Request, call_next):
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=()"
+    response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+    if path.startswith(("/auth/", "/admin/", "/exams/", "/proctoring/", "/tools/", "/ops/", "/config/")):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
     if settings.security_enable_csp:
+        supabase_origin = ""
+        if str(settings.supabase_url or "").startswith("https://"):
+            supabase_origin = f" {str(settings.supabase_url).rstrip('/')}"
+        frame_sources = "'self'" if settings.is_production else "'self' http://127.0.0.1:* http://localhost:*"
         csp = (
             "default-src 'self'; "
             "img-src 'self' data: blob: https:; "
             "media-src 'self' blob: data: https:; "
-            "script-src 'self' 'wasm-unsafe-eval' https://www.gstatic.com https://www.googleapis.com https://cdn.jsdelivr.net https://storage.googleapis.com; "
+            "script-src 'self' 'wasm-unsafe-eval' https://www.gstatic.com https://www.googleapis.com https://storage.googleapis.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' data: https://fonts.gstatic.com; "
-            "connect-src 'self' https://www.gstatic.com https://www.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://cdn.jsdelivr.net https://storage.googleapis.com; "
+            f"connect-src 'self'{supabase_origin} https://www.gstatic.com https://www.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://storage.googleapis.com; "
             "worker-src 'self' blob:; "
-            "frame-src 'self' http://127.0.0.1:* http://localhost:*; "
+            f"frame-src {frame_sources}; "
             f"frame-ancestors {settings.security_csp_frame_ancestors}; "
-            "base-uri 'self'; form-action 'self';"
+            "object-src 'none'; manifest-src 'self'; base-uri 'self'; form-action 'self';"
         )
         if settings.security_csp_extra:
             csp = f"{csp} {settings.security_csp_extra.strip()}"
-        response.headers["Content-Security-Policy"] = csp
-    if request.url.scheme == "https":
+        if "Content-Security-Policy" not in response.headers:
+            response.headers["Content-Security-Policy"] = csp
+    if settings.is_production or request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
     return response
 
 
 @app.middleware("http")
 async def enforce_basic_rate_limits(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > max(1024, int(settings.max_request_body_bytes)):
+                return JSONResponse(status_code=413, content={"detail": "Request body is too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header"})
     if not settings.rate_limit_enabled:
         return await call_next(request)
     path = request.url.path or "/"
@@ -130,9 +152,17 @@ async def enforce_basic_rate_limits(request: Request, call_next):
         or path in {"/health", "/favicon.ico", "/manifest.json", "/site.webmanifest", "/apple-touch-icon.png"}
     ):
         return await call_next(request)
-    xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    client_ip = xff or (request.client.host if request.client else "unknown")
-    auth_route = path.startswith("/auth/") or path.startswith("/config/firebase")
+    if settings.is_vercel:
+        forwarded = request.headers.get("x-vercel-forwarded-for") or request.headers.get("x-real-ip") or ""
+        client_ip = forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    else:
+        client_ip = request.client.host if request.client else "unknown"
+    auth_route = (
+        path.startswith("/auth/")
+        or path.startswith("/config/firebase")
+        or path == "/exams/issued/login"
+        or (path.startswith("/exams/issued/key/") and path.endswith("/login"))
+    )
     rule = LimitRule(
         max_requests=settings.rate_limit_auth_requests_per_minute if auth_route else settings.rate_limit_requests_per_minute,
         window_seconds=60,
@@ -153,10 +183,16 @@ async def enforce_basic_rate_limits(request: Request, call_next):
 @app.on_event("startup")
 def on_startup() -> None:
     global database_startup_failed
+    security_errors = settings.production_security_errors()
+    if security_errors:
+        raise RuntimeError("Unsafe production configuration: " + "; ".join(security_errors))
     try:
-        init_db()
+        if settings.is_production and not settings.enable_startup_database_management:
+            verify_database_schema()
+        else:
+            init_db()
     except Exception as exc:
-        if settings.is_vercel and "already exists" in str(exc).lower():
+        if settings.enable_startup_database_management and settings.is_vercel and "already exists" in str(exc).lower():
             # Concurrent Vercel cold starts can race during the first schema
             # bootstrap. The winning instance creates the table; retry after
             # it commits so this instance can continue normally.
@@ -177,10 +213,11 @@ def on_startup() -> None:
 
 @app.get("/health")
 def health():
-    return {
+    payload = {
         "status": "degraded" if database_startup_failed else "ok",
         "database": "unavailable" if database_startup_failed else "ready",
     }
+    return JSONResponse(content=payload, status_code=503 if database_startup_failed else 200)
 
 
 @app.get("/favicon.ico")
@@ -268,7 +305,7 @@ if settings.cors_origins_list:
     app = CORSMiddleware(
         app=app,
         allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
     )

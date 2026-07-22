@@ -72,10 +72,10 @@ def _upload_file_to_s3(local_path: Path, *, object_path: str, content_type: str 
     settings = get_settings()
     key = object_path.lstrip("/")
     client = _s3_client()
+    extra_args = {"ServerSideEncryption": "AES256"}
     if content_type:
-        client.upload_file(str(local_path), settings.aws_s3_bucket_name, key, ExtraArgs={"ContentType": content_type})
-    else:
-        client.upload_file(str(local_path), settings.aws_s3_bucket_name, key)
+        extra_args["ContentType"] = content_type
+    client.upload_file(str(local_path), settings.aws_s3_bucket_name, key, ExtraArgs=extra_args)
     return f"s3://{settings.aws_s3_bucket_name}/{key}"
 
 
@@ -231,6 +231,8 @@ def normalize_image_storage_reference(
         return raw
 
     mime = (match.group("mime") or "application/octet-stream").strip().lower()
+    if mime not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
+        raise ValueError("Unsupported image media type.")
     b64_data = match.group("data") or ""
     try:
         image_bytes = base64.b64decode(b64_data, validate=True)
@@ -238,6 +240,8 @@ def normalize_image_storage_reference(
         raise ValueError("Invalid base64 data URL.") from exc
     if not image_bytes:
         raise ValueError("Image data is empty.")
+    if len(image_bytes) > 5_000_000:
+        raise ValueError("Image data exceeds the 5 MB limit.")
 
     ext = mimetypes.guess_extension(mime) or ".bin"
     if ext == ".jpe":
