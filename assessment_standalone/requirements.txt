@@ -4,4 +4,4 @@ sqlalchemy==2.0.43
 pydantic==2.11.9
 python-multipart==0.0.20
 passlib[bcrypt]==1.7.4
-PyJWT==2.10.1
+PyJWT==2.13.0
