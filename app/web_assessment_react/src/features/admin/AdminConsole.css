@@ -106,11 +106,21 @@
 .admin-modal header > button { width: 30px; height: 30px; padding: 0; border: 1px solid #d3dbe1; border-radius: 4px; background: #fff; }
 .admin-user-form { display: grid; gap: 15px; padding: 20px; }
 .admin-user-form .admin-form-actions { margin: 3px -20px -20px; }
+.admin-user-form label > small { color: #73808a; font-size: 11px; font-weight: 500; }
+.admin-user-form .admin-password-toggle { display: flex; align-items: center; gap: 8px; width: fit-content; color: #51606b; font-weight: 600; }
+.admin-password-toggle input { width: 16px; height: 16px; margin: 0; }
 .admin-created-access { display: grid; gap: 14px; padding: 20px; }
 .admin-created-access dl { display: grid; grid-template-columns: 130px 1fr; gap: 8px 12px; margin: 0; padding: 14px; border-left: 3px solid #176b57; background: #f3f8f6; }
 .admin-created-access dt { color: #627069; font-size: 12px; }
 .admin-created-access dd { margin: 0; font-family: Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
 .admin-created-access button { justify-self: end; }
+.admin-settings-section { max-width: 760px; }
+.admin-settings-account { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 20px; }
+.admin-settings-account > div { display: grid; gap: 4px; }
+.admin-settings-account span, .admin-settings-account small { color: #6d7983; font-size: 12px; }
+.admin-settings-account strong { color: #1e2a34; font-size: 14px; }
+.admin-signout { min-height: 36px; padding: 0 14px; border: 1px solid #d4a8a3; border-radius: 4px; background: #fff; color: #a2382e; font-weight: 700; }
+.admin-signout:hover { background: #fff5f3; }
 @media (max-width: 1050px) {
   .admin-metric-band { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .admin-metric-band > div { border-bottom: 1px solid #e2e7eb; }
@@ -129,4 +139,5 @@
   .admin-metric-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-form-grid { grid-template-columns: 1fr; }
   .admin-span-2 { grid-column: auto; }
+  .admin-settings-account { align-items: flex-start; flex-direction: column; }
 }

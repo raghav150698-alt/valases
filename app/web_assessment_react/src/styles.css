@@ -1219,6 +1219,27 @@ body { margin: 0; background: #f6f8fb; }
   background: #fff;
   box-shadow: 0 24px 60px rgba(15,23,42,.22);
 }
+.workspace-settings-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 0;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+}
+.workspace-settings-account > div { display: grid; gap: 4px; }
+.workspace-settings-account strong { color: #17212b; font-size: 13px; }
+.workspace-settings-account span { color: #66737e; font-size: 12px; }
+.workspace-signout-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid #d4a8a3 !important;
+  border-radius: 4px;
+  background: #fff !important;
+  color: #a2382e !important;
+  font-weight: 700;
+}
 .assessment-table-row strong,
 .issued-list-row strong {
   color: #0f172a;

@@ -9,6 +9,7 @@ import { CodingEnv } from "../features/tools/CodingEnv";
 import { ExcelSimulator } from "../features/tools/ExcelSimulator";
 import { AccountingTool } from "../features/tools/AccountingTool";
 import { TaxTool } from "../features/tools/TaxTool";
+import { api } from "../lib/api";
 import { useSessionStore } from "../lib/sessionStore";
 
 type View = "provider";
@@ -127,7 +128,10 @@ function EmbeddedToolShell({
 
 export function App() {
   const [view] = useState<View>("provider");
+  const token = useSessionStore((s) => s.token);
   const role = useSessionStore((s) => s.role);
+  const setSession = useSessionStore((s) => s.setSession);
+  const [sessionResolved, setSessionResolved] = useState(!token);
   const params = new URLSearchParams(window.location.search);
   const embedded = params.get("embedded") === "1";
   const tool = String(params.get("tool") || "").trim().toLowerCase();
@@ -143,6 +147,34 @@ export function App() {
     }
     return null;
   }, [recruiterAuthenticated]);
+
+  useEffect(() => {
+    if (!token) {
+      setSessionResolved(true);
+      return;
+    }
+
+    let active = true;
+    setSessionResolved(false);
+    void api.get("/auth/me/context", {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((response) => {
+      if (!active) return;
+      const resolvedRole = String(response.data?.role || "").trim().toLowerCase();
+      if (resolvedRole === "admin" || resolvedRole === "provider" || resolvedRole === "student") {
+        setSession(token, resolvedRole);
+      }
+    }).catch(() => {
+      // The API interceptor clears expired sessions. For transient failures,
+      // retain the last known session so a reload can retry role resolution.
+    }).finally(() => {
+      if (active) setSessionResolved(true);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [setSession, token]);
 
   if (embedded && tool === "excel") {
     return (
@@ -187,6 +219,16 @@ export function App() {
 
   if (issuedAccessKey) {
     return <CandidatePortalRedirect accessKey={issuedAccessKey} />;
+  }
+
+  if (token && !sessionResolved) {
+    return (
+      <main className="assessment-thank-you" role="status">
+        <BrandLogo className="assessment-brand-logo" />
+        <h1>Opening your workspace</h1>
+        <p>Confirming your account access...</p>
+      </main>
+    );
   }
 
   if (role === "admin") {

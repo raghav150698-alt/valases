@@ -8,6 +8,27 @@ from app.models.entities import ApprovalStatus, User, UserApproval, UserRole
 from app.services.firebase_auth import get_firebase_uid_by_email, set_firebase_custom_claims
 
 
+def is_configured_admin_email(email: str | None, admin_emails: set[str]) -> bool:
+    email_norm = str(email or "").strip().lower()
+    return bool(email_norm and email_norm in admin_emails)
+
+
+def resolve_identity_role(
+    *,
+    email: str | None,
+    role_claim: str | None,
+    admin_emails: set[str],
+    default_role: UserRole = UserRole.STUDENT,
+) -> UserRole:
+    """Resolve a trusted application role from an authenticated identity."""
+    if is_configured_admin_email(email, admin_emails):
+        return UserRole.ADMIN
+    normalized_claim = str(role_claim or "").strip().lower()
+    if normalized_claim in {UserRole.PROVIDER.value, UserRole.STUDENT.value}:
+        return UserRole(normalized_claim)
+    return default_role
+
+
 def sync_existing_accounts(
     db: Session,
     *,
@@ -29,6 +50,11 @@ def sync_existing_accounts(
         users_scanned += 1
         user_changed = False
         email = (user.email or "").strip().lower()
+
+        if is_configured_admin_email(email, settings.admin_email_set) and user.role != UserRole.ADMIN:
+            user.role = UserRole.ADMIN
+            roles_updated += 1
+            user_changed = True
 
         approval = db.scalar(select(UserApproval).where(UserApproval.user_id == user.id))
         if not approval:

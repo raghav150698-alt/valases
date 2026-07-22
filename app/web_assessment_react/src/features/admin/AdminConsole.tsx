@@ -8,7 +8,13 @@ import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
 import "./AdminConsole.css";
 
-type AdminTab = "overview" | "companies" | "users" | "usage" | "billing";
+type AdminTab = "overview" | "companies" | "users" | "usage" | "billing" | "settings";
+
+type AccountContext = {
+  email: string;
+  full_name: string;
+  role: string;
+};
 
 type Overview = {
   companies: number;
@@ -117,15 +123,20 @@ export function AdminConsole() {
   const [tab, setTab] = useState<AdminTab>("overview");
   const [search, setSearch] = useState("");
   const [usageDays, setUsageDays] = useState(30);
-  const [showNewUser, setShowNewUser] = useState(false);
-  const [createdAccess, setCreatedAccess] = useState<{ email: string; temporary_password: string } | null>(null);
-  const [newUser, setNewUser] = useState({ full_name: "", email: "", company_name: "", temporary_password: "" });
+  const [showNewCompany, setShowNewCompany] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [createdCompany, setCreatedCompany] = useState<{ business_name: string; email: string } | null>(null);
+  const [newCompany, setNewCompany] = useState({ business_name: "", email: "", password: "" });
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null);
   const [billingForm, setBillingForm] = useState<Billing>(emptyBilling);
 
   const overview = useQuery({
     queryKey: ["admin-overview"],
     queryFn: async () => (await api.get<Overview>("/admin/workspace/overview")).data,
+  });
+  const account = useQuery({
+    queryKey: ["admin-account"],
+    queryFn: async () => (await api.get<AccountContext>("/auth/me/context")).data,
   });
   const companies = useQuery({
     queryKey: ["admin-companies"],
@@ -159,14 +170,12 @@ export function AdminConsole() {
     if (company) setBillingForm({ ...company.billing, billing_email: company.billing.billing_email || company.owner_email, notes: company.billing.notes || "" });
   }, [companies.data, selectedProviderId]);
 
-  const createUser = useMutation({
-    mutationFn: async () => (await api.post("/admin/workspace/users", {
-      ...newUser,
-      temporary_password: newUser.temporary_password || null,
-    })).data as { email: string; temporary_password: string },
+  const createCompany = useMutation({
+    mutationFn: async () => (await api.post("/admin/workspace/companies", newCompany)).data as { business_name: string; email: string },
     onSuccess: async (data) => {
-      setCreatedAccess(data);
-      setNewUser({ full_name: "", email: "", company_name: "", temporary_password: "" });
+      setCreatedCompany(data);
+      setNewCompany({ business_name: "", email: "", password: "" });
+      setShowPassword(false);
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["admin-overview"] }),
         qc.invalidateQueries({ queryKey: ["admin-companies"] }),
@@ -208,15 +217,18 @@ export function AdminConsole() {
     },
   });
 
-  const handleCreateUser = (event: FormEvent) => {
+  const handleCreateCompany = (event: FormEvent) => {
     event.preventDefault();
-    setCreatedAccess(null);
-    createUser.mutate();
+    setCreatedCompany(null);
+    createCompany.mutate();
   };
 
   const logout = async () => {
-    if (supabase) await supabase.auth.signOut();
-    clearSession();
+    try {
+      if (supabase) await supabase.auth.signOut();
+    } finally {
+      clearSession();
+    }
   };
 
   const pageTitles: Record<AdminTab, [string, string]> = {
@@ -225,6 +237,7 @@ export function AdminConsole() {
     users: ["Users", "Provision recruiter accounts and control access."],
     usage: ["Usage", "Track assessment delivery and completion by company."],
     billing: ["Billing", "Maintain plans, allowances, pricing, and billing periods."],
+    settings: ["Settings", "Manage your administrator session and account access."],
   };
   const [title, description] = pageTitles[tab];
   const metrics = overview.data;
@@ -234,20 +247,20 @@ export function AdminConsole() {
       <aside className="admin-rail">
         <div className="admin-brand"><BrandLogo className="workspace-brand-logo" /><div><strong>Valases</strong><small>Administration</small></div></div>
         <nav aria-label="Administration">
-          {(["overview", "companies", "users", "usage", "billing"] as AdminTab[]).map((item) => (
+          {(["overview", "companies", "users", "usage", "billing", "settings"] as AdminTab[]).map((item) => (
             <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>
           ))}
         </nav>
         <div className="admin-account">
-          <div><strong>admin@valases.com</strong><small>Platform administrator</small></div>
-          <button type="button" onClick={() => void logout()}>Sign out</button>
+          <div><strong>{account.data?.email || "Administrator"}</strong><small>Platform administrator</small></div>
+          <button type="button" onClick={() => setTab("settings")}>Settings</button>
         </div>
       </aside>
 
       <main className="admin-main">
         <header className="admin-page-head">
           <div><h1>{title}</h1><p>{description}</p></div>
-          {tab === "users" && <button type="button" className="admin-primary" onClick={() => { setCreatedAccess(null); setShowNewUser(true); }}>Add user</button>}
+          {tab === "companies" && <button type="button" className="admin-primary" onClick={() => { setCreatedCompany(null); setShowNewCompany(true); }}>Add company</button>}
         </header>
 
         {overview.isError && <div className="admin-error">{apiMessage(overview.error, "Administration data could not be loaded.")}</div>}
@@ -324,9 +337,51 @@ export function AdminConsole() {
             </form>
           </section>
         )}
+
+        {tab === "settings" && (
+          <section className="admin-section admin-settings-section">
+            <div className="admin-section-head">
+              <div><h2>Administrator account</h2><p>Your current authenticated Valases session.</p></div>
+            </div>
+            <div className="admin-settings-account">
+              <div>
+                <span>Signed in as</span>
+                <strong>{account.data?.full_name || "Valases Administrator"}</strong>
+                <small>{account.data?.email || "admin@valases.com"}</small>
+              </div>
+              <button type="button" className="admin-signout" onClick={() => void logout()}>Sign out</button>
+            </div>
+          </section>
+        )}
       </main>
 
-      {showNewUser && <div className="admin-modal-backdrop" role="presentation" onMouseDown={() => setShowNewUser(false)}><section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="new-user-title" onMouseDown={(event) => event.stopPropagation()}><header><div><h2 id="new-user-title">Add recruiter account</h2><p>Create the company owner and their Supabase sign-in.</p></div><button type="button" aria-label="Close" onClick={() => setShowNewUser(false)}>x</button></header>{createdAccess ? <div className="admin-created-access"><strong>Account created</strong><p>Share these credentials through a secure channel. The password is shown only here.</p><dl><dt>Email</dt><dd>{createdAccess.email}</dd><dt>Temporary password</dt><dd>{createdAccess.temporary_password}</dd></dl><button type="button" className="admin-primary" onClick={() => setShowNewUser(false)}>Done</button></div> : <form onSubmit={handleCreateUser} className="admin-user-form"><label>Full name<input required minLength={2} value={newUser.full_name} onChange={(event) => setNewUser((value) => ({ ...value, full_name: event.target.value }))} /></label><label>Work email<input required type="email" value={newUser.email} onChange={(event) => setNewUser((value) => ({ ...value, email: event.target.value }))} /></label><label>Company name<input required minLength={2} value={newUser.company_name} onChange={(event) => setNewUser((value) => ({ ...value, company_name: event.target.value }))} /></label><label>Temporary password <small>Optional</small><input type="text" minLength={10} value={newUser.temporary_password} onChange={(event) => setNewUser((value) => ({ ...value, temporary_password: event.target.value }))} placeholder="Generate automatically" /></label>{createUser.isError && <div className="admin-error">{apiMessage(createUser.error, "The user could not be created.")}</div>}<div className="admin-form-actions"><button type="button" onClick={() => setShowNewUser(false)}>Cancel</button><button className="admin-primary" type="submit" disabled={createUser.isPending}>{createUser.isPending ? "Creating..." : "Create account"}</button></div></form>}</section></div>}
+      {showNewCompany && (
+        <div className="admin-modal-backdrop" role="presentation" onMouseDown={() => setShowNewCompany(false)}>
+          <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="new-company-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div><h2 id="new-company-title">Add company</h2><p>Create the business workspace and its initial login.</p></div>
+              <button type="button" aria-label="Close" onClick={() => setShowNewCompany(false)}>x</button>
+            </header>
+            {createdCompany ? (
+              <div className="admin-created-access">
+                <strong>Company created</strong>
+                <p>The company workspace is active and ready for sign in.</p>
+                <dl><dt>Business</dt><dd>{createdCompany.business_name}</dd><dt>Email</dt><dd>{createdCompany.email}</dd></dl>
+                <button type="button" className="admin-primary" onClick={() => setShowNewCompany(false)}>Done</button>
+              </div>
+            ) : (
+              <form onSubmit={handleCreateCompany} className="admin-user-form">
+                <label>Business name<input required minLength={2} maxLength={200} autoFocus value={newCompany.business_name} onChange={(event) => setNewCompany((value) => ({ ...value, business_name: event.target.value }))} /></label>
+                <label>Email<input required type="email" autoComplete="email" value={newCompany.email} onChange={(event) => setNewCompany((value) => ({ ...value, email: event.target.value }))} /></label>
+                <label>Password<input required type={showPassword ? "text" : "password"} autoComplete="new-password" minLength={10} maxLength={128} value={newCompany.password} onChange={(event) => setNewCompany((value) => ({ ...value, password: event.target.value }))} /><small>Use at least 10 characters.</small></label>
+                <label className="admin-password-toggle"><input type="checkbox" checked={showPassword} onChange={(event) => setShowPassword(event.target.checked)} /><span>Show password</span></label>
+                {createCompany.isError && <div className="admin-error">{apiMessage(createCompany.error, "The company could not be created.")}</div>}
+                <div className="admin-form-actions"><button type="button" onClick={() => setShowNewCompany(false)}>Cancel</button><button className="admin-primary" type="submit" disabled={createCompany.isPending}>{createCompany.isPending ? "Creating..." : "Create company"}</button></div>
+              </form>
+            )}
+          </section>
+        </div>
+      )}
     </section>
   );
 }

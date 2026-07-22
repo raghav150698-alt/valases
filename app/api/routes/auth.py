@@ -13,6 +13,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.db.session import get_db
 from app.models.entities import ApprovalStatus, ProviderProfile, User, UserApproval, UserIdentityVerification, UserRole
 from app.schemas import AdminRecoveryRequest, AdminSetUserPasswordRequest, LoginRequest, RegisterRoleRequest, SignupRequest, TokenResponse, UserOut
+from app.services.account_rules import is_configured_admin_email, resolve_identity_role
 from app.services.firebase_auth import (
     create_firebase_custom_token,
     ensure_firebase_user_uid,
@@ -325,7 +326,14 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             token = sign_in_with_password(payload.email.strip(), payload.password, settings)
             identity_payload = verify_supabase_token(token, settings)
             role_claim = str(identity_payload.get("role") or "").strip().lower()
-            role = UserRole(role_claim) if role_claim in {item.value for item in UserRole} else UserRole.PROVIDER
+            identity_email = str(identity_payload.get("email") or payload.email).strip().lower()
+            existing_user = db.scalar(_normalized_user_query(identity_email))
+            role = resolve_identity_role(
+                email=identity_email,
+                role_claim=role_claim,
+                admin_emails=settings.admin_email_set,
+                default_role=existing_user.role if existing_user else UserRole.PROVIDER,
+            )
             return TokenResponse(access_token=token, role=role)
         except Exception as exc:
             raise HTTPException(status_code=401, detail=str(exc) or "Unable to sign in with Supabase.") from exc
@@ -368,15 +376,11 @@ def me_context(
         role_from_claim = UserRole(role_claim)
     if not current_user:
         _assert_not_banned_identity(db, email=email_norm, phone_number=phone_number)
-        desired_role: UserRole
-        if role_from_claim in {UserRole.STUDENT, UserRole.PROVIDER}:
-            desired_role = role_from_claim
-        elif role_from_claim == UserRole.ADMIN:
-            desired_role = UserRole.ADMIN if (email_norm and email_norm in settings.admin_email_set) else UserRole.STUDENT
-        elif email_norm and email_norm in settings.admin_email_set:
-            desired_role = UserRole.ADMIN
-        else:
-            desired_role = UserRole.STUDENT
+        desired_role = resolve_identity_role(
+            email=email_norm,
+            role_claim=role_from_claim.value if role_from_claim else None,
+            admin_emails=settings.admin_email_set,
+        )
         if desired_role == UserRole.ADMIN:
             current_user = User(
                 email=email_norm,
@@ -425,7 +429,11 @@ def me_context(
             _safe_sync_claims(firebase_uid, current_user, approval.status)
     else:
         changed = False
-        if current_user.role == UserRole.ADMIN and (not email_norm or email_norm not in settings.admin_email_set):
+        configured_admin = is_configured_admin_email(email_norm, settings.admin_email_set)
+        if configured_admin and current_user.role != UserRole.ADMIN:
+            current_user.role = UserRole.ADMIN
+            changed = True
+        elif current_user.role == UserRole.ADMIN and not configured_admin:
             current_user.role = _resolve_non_admin_role(
                 db,
                 user_id=current_user.id,

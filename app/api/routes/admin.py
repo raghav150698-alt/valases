@@ -59,6 +59,12 @@ class AdminUserCreate(BaseModel):
     temporary_password: str | None = Field(default=None, min_length=10, max_length=128)
 
 
+class AdminCompanyCreate(BaseModel):
+    business_name: str = Field(min_length=2, max_length=200)
+    email: EmailStr
+    password: str = Field(min_length=10, max_length=128)
+
+
 class BillingAccountUpdate(BaseModel):
     plan_code: str = Field(default="trial", max_length=40)
     status: str = Field(default="trialing", max_length=30)
@@ -104,6 +110,94 @@ def _billing_payload(account: ProviderBillingAccount | None, provider: ProviderP
         "current_period_start": account.current_period_start if account else None,
         "current_period_end": account.current_period_end if account else None,
         "notes": account.notes if account else None,
+    }
+
+
+def _create_company_account(
+    *,
+    business_name: str,
+    email_address: str,
+    password: str,
+    account_name: str | None,
+    db: Session,
+    current_user: User,
+) -> dict:
+    email = email_address.strip().lower()
+    company_name = business_name.strip()
+    owner_name = (account_name or company_name).strip()
+    if db.scalar(select(User.id).where(func.lower(func.trim(User.email)) == email)):
+        raise HTTPException(status_code=409, detail="A user with this email already exists.")
+    try:
+        auth_result = ensure_supabase_user(
+            email=email,
+            password=password,
+            full_name=owner_name,
+            role=UserRole.PROVIDER.value,
+            settings=get_settings(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=f"Supabase user provisioning failed: {exc}") from exc
+    if not auth_result.get("configured"):
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase company provisioning is not configured. Add SUPABASE_SECRET_KEY to the backend environment.",
+        )
+    if auth_result.get("existing"):
+        raise HTTPException(
+            status_code=409,
+            detail="This email already has a Supabase account. Use a different email or recover the existing account.",
+        )
+
+    user = User(
+        email=email,
+        full_name=owner_name,
+        password_hash=hash_password(password),
+        role=UserRole.PROVIDER,
+        is_active=True,
+        account_state="active",
+    )
+    db.add(user)
+    db.flush()
+    provider = ProviderProfile(
+        user_id=user.id,
+        provider_type=ProviderType.BUSINESS,
+        display_name=company_name,
+        description="Valases recruiter organization",
+        approval_status=ApprovalStatus.APPROVED,
+        reviewed_by_admin_id=current_user.id,
+        reviewed_at=datetime.now(timezone.utc),
+    )
+    db.add(provider)
+    db.add(UserApproval(
+        user_id=user.id,
+        status=ApprovalStatus.APPROVED,
+        reviewed_by_admin_id=current_user.id,
+        reviewed_at=datetime.now(timezone.utc),
+    ))
+    db.flush()
+    db.add(ProviderBillingAccount(
+        provider_id=provider.id,
+        plan_code="trial",
+        status="trialing",
+        billing_email=email,
+        current_period_start=datetime.now(timezone.utc),
+        current_period_end=datetime.now(timezone.utc) + timedelta(days=14),
+    ))
+    _audit(
+        db,
+        current_user.id,
+        "company_created",
+        "provider",
+        provider.id,
+        {"email": email, "company": company_name, "owner_user_id": user.id},
+    )
+    db.commit()
+    return {
+        "user_id": user.id,
+        "provider_id": provider.id,
+        "business_name": company_name,
+        "email": email,
+        "supabase": auth_result,
     }
 
 
@@ -191,6 +285,22 @@ def admin_workspace_companies(
     return {"items": items, "total": len(items)}
 
 
+@router.post("/workspace/companies", status_code=201)
+def admin_workspace_create_company(
+    payload: AdminCompanyCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    return _create_company_account(
+        business_name=payload.business_name,
+        email_address=str(payload.email),
+        password=payload.password,
+        account_name=None,
+        db=db,
+        current_user=current_user,
+    )
+
+
 @router.get("/workspace/users")
 def admin_workspace_users(
     q: str = Query(default="", max_length=120),
@@ -232,63 +342,18 @@ def admin_workspace_create_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ):
-    email = str(payload.email).strip().lower()
-    if db.scalar(select(User.id).where(func.lower(func.trim(User.email)) == email)):
-        raise HTTPException(status_code=409, detail="A user with this email already exists.")
     temporary_password = payload.temporary_password or secrets.token_urlsafe(12)
-    try:
-        auth_result = ensure_supabase_user(
-            email=email,
-            password=temporary_password,
-            full_name=payload.full_name.strip(),
-            role=UserRole.PROVIDER.value,
-            settings=get_settings(),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail=f"Supabase user provisioning failed: {exc}") from exc
-    user = User(
-        email=email,
-        full_name=payload.full_name.strip(),
-        password_hash=hash_password(temporary_password),
-        role=UserRole.PROVIDER,
-        is_active=True,
-        account_state="active",
+    result = _create_company_account(
+        business_name=payload.company_name,
+        email_address=str(payload.email),
+        password=temporary_password,
+        account_name=payload.full_name,
+        db=db,
+        current_user=current_user,
     )
-    db.add(user)
-    db.flush()
-    provider = ProviderProfile(
-        user_id=user.id,
-        provider_type=ProviderType.BUSINESS,
-        display_name=payload.company_name.strip(),
-        description="Valases recruiter organization",
-        approval_status=ApprovalStatus.APPROVED,
-        reviewed_by_admin_id=current_user.id,
-        reviewed_at=datetime.now(timezone.utc),
-    )
-    db.add(provider)
-    db.add(UserApproval(
-        user_id=user.id,
-        status=ApprovalStatus.APPROVED,
-        reviewed_by_admin_id=current_user.id,
-        reviewed_at=datetime.now(timezone.utc),
-    ))
-    db.flush()
-    db.add(ProviderBillingAccount(
-        provider_id=provider.id,
-        plan_code="trial",
-        status="trialing",
-        billing_email=email,
-        current_period_start=datetime.now(timezone.utc),
-        current_period_end=datetime.now(timezone.utc) + timedelta(days=14),
-    ))
-    _audit(db, current_user.id, "provider_user_created", "user", user.id, {"email": email, "company": provider.display_name})
-    db.commit()
     return {
-        "user_id": user.id,
-        "provider_id": provider.id,
-        "email": email,
+        **result,
         "temporary_password": temporary_password,
-        "supabase": auth_result,
     }
 
 

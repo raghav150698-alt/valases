@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "../../components/BrandLogo";
 import { api } from "../../lib/api";
+import { useSessionStore } from "../../lib/sessionStore";
+import { supabase } from "../../lib/supabase";
 import { CodingEnv } from "../tools/CodingEnv";
 import { ExcelAssessmentSubmission, ExcelSimulator } from "../tools/ExcelSimulator";
 import { RemoteDesktopTool } from "../tools/RemoteDesktopTool";
@@ -168,6 +170,7 @@ function formatResultDate(value?: string | null) {
 
 export function ProviderAssessments() {
   const qc = useQueryClient();
+  const clearSession = useSessionStore((state) => state.clear);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("dashboard");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedExamId, setSelectedExamId] = useState<number | null>(null);
@@ -564,6 +567,14 @@ export function ProviderAssessments() {
     assessments: ["Assessments", "Build, publish, issue, and review candidate assessments."],
     results: ["Results & analytics", "Compare candidate outcomes and assessment effectiveness."],
   } as const;
+
+  const logout = async () => {
+    try {
+      if (supabase) await supabase.auth.signOut();
+    } finally {
+      clearSession();
+    }
+  };
 
   return (
     <section className="provider-workspace hrms-shell">
@@ -1159,6 +1170,10 @@ export function ProviderAssessments() {
               <label className="field-stack"><span>Workspace name</span><input defaultValue="Valases Recruiting" /></label>
               <label className="field-stack"><span>Default pass score</span><input type="number" defaultValue="70" /></label>
               <label className="field-stack workspace-span-2"><span>Timezone</span><select defaultValue="Asia/Calcutta"><option value="Asia/Calcutta">India Standard Time (IST)</option><option value="UTC">UTC</option></select></label>
+            </div>
+            <div className="workspace-settings-account">
+              <div><strong>Account access</strong><span>End your session on this device.</span></div>
+              <button type="button" className="workspace-signout-btn" onClick={() => void logout()}>Sign out</button>
             </div>
             <div className="workspace-form-footer"><button type="button" className="secondary-btn" onClick={() => setShowSettings(false)}>Cancel</button><button type="button" onClick={() => setShowSettings(false)}>Save settings</button></div>
           </section>

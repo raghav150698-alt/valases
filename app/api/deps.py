@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.entities import ApprovalStatus, BannedIdentity, ProviderProfile, User, UserApproval, UserRole
+from app.services.account_rules import is_configured_admin_email, resolve_identity_role
 from app.services.firebase_auth import set_firebase_custom_claims, verify_firebase_token
 from app.services.supabase_auth import verify_supabase_token
 
@@ -110,14 +111,11 @@ def get_current_user(
         if db.scalar(select(BannedIdentity.id).where(BannedIdentity.phone_number == phone_number)):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account is banned.")
     if not user:
-        if role_claim in {UserRole.PROVIDER.value, UserRole.STUDENT.value}:
-            role = UserRole(role_claim)
-        elif role_claim == UserRole.ADMIN.value and email_norm and email_norm in settings.admin_email_set:
-            role = UserRole.ADMIN
-        elif email_norm and email_norm in settings.admin_email_set:
-            role = UserRole.ADMIN
-        else:
-            role = UserRole.STUDENT
+        role = resolve_identity_role(
+            email=email_norm,
+            role_claim=role_claim,
+            admin_emails=settings.admin_email_set,
+        )
         user = User(
             email=email_norm or f"{firebase_uid}@firebase.local",
             phone_number=phone_number,
@@ -140,7 +138,11 @@ def get_current_user(
         return user
 
     changed = False
-    if user.role == UserRole.ADMIN and (not email_norm or email_norm not in settings.admin_email_set):
+    configured_admin = is_configured_admin_email(email_norm, settings.admin_email_set)
+    if configured_admin and user.role != UserRole.ADMIN:
+        user.role = UserRole.ADMIN
+        changed = True
+    elif user.role == UserRole.ADMIN and not configured_admin:
         user.role = _resolve_non_admin_role(
             db,
             user_id=user.id,
