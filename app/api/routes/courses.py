@@ -23,7 +23,7 @@ def _provider_profile_or_404(db: Session, user_id: int) -> ProviderProfile:
 
 
 def _can_delete_course(db: Session, course: Course, current_user: User) -> bool:
-    if current_user.role == UserRole.ADMIN and str(current_user.email or "").strip().lower() == "admin@certora.in":
+    if current_user.role == UserRole.ADMIN and str(current_user.email or "").strip().lower() in get_settings().admin_email_set:
         return True
     if current_user.role != UserRole.PROVIDER:
         return False

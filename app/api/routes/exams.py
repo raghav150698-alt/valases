@@ -49,7 +49,7 @@ ALLOWED_TIME_PER_QUESTION_SECONDS = {25, 30, 35, 40, 45}
 ALLOWED_ASSESSMENT_TYPES = {x.value for x in AssessmentType}
 STANDALONE_ASSESSMENT_CATEGORY = "__standalone_assessment__"
 ISSUED_TOKEN_ROLE = "issued_candidate"
-request_logger = logging.getLogger("certora.request")
+request_logger = logging.getLogger("valases.request")
 
 
 def _sync_pk_sequence_if_needed(db: Session, table_name: str, pk_col: str = "id") -> None:
@@ -569,7 +569,7 @@ def _safe_send_assessment_issue_email(
     <p style=\"font-size:14px;color:#526071\">Please review the assessment instructions and privacy information before starting. The assessment link is personal to you.</p>
     <p style=\"font-size:13px\"><a href=\"{safe_privacy}\">Privacy policy</a> &nbsp; <a href=\"{safe_retention}\">Data retention</a></p>
   </div>
-  <p style=\"font-size:12px;color:#667085;text-align:center\">This invitation was sent by {safe_company} through Certora Assessments.</p>
+  <p style=\"font-size:12px;color:#667085;text-align:center\">This invitation was sent by {safe_company} through Valases Assessments.</p>
 </div></body></html>"""
     try:
         return send_email(to_email, subject, body, html_body=html_body)

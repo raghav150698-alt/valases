@@ -1152,7 +1152,7 @@ def provider_assessments(
             "total_marks": exam.total_marks,
             "question_count": int(question_counts.get(exam.id, 0)),
             "checkpoint_count": len((task_by_exam[exam.id].grading_config_json or {}).get("checkpoints") or []) if exam.id in task_by_exam else 0,
-            "is_certora_default": exam.id in template_installs,
+            "is_platform_default": exam.id in template_installs,
             "template_key": templates_by_id.get(template_installs[exam.id].template_id).template_key if exam.id in template_installs and templates_by_id.get(template_installs[exam.id].template_id) else None,
             "template_version": template_installs[exam.id].template_version if exam.id in template_installs else None,
             "issued_count": int(issued_counts.get(exam.id, 0)),

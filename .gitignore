@@ -5,7 +5,7 @@ __pycache__/
 *.pyc
 .env
 gmail.smtp.local.env
-certora.db
+*.db
 logs/
 secrets/
 app/web/media/

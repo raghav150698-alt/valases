@@ -167,8 +167,8 @@ def migrate(source_url: str, target_url: str, replace: bool, sync_rules: bool) -
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Migrate Certora data from local SQLite to target database.")
-    parser.add_argument("--source-sqlite", default="certora.db", help="Path to local SQLite DB file (default: certora.db)")
+    parser = argparse.ArgumentParser(description="Migrate Valases data from local SQLite to target database.")
+    parser.add_argument("--source-sqlite", default="valases.db", help="Path to local SQLite DB file (default: valases.db)")
     parser.add_argument(
         "--target-url",
         default=os.getenv("TARGET_DATABASE_URL") or os.getenv("DATABASE_URL"),

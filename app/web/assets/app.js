@@ -202,7 +202,7 @@ const COURSE_PRICING = {
 
 const COURSE_AGE_RANGE_KEYS = ["under_13", "13_17", "18_24", "25_34", "35_44", "45_plus"];
 
-window.__certoraDebug = {
+window.__valasesDebug = {
   getState() {
     return state;
   },
@@ -2159,7 +2159,7 @@ function toggleWorkspaceCollapse() {
   const collapsed = !document.body.classList.contains("workspace-collapsed");
   applyWorkspaceCollapse(collapsed);
   try {
-    localStorage.setItem("certora_workspace_collapsed", collapsed ? "1" : "0");
+    localStorage.setItem("valases_workspace_collapsed", collapsed ? "1" : "0");
   } catch {}
 }
 
@@ -2367,7 +2367,7 @@ function renderStudentHomeSnapshots() {
     target.innerHTML = `<div class="item"><div class="meta">No suggested courses yet.</div></div>`;
     return;
   }
-  const fallbackThumb = "/assets/classagon_logo.png?v=20260422c";
+  const fallbackThumb = "/assets/brand/valases-logo.png";
   const difficultyMeta = (course) => {
     const tag = String(course?.difficulty_tag || "").trim();
     const attempts = Number(course?.difficulty_attempt_count || 0);
@@ -2453,7 +2453,7 @@ function renderStudentAssessmentsList() {
     `;
     return;
   }
-  const fallbackThumb = "/assets/classagon_logo.png?v=20260422c";
+  const fallbackThumb = "/assets/brand/valases-logo.png";
   const cards = rows.map((r) => `
     <article class="course-tile">
       <img src="${escapeHtmlAttr(r.thumbnail_url || fallbackThumb)}" alt="" class="${r.thumbnail_url ? "course-tile-thumb" : "course-tile-thumb is-logo"}" onerror="this.onerror=null;this.src='${fallbackThumb}';this.className='course-tile-thumb is-logo';" />
@@ -3098,7 +3098,7 @@ function findLiveLessons(course) {
 function canDeleteCourseFromUi() {
   const role = String(state.context?.role || "").toLowerCase();
   const email = String(state.context?.email || "").trim().toLowerCase();
-  return role === "provider" || (role === "admin" && email === "admin@certora.in");
+  return role === "provider" || role === "admin";
 }
 
 async function fetchVideoDuration(url) {
@@ -3116,7 +3116,7 @@ async function fetchVideoDuration(url) {
 }
 
 function resolveCourseThumbnail(course, lesson) {
-  const fallback = "/assets/classagon_logo.png?v=20260422c";
+  const fallback = "/assets/brand/valases-logo.png";
   if (course?.thumbnail_url) return course.thumbnail_url;
   const firstTopicThumb = lesson?.topics?.find((t) => t.thumbnail_data_url)?.thumbnail_data_url;
   return firstTopicThumb || fallback;
@@ -4469,7 +4469,7 @@ async function refreshStudentLiveClasses() {
       toast(msg);
       if ("Notification" in window) {
         if (Notification.permission === "granted") {
-          try { new Notification("Classagon Class Reminder", { body: msg }); } catch {}
+          try { new Notification("Valases Class Reminder", { body: msg }); } catch {}
         } else if (Notification.permission === "default") {
           Notification.requestPermission().catch(() => {});
         }
@@ -6237,7 +6237,7 @@ function isAssessmentDraftSourceSelected() {
   return raw.startsWith("draft:");
 }
 
-const ASSESSMENT_BUILDER_CACHE_KEY = "certora_assessment_builder_cache_v1";
+const ASSESSMENT_BUILDER_CACHE_KEY = "valases_assessment_builder_cache_v1";
 
 function persistAssessmentBuilderCache() {
   try {
@@ -10475,7 +10475,7 @@ const providerCodingWorkspace = {
         "</head>",
         "<body>",
         "  <main class=\"hero\">",
-        "    <p class=\"eyebrow\">Classagon Preview</p>",
+        "    <p class=\"eyebrow\">Valases Preview</p>",
         "    <h1>Static preview is working.</h1>",
         "    <p class=\"lede\">This page is rendered from the Coding Env preview host.</p>",
         "    <button id=\"demoButton\" class=\"cta\">Click me</button>",
@@ -11137,7 +11137,7 @@ function resetProviderCodingWorkspace() {
         "</head>",
         "<body>",
         "  <main class=\"hero\">",
-        "    <p class=\"eyebrow\">Classagon Preview</p>",
+        "    <p class=\"eyebrow\">Valases Preview</p>",
         "    <h1>Static preview is working.</h1>",
         "    <p class=\"lede\">This page is rendered from the Coding Env preview host.</p>",
         "    <button id=\"demoButton\" class=\"cta\">Click me</button>",
@@ -12527,7 +12527,7 @@ function bindEvents() {
   initializeLiveIconButtons();
   refreshLiveFullscreenButton();
   let appNetworkHideTimer = null;
-  window.addEventListener("certora:network-busy", (event) => {
+  window.addEventListener("valases:network-busy", (event) => {
     const pending = Number(event?.detail?.pending || 0);
     if (pending > 0) {
       if (appNetworkHideTimer) {
@@ -12687,7 +12687,7 @@ function bindEvents() {
               breakglassErrorMessage = String(breakglassErr?.message || breakglassErr || "").trim();
             }
           }
-          if (!loggedIn && email === "admin@certora.in") {
+          if (!loggedIn && email === "admin@valases.com") {
             if (breakglassErrorMessage) {
               throw new Error(
                 `Admin break-glass login failed. ${breakglassErrorMessage}`,
@@ -12774,7 +12774,7 @@ function bindEvents() {
         await signOut(state.auth);
       }
       try {
-        localStorage.setItem("certora_signup_role_intent", role);
+        localStorage.setItem("valases_signup_role_intent", role);
       } catch {}
       state.authRoleSetupInFlight = true;
       let cred = null;
@@ -12821,7 +12821,7 @@ function bindEvents() {
         context = await loadSessionContext();
       }
       try {
-        localStorage.removeItem("certora_signup_role_intent");
+        localStorage.removeItem("valases_signup_role_intent");
       } catch {}
       toast("Account created");
     } catch (err) {
@@ -12830,7 +12830,7 @@ function bindEvents() {
       const currentEmail = String(state.auth?.currentUser?.email || "").trim().toLowerCase();
       if (requestedEmail && currentEmail && currentEmail === requestedEmail) {
         try {
-          const fallbackRole = String(localStorage.getItem("certora_signup_role_intent") || "").trim().toLowerCase();
+          const fallbackRole = String(localStorage.getItem("valases_signup_role_intent") || "").trim().toLowerCase();
           let context = null;
           for (let attempt = 0; attempt < 4; attempt += 1) {
             try {
@@ -12852,7 +12852,7 @@ function bindEvents() {
             }
           }
           try {
-            localStorage.removeItem("certora_signup_role_intent");
+            localStorage.removeItem("valases_signup_role_intent");
           } catch {}
           toast("Account created");
           return;
@@ -12986,7 +12986,7 @@ function bindEvents() {
     if (!document.body.classList.contains("workspace-collapsed")) return;
     applyWorkspaceCollapse(false);
     try {
-      localStorage.setItem("certora_workspace_collapsed", "0");
+      localStorage.setItem("valases_workspace_collapsed", "0");
     } catch {}
   });
 
@@ -14486,7 +14486,7 @@ function bindEvents() {
 
 (async function boot() {
   try {
-    applyWorkspaceCollapse(localStorage.getItem("certora_workspace_collapsed") === "1");
+    applyWorkspaceCollapse(localStorage.getItem("valases_workspace_collapsed") === "1");
   } catch {
     applyWorkspaceCollapse(false);
   }

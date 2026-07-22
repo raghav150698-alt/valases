@@ -1,4 +1,4 @@
-# Certora Production Deployment
+# Valases Production Deployment
 
 This folder prepares the app for one-server launch and later horizontal scaling.
 

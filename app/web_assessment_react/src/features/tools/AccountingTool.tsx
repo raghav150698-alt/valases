@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import "./AccountingTool.css";
+import { BrandLogo } from "../../components/BrandLogo";
 
 type Transaction = {
   id: number;
@@ -77,7 +78,7 @@ export function AccountingTool() {
   return (
     <div className="accounting-app">
       <aside className="accounting-sidebar">
-        <div className="accounting-brand"><span className="accounting-brand-mark">C</span><strong>Certora Books</strong></div>
+        <div className="accounting-brand"><BrandLogo className="accounting-brand-logo" /><strong>Valases Books</strong></div>
         <button className="accounting-create-btn" type="button" onClick={() => setShowForm(true)}>+ Create</button>
         <nav aria-label="Accounting navigation">
           {["Home", "Transactions", "Sales", "Expenses", "Reports", "Taxes"].map((page) => (

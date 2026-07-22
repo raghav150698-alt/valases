@@ -20,7 +20,7 @@ from app.live_ws import register_live_websocket
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
-request_logger = logging.getLogger("certora.request")
+request_logger = logging.getLogger("valases.request")
 database_startup_failed = False
 WEB_DIR = Path(__file__).resolve().parent / "web"
 ASSETS_DIR = WEB_DIR / "assets"

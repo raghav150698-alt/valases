@@ -3,7 +3,7 @@ export function createApiClient({ state }) {
 
   function emitNetworkBusy() {
     try {
-      window.dispatchEvent(new CustomEvent("certora:network-busy", {
+      window.dispatchEvent(new CustomEvent("valases:network-busy", {
         detail: { pending: pendingRequests },
       }));
     } catch {}

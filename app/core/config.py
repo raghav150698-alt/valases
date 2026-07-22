@@ -9,10 +9,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_env: str = "development"
-    app_name: str = "Classagon API"
+    app_name: str = "Valases API"
     app_base_url: str = "http://localhost:8000"
     candidate_app_base_url: str = ""
-    database_url: str = "sqlite:///./certora.db"
+    database_url: str = "sqlite:///./valases.db"
     jwt_secret_key: str = "change_me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 120
@@ -52,10 +52,10 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
-    smtp_sender: str = "noreply@certora.in"
-    smtp_sender_name: str = "Certora Assessments"
+    smtp_sender: str = "noreply@valases.com"
+    smtp_sender_name: str = "Valases Assessments"
     smtp_reply_to: str = ""
-    admin_emails: str = "admin@certora.in,admin@certora.com"
+    admin_emails: str = "admin@valases.com"
     identity_verify_enforce: bool = True
     identity_verify_timeout_seconds: int = 15
     identity_verify_api_key: str = ""
@@ -167,7 +167,7 @@ class Settings(BaseSettings):
         path = Path(raw)
         if path.is_absolute():
             return str(path)
-        return "/tmp/certora-media"
+        return "/tmp/valases-media"
 
     @property
     def admin_email_set(self) -> set[str]:

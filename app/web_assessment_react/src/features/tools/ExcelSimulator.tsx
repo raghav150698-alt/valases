@@ -875,7 +875,7 @@ export function ExcelSimulator({
         editable_cells: [],
         locked_cells: [],
       };
-      window.localStorage.setItem("certora_excel_assessment_autosave", JSON.stringify(lightweightAutosave));
+      window.localStorage.setItem("valases_excel_assessment_autosave", JSON.stringify(lightweightAutosave));
       onAutosave?.(lightweightAutosave);
       setStatus(`Autosaved ${new Date().toLocaleTimeString()}`);
     } catch (error) {

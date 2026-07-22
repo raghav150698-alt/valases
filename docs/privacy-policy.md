@@ -1,12 +1,12 @@
-# Certora Privacy Policy
+# Valases Privacy Policy
 
 **Status:** Product draft for legal review  
 **Effective date:** 19 July 2026  
-**Controller:** Certora (replace with the registered legal entity and address before launch)
+**Controller:** Valases (replace with the registered legal entity and address before launch)
 
 ## 1. Scope
 
-This policy explains how Certora processes information when recruiters create, issue, score, review, or administer assessments and when candidates complete an issued assessment.
+This policy explains how Valases processes information when recruiters create, issue, score, review, or administer assessments and when candidates complete an issued assessment.
 
 ## 2. Information we collect
 
@@ -32,11 +32,11 @@ The default retention schedule is defined in `docs/data-retention-and-deletion.m
 
 ## 6. Candidate rights
 
-Subject to applicable law, candidates may request access, correction, deletion, restriction, portability, or information about automated processing. Requests should be sent to the organization that issued the assessment or to the Certora privacy contact configured for production.
+Subject to applicable law, candidates may request access, correction, deletion, restriction, portability, or information about automated processing. Requests should be sent to the organization that issued the assessment or to the Valases privacy contact configured for production.
 
 ## 7. Security
 
-Certora uses authenticated access, short-lived issued assessment tokens, role checks, audit logs, encrypted transport in production, restricted storage access, and bounded proctoring event logs. No browser-only control can guarantee prevention of screenshots, operating-system task switching, or device tampering.
+Valases uses authenticated access, short-lived issued assessment tokens, role checks, audit logs, encrypted transport in production, restricted storage access, and bounded proctoring event logs. No browser-only control can guarantee prevention of screenshots, operating-system task switching, or device tampering.
 
 ## 8. Changes and contact
 

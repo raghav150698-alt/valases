@@ -1,4 +1,4 @@
-"""Certora-owned assessment templates with deterministic answer keys."""
+"""Platform assessment templates with deterministic answer keys."""
 
 from copy import deepcopy
 
@@ -22,9 +22,9 @@ from app.models.entities import (
 )
 
 
-TEMPLATE_CATALOG_VERSION = 4
+TEMPLATE_CATALOG_VERSION = 5
 STANDALONE_ASSESSMENT_CATEGORY = "__standalone_assessment__"
-SUPERSEDED_TEMPLATE_PREFIX = "__certora_superseded__"
+SUPERSEDED_TEMPLATE_PREFIX = "__platform_superseded__"
 
 
 MCQ_QUESTIONS = [
@@ -59,15 +59,15 @@ MCQ_QUESTIONS = [
 DEFAULT_ASSESSMENTS = [
     {
         "id": "financial-controls-core",
-        "title": "Certora Financial Controls Challenge",
+        "title": "Financial Controls Challenge",
         "summary": "Advanced accounting, controls, analysis, and close-readiness screening.",
         "assessment_type": "mcq",
         "duration_minutes": 40,
         "pass_score": 72,
         "topics": ["Financial accounting", "Controls", "Analysis", "Audit evidence"],
-        "tools": ["Certora question workspace"],
+        "tools": ["Question workspace"],
         "instructions": "Answer all questions. Select the single best response using the facts provided.",
-        "about": "Certora default screening assessment for finance and accounting professionals.",
+        "about": "Default screening assessment for finance and accounting professionals.",
         "questions": [
             {"question_text": text, "question_type": "mcq_single_correct", "marks": 4, "negative_marks": 1,
              "options": [{"option_text": option, "is_correct": index == answer, "position": index + 1} for index, option in enumerate(options)]}
@@ -76,12 +76,12 @@ DEFAULT_ASSESSMENTS = [
     },
     {
         "id": "working-capital-model",
-        "title": "Certora Advanced FP&A and Working Capital Model",
+        "title": "Advanced FP&A and Working Capital Model",
         "summary": "Analyze a 12-month operating dataset, build KPIs, diagnose exceptions, and produce a forecast.",
         "assessment_type": "spreadsheet", "duration_minutes": 90, "pass_score": 78,
         "topics": ["Advanced Excel", "FP&A", "Variance analysis", "Working capital", "Revenue quality", "Controls"], "tools": ["Excel"],
         "instructions": "Complete all required outputs using formulas. Preserve source data and use the assumptions supplied in the workbook.",
-        "about": "Complex Certora default Excel assessment for senior finance, FP&A, controllership, and accounting candidates.",
+        "about": "Complex default Excel assessment for senior finance, FP&A, controllership, and accounting candidates.",
         "task": {
             "title": "Advanced FP&A and working capital model", "marks": 100,
             "description": "Analyze twelve months of actual and budget revenue, COGS, operating expense, AR, inventory, AP, cash collections, and invoice-risk data. Build a management-ready KPI and forecast output block.",
@@ -144,7 +144,7 @@ DEFAULT_ASSESSMENTS = [
         },
     },
     {
-        "id": "invoice-reconciliation-engine", "title": "Certora Invoice Reconciliation Engine",
+        "id": "invoice-reconciliation-engine", "title": "Invoice Reconciliation Engine",
         "summary": "Implement a deterministic reconciliation function with validation and duplicate controls.",
         "assessment_type": "coding", "duration_minutes": 75, "pass_score": 75,
         "topics": ["Python", "Data validation", "Reconciliation", "Edge cases"], "tools": ["Coding environment"],
@@ -166,7 +166,7 @@ DEFAULT_ASSESSMENTS = [
         },
     },
     {
-        "id":"month-end-close","title":"Certora Month-End Close & Exception Review","summary":"Complete a bank, receivables, accrual, and control close with traceable outputs.",
+        "id":"month-end-close","title":"Month-End Close & Exception Review","summary":"Complete a bank, receivables, accrual, and control close with traceable outputs.",
         "assessment_type":"accounting","duration_minutes":70,"pass_score":75,"topics":["Month-end close","Reconciliation","Accruals","Controls"],"tools":["Accounting workspace"],
         "instructions":"Enter the calculated close balances and identify every control exception supported by the case.","about":"Tough default practical assessment for accounting and controllership candidates.",
         "task":{"title":"Month-end close and exception review","marks":100,"description":"The bank statement is 486,240. Outstanding cheques are 42,800; deposits in transit 31,500; bank charges 640; and an unrecorded customer receipt is 18,200. Ledger cash before adjustments is 456,380. AR control is 612,900 while the subledger totals 606,400. Services received but unbilled are 27,500. Depreciation is 14,250. A vendor invoice of 9,800 appears twice.",
@@ -185,7 +185,7 @@ DEFAULT_ASSESSMENTS = [
         },
     },
     {
-        "id":"individual-tax-review","title":"Certora Complex Individual Tax Review","summary":"Calculate a return and identify documentation and compliance exceptions.",
+        "id":"individual-tax-review","title":"Complex Individual Tax Review","summary":"Calculate a return and identify documentation and compliance exceptions.",
         "assessment_type":"tax_simulator","duration_minutes":65,"pass_score":75,"topics":["Individual tax","Adjustments","Credits","Compliance review"],"tools":["Tax software"],
         "instructions":"Use the supplied case values. Enter calculated fields and select every supported review flag.","about":"Tough default tax-preparer and reviewer assessment.",
         "task":{"title":"Individual return calculation and review","marks":100,"description":"Case: wages 118,000; interest 2,400; Schedule C receipts 46,000 and substantiated expenses 18,500; deductible HSA contribution 3,850; standard deduction 14,600; pre-credit tax 22,940; nonrefundable credits 2,000; withholding 24,500. A 6,200 vehicle claim has no mileage log, a dependent SSN is missing, and a 1099-NEC is absent from source documents.",
@@ -213,7 +213,7 @@ def get_default_assessment(template_id: str) -> dict | None:
 
 
 def seed_default_assessment_templates(db: Session) -> list[AssessmentTemplate]:
-    """Upsert versioned Certora templates into the configured application database."""
+    """Upsert versioned platform templates into the configured application database."""
     existing = {
         row.template_key: row
         for row in db.scalars(select(AssessmentTemplate)).all()
@@ -336,7 +336,18 @@ def _create_exam_from_template(
 
 
 def ensure_provider_default_assessments(db: Session, provider: ProviderProfile) -> list[Exam]:
-    """Provision one current published copy of every active Certora template."""
+    """Provision one current published copy of every active platform template."""
+    legacy_brand = "Cer" + "tora "
+    provider_course_ids = select(Course.id).where(Course.provider_id == provider.id)
+    for legacy_exam in db.scalars(
+        select(Exam).where(
+            Exam.course_id.in_(provider_course_ids),
+            Exam.title.like(f"{legacy_brand}%"),
+        ),
+    ).all():
+        legacy_exam.title = str(legacy_exam.title)[len(legacy_brand):]
+        legacy_exam.assessment_about = str(legacy_exam.assessment_about or "").replace(legacy_brand, "")
+        db.add(legacy_exam)
     templates = [row for row in seed_default_assessment_templates(db) if row.is_active]
     installs = {
         row.template_id: row
@@ -359,6 +370,7 @@ def ensure_provider_default_assessments(db: Session, provider: ProviderProfile) 
             previous_exam = exam
             exam = _create_exam_from_template(db, provider, template, existing_exam=exam if can_upgrade_in_place else None)
             if previous_exam and not can_upgrade_in_place:
+                previous_exam.title = str(template.title)
                 previous_exam.assessment_about = f"{SUPERSEDED_TEMPLATE_PREFIX} {previous_exam.assessment_about or ''}".strip()
                 previous_exam.status = ExamStatus.REJECTED
                 db.add(previous_exam)

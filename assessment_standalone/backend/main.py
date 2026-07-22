@@ -152,7 +152,7 @@ def send_credentials_email(candidate_email: str, candidate_name: str, username: 
     smtp_port = int(os.getenv("ASSESSMENT_SMTP_PORT", "587"))
     smtp_user = os.getenv("ASSESSMENT_SMTP_USER", "").strip()
     smtp_pass = os.getenv("ASSESSMENT_SMTP_PASS", "").strip()
-    sender = os.getenv("ASSESSMENT_FROM_EMAIL", "no-reply@classagon.local")
+    sender = os.getenv("ASSESSMENT_FROM_EMAIL", "no-reply@valases.local")
 
     body = (
         f"Hi {candidate_name},\n\n"
@@ -469,4 +469,3 @@ def on_startup():
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         seed_catalog(db)
-

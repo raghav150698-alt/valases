@@ -82,7 +82,7 @@ PYTHON_RUNNER = (
     "exec(compile(code, '<candidate.py>', 'exec'), scope, scope)\n"
 )
 
-PREVIEW_ROOT = Path(tempfile.gettempdir()) / "certora_coding_preview"
+PREVIEW_ROOT = Path(tempfile.gettempdir()) / "valases_coding_preview"
 
 
 def _client_or_503() -> GraphExcelClient:
@@ -154,7 +154,7 @@ def coding_run(
 ):
     if payload.language == "python":
         try:
-            with tempfile.TemporaryDirectory(prefix="certora-code-") as workdir:
+            with tempfile.TemporaryDirectory(prefix="valases-code-") as workdir:
                 completed = subprocess.run(
                     [
                         sys.executable,

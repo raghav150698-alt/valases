@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import "./TaxTool.css";
+import { BrandLogo } from "../../components/BrandLogo";
 
 type TaxField = { key: string; label: string; value: string; hint?: string };
 
@@ -39,7 +40,7 @@ export function TaxTool() {
 
   return <div className="tax-app">
     <aside className="tax-sidebar">
-      <div className="tax-brand"><span className="tax-brand-mark">D</span><div><strong>Certora Tax</strong><small>2026 Professional</small></div></div>
+      <div className="tax-brand"><BrandLogo className="tax-brand-logo" /><div><strong>Valases Tax</strong><small>2026 Professional</small></div></div>
       <div className="tax-client-card"><span>RETURN IN PROGRESS</span><strong>Rivera, Alex</strong><small>Federal 1040 · 2025</small></div>
       <nav aria-label="Tax return sections">{sections.map((section, index) => <button type="button" key={section} className={activeSection === section ? "active" : ""} onClick={() => setActiveSection(section)}><span>{index + 1}</span>{section}{index < 3 && <em>✓</em>}</button>)}</nav>
       <div className="tax-sidebar-footer"><small>Preparer: Jordan Lee</small><button type="button">⚙ Preferences</button></div>

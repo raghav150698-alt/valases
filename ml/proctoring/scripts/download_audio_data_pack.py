@@ -64,7 +64,7 @@ def _print_progress(downloaded: int, total: int | None) -> None:
 
 def _download_once(url: str, target: Path, timeout: float, chunk_size: int) -> None:
     partial = target.with_suffix(target.suffix + ".part")
-    req = Request(url, headers={"User-Agent": "certora-downloader/1.0"})
+    req = Request(url, headers={"User-Agent": "valases-downloader/1.0"})
     with urlopen(req, timeout=timeout) as response, partial.open("wb") as handle:
         total = response.headers.get("Content-Length")
         total_bytes = int(total) if total else None

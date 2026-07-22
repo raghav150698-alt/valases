@@ -758,10 +758,10 @@ def admin_breakglass_login(
     email_norm = str(payload.email or "").strip().lower()
     if not email_norm:
         raise HTTPException(status_code=400, detail="Email is required.")
-    if email_norm != "admin@certora.in":
-        raise HTTPException(status_code=403, detail="Break-glass login is allowed only for admin@certora.in")
+    if email_norm not in settings.admin_email_set:
+        raise HTTPException(status_code=403, detail="Break-glass login is allowed only for a configured admin email.")
     try:
-        uid = ensure_firebase_user_uid(email_norm, display_name="Classagon Admin")
+        uid = ensure_firebase_user_uid(email_norm, display_name="Valases Admin")
         if not uid:
             raise HTTPException(status_code=500, detail="Failed to resolve Firebase admin user.")
         # Ensure client password sign-in can always work without mailbox access.
@@ -777,7 +777,7 @@ def admin_breakglass_login(
     if not user:
         user = User(
             email=email_norm,
-            full_name="Classagon Admin",
+            full_name="Valases Admin",
             password_hash="firebase",
             role=UserRole.ADMIN,
             is_active=True,

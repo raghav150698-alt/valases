@@ -99,11 +99,15 @@ function isAway(model: GazeModel, metrics: FaceMetrics, ref: FaceMetrics) {
   const awayIndex = model.class_names.indexOf("away");
   const topIndex = probabilities.indexOf(Math.max(...probabilities));
   const awayProbability = awayIndex >= 0 ? probabilities[awayIndex] : 0;
-  return model.class_names[topIndex] === "away" || awayProbability >= Number(model.thresholds?.suspect_away_probability ?? 0.48);
+  const minAwayProbability = Math.max(
+    Number(model.thresholds?.suspect_away_probability ?? 0.48),
+    Number(model.thresholds?.min_top_class_probability ?? 0.34),
+  );
+  return model.class_names[topIndex] === "away" && awayProbability >= minAwayProbability;
 }
 
 function emitProctorSignal(eventType: string, details: Record<string, unknown>) {
-  window.dispatchEvent(new CustomEvent("certora:proctor-signal", { detail: { event_type: eventType, ...details } }));
+  window.dispatchEvent(new CustomEvent("valases:proctor-signal", { detail: { event_type: eventType, ...details } }));
 }
 
 export function useCandidateGazeProctor(active: boolean) {
@@ -120,6 +124,7 @@ export function useCandidateGazeProctor(active: boolean) {
   const lastObjectScanRef = useRef(0);
   const lastPhoneWarningRef = useRef(0);
   const phoneDetectionStreakRef = useRef(0);
+  const onscreenNavigationGraceUntilRef = useRef(0);
 
   const stop = useCallback(() => {
     if (frameTimerRef.current) window.clearInterval(frameTimerRef.current);
@@ -229,6 +234,10 @@ export function useCandidateGazeProctor(active: boolean) {
             phoneDetectionStreakRef.current = 0;
           }
         }
+        if (now < onscreenNavigationGraceUntilRef.current) {
+          awaySinceRef.current = 0;
+          return;
+        }
         if (!suspicious) {
           awaySinceRef.current = 0;
           return;
@@ -252,6 +261,14 @@ export function useCandidateGazeProctor(active: boolean) {
   useEffect(() => {
     if (!active && status === "active") stop();
   }, [active, status, stop]);
+  useEffect(() => {
+    const handleOnscreenNavigation = () => {
+      onscreenNavigationGraceUntilRef.current = Date.now() + 3500;
+      awaySinceRef.current = 0;
+    };
+    window.addEventListener("valases:onscreen-navigation", handleOnscreenNavigation);
+    return () => window.removeEventListener("valases:onscreen-navigation", handleOnscreenNavigation);
+  }, []);
   useEffect(() => stop, [stop]);
 
   return { status, error, stream, start, stop };

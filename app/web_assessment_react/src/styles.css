@@ -44,18 +44,12 @@ body { margin: 0; background: #f6f8fb; }
   color: #64748b;
   font-size: 12px;
 }
-.auth-logo-mark {
-  width: 36px;
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  background: #0f172a;
-  color: #ffffff;
-  font-size: 15px;
-  font-weight: 800;
-}
+.brand-logo-frame { display: inline-grid; place-items: center; flex: none; overflow: hidden; }
+.brand-logo-image { display: block; width: 180%; height: 180%; max-width: none; object-fit: contain; }
+.brand-logo { width: 64px; height: 44px; }
+.auth-brand-logo { width: 64px; height: 44px; }
+.accounting-brand-logo { width: 52px; height: 38px; }
+.tax-brand-logo { width: 54px; height: 40px; }
 .auth-page-main {
   width: min(100%, 1440px);
   margin: 0 auto;
@@ -438,17 +432,7 @@ body { margin: 0; background: #f6f8fb; }
   color: #172033;
   text-align: center;
 }
-.assessment-thank-you-mark {
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 8px;
-  background: #107c41;
-  color: #ffffff;
-  font-size: 28px;
-  font-weight: 800;
-}
+.assessment-brand-logo { width: 104px; height: 64px; }
 .assessment-thank-you h1 { margin: 4px 0 0; font-size: 32px; }
 .assessment-thank-you p { max-width: 600px; margin: 0; color: #526071; line-height: 1.6; }
 .assessment-thank-you small { color: #718096; }
@@ -770,16 +754,7 @@ body { margin: 0; background: #f6f8fb; }
 .workspace-rail-brand strong { color: #16212f; font-size: 16px; }
 .workspace-rail-brand small,
 .workspace-user-chip small { color: #7a8796; font-size: 11px; }
-.workspace-brand-mark {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
-  background: #176b57;
-  color: #fff;
-  font-weight: 800;
-}
+.workspace-brand-logo { width: 50px; height: 38px; }
 .workspace-rail-label {
   padding: 0 10px 8px;
   color: #98a2ae;
@@ -1726,17 +1701,7 @@ body { margin: 0; background: #f6f8fb; }
   color: #14201c;
   text-decoration: none;
 }
-.candidate-portal-brand > span,
-.candidate-brand-mark {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
-  background: #146c4b;
-  color: #ffffff;
-  font-weight: 800;
-}
+.candidate-header-logo { width: 52px; height: 40px; }
 .candidate-portal-brand strong { font-size: 16px; }
 .candidate-portal-footer { border-top: 1px solid #dce3e0; }
 .candidate-portal-footer nav { display: flex; align-items: center; gap: 22px; }
@@ -1759,6 +1724,7 @@ body { margin: 0; background: #f6f8fb; }
   box-shadow: 0 18px 50px rgba(28, 45, 38, 0.09);
 }
 .candidate-login-intro { display: grid; gap: 10px; }
+.candidate-login-logo { width: 90px; height: 54px; }
 .candidate-login-intro h1 {
   margin: 8px 0 0;
   color: #111b17;
@@ -3037,6 +3003,89 @@ select { min-height: 42px; padding: 9px 12px; border-radius: 10px; border: 1px s
 .excel-font-36 { font-size: 36px !important; }
 .hot-display-license-info {
   display: none;
+}
+
+.issued-assessment-runtime > .mcq-runtime {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: #f3f6f5;
+}
+.mcq-runtime > .question-runtime-surface {
+  width: min(calc(100% - 48px), 960px);
+  min-height: 0;
+  margin: 24px auto;
+  padding: clamp(24px, 4vw, 42px);
+  align-content: start;
+  gap: 22px;
+  overflow: auto;
+  border: 1px solid #d5dfdb;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(21, 44, 35, 0.06);
+}
+.mcq-question-number {
+  color: #607069;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.mcq-runtime .question-option-list { gap: 10px; }
+.mcq-runtime .question-option-card {
+  min-height: 54px;
+  align-items: center;
+  padding: 14px 16px;
+  border-color: #d4ded9;
+  border-radius: 6px;
+  transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+.mcq-runtime .question-option-card:hover { border-color: #8ba99c; background: #f8fbfa; }
+.mcq-runtime .question-option-card:has(input:checked) {
+  border-color: #146c4b;
+  background: #edf7f2;
+  box-shadow: inset 3px 0 0 #146c4b;
+}
+.assessment-question-footer {
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  padding: 12px max(24px, calc((100vw - 960px) / 2));
+  border-top: 1px solid #d5dfdb;
+  background: #ffffff;
+  box-shadow: 0 -8px 24px rgba(21, 44, 35, 0.05);
+}
+.assessment-question-context,
+.assessment-question-navigation { display: flex; align-items: center; gap: 12px; }
+.assessment-question-context span { color: #607069; font-size: 12px; }
+.assessment-question-context .assessment-exit-btn {
+  min-height: 40px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.assessment-question-context .assessment-exit-btn:hover { border-color: #fecdd3; background: #fff1f2; }
+.assessment-question-navigation button { min-width: 112px; min-height: 44px; border-radius: 6px; }
+.assessment-question-navigation .assessment-primary-btn { min-width: 152px; }
+
+@media (max-width: 680px) {
+  .mcq-runtime > .question-runtime-surface {
+    width: calc(100% - 24px);
+    margin: 12px auto;
+    padding: 22px 18px;
+  }
+  .assessment-question-footer {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px;
+  }
+  .assessment-question-context { justify-content: space-between; }
+  .assessment-question-navigation { width: 100%; }
+  .assessment-question-navigation button { flex: 1; min-width: 0; }
+  .assessment-question-navigation .assessment-primary-btn { min-width: 0; }
 }
 
 @media (max-width: 760px) {

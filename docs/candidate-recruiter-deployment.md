@@ -1,6 +1,6 @@
 # Recruiter and Candidate Deployment
 
-Certora uses one repository, one API, and one database with two independently built frontend surfaces.
+Valases uses one repository, one API, and one database with two independently built frontend surfaces.
 
 ## Project 1: Recruiter and API
 

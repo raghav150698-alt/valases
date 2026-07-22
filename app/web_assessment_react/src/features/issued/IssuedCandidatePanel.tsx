@@ -4,6 +4,7 @@ import { useCandidateGazeProctor } from "../assessment/useCandidateGazeProctor";
 import { useAssessmentSession } from "../assessment/useAssessmentSession";
 import { useAssessmentTimer } from "../student/useAssessmentTimer";
 import { ExcelAssessmentSubmission, ExcelSimulator } from "../tools/ExcelSimulator";
+import { BrandLogo } from "../../components/BrandLogo";
 
 type IssuedOption = { id: number; text: string };
 type IssuedQuestion = { question_id: number; question_text: string; question_type: string; options: IssuedOption[] };
@@ -113,7 +114,7 @@ export function IssuedCandidatePanel() {
   const welcomeBriefing = useMemo(() => {
     if (!paper) return "";
     const assessmentType = paper.assessment_type.replaceAll("_", " ");
-    return `Welcome to your Certora assessment. You are about to begin ${paper.assessment_title}, a ${assessmentType} assessment with ${paper.duration_minutes} minutes available. Before continuing, move to a quiet place, keep a stable internet connection, put away mobile phones, and have your camera ready. The assessment must remain in fullscreen. Camera-based attention and object checks run during the session. If sustained attention away from the screen or a mobile phone is detected, the timer pauses and an integrity warning appears. Exiting fullscreen ends the assessment. Listen to this briefing completely, then select Next to review privacy and camera consent.`;
+    return `Please listen carefully to this complete briefing before you continue. Welcome to your Valases assessment. You are about to begin ${paper.assessment_title}, a ${assessmentType} assessment with ${paper.duration_minutes} minutes available. Find a quiet place, make sure your internet connection is stable, put away mobile phones, and keep your camera ready. Your assessment will remain in fullscreen. During the session, camera-based attention and object checks help protect assessment integrity. If sustained attention away from the screen or a mobile phone is detected, the timer pauses and a warning appears. Leaving fullscreen ends the assessment. When you are ready, select Next to review the privacy and camera notice.`;
   }, [paper]);
 
   const playWelcomeBriefing = () => {
@@ -128,34 +129,29 @@ export function IssuedCandidatePanel() {
     const runId = welcomeSpeechRunRef.current;
     window.speechSynthesis.cancel();
     const voices = window.speechSynthesis.getVoices();
-    const selectedVoice = voices.find((voice) => voice.lang.toLowerCase() === "en-in")
+    const selectedVoice = voices.find((voice) => voice.lang.toLowerCase().startsWith("en") && /natural|neural/i.test(voice.name))
+      || voices.find((voice) => voice.lang.toLowerCase() === "en-in" && voice.localService)
       || voices.find((voice) => voice.lang.toLowerCase().startsWith("en"))
       || null;
-    const segments = welcomeBriefing.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((segment) => segment.trim()).filter(Boolean) || [welcomeBriefing];
-    const speakSegment = (position: number) => {
+    const utterance = new SpeechSynthesisUtterance(welcomeBriefing);
+    utterance.voice = selectedVoice;
+    utterance.rate = 0.92;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    utterance.onend = () => {
       if (runId !== welcomeSpeechRunRef.current) return;
-      if (position >= segments.length) {
-        welcomeSpeechRef.current = null;
-        setBriefingState("completed");
-        return;
-      }
-      const utterance = new SpeechSynthesisUtterance(segments[position]);
-      utterance.voice = selectedVoice;
-      utterance.rate = 0.94;
-      utterance.pitch = 1;
-      utterance.volume = 1;
-      utterance.onend = () => speakSegment(position + 1);
-      utterance.onerror = (event) => {
-        welcomeSpeechRef.current = null;
-        if (event.error === "canceled" || event.error === "interrupted" || runId !== welcomeSpeechRunRef.current) return;
-        setBriefingState("error");
-        setBriefingError("The audio briefing stopped unexpectedly. Select Play audio briefing to try again.");
-      };
-      welcomeSpeechRef.current = utterance;
-      window.speechSynthesis.speak(utterance);
+      welcomeSpeechRef.current = null;
+      setBriefingState("completed");
     };
+    utterance.onerror = (event) => {
+      welcomeSpeechRef.current = null;
+      if (event.error === "canceled" || event.error === "interrupted" || runId !== welcomeSpeechRunRef.current) return;
+      setBriefingState("error");
+      setBriefingError("The audio briefing stopped unexpectedly. Select Play audio briefing to try again.");
+    };
+    welcomeSpeechRef.current = utterance;
     setBriefingState("playing");
-    speakSegment(0);
+    window.speechSynthesis.speak(utterance);
   };
 
   const login = async () => {
@@ -337,8 +333,8 @@ export function IssuedCandidatePanel() {
   if (completion) {
     return (
       <section className="assessment-thank-you" role="status">
-        <div className="assessment-thank-you-mark" aria-hidden="true">C</div>
-        <span className="launch-section-label">Certora Assessments</span>
+        <BrandLogo className="assessment-brand-logo" />
+        <span className="launch-section-label">Valases Assessments</span>
         <h1>{completion.title}</h1>
         <p>{completion.message}</p>
         <strong>Thank you for your time.</strong>
@@ -352,7 +348,7 @@ export function IssuedCandidatePanel() {
       {!paper ? (
         <div className="candidate-login-layout">
           <div className="candidate-login-intro">
-            <span className="candidate-brand-mark" aria-hidden="true">C</span>
+            <BrandLogo className="candidate-login-logo" />
             <h1>Welcome</h1>
             <p>Sign in with the details from your assessment invitation.</p>
           </div>
@@ -388,7 +384,7 @@ export function IssuedCandidatePanel() {
               </nav>
               <div className="candidate-welcome-heading">
                 <span className="launch-section-label">Your assessment is ready</span>
-                <h2 id="candidate-welcome-title">Welcome to Certora Assessments</h2>
+                <h2 id="candidate-welcome-title">Welcome to Valases Assessments</h2>
                 <p>Review the written note and listen to the complete audio briefing before continuing.</p>
               </div>
               <div className="candidate-assessment-summary">
@@ -526,8 +522,10 @@ export function IssuedCandidatePanel() {
               }}
             />
           )}
-          {paper.assessment_type !== "spreadsheet" && current && (
+          {isMcqAssessment && current && (
+            <main className="mcq-runtime">
             <div className="question-runtime-surface">
+              <span className="mcq-question-number">Question {index + 1} of {paper.questions.length}</span>
               <strong>{current.question_text}</strong>
               <div className="question-option-list">
                 {current.options.map((o) => (
@@ -549,6 +547,25 @@ export function IssuedCandidatePanel() {
               ))}
               </div>
             </div>
+            <footer
+              className="assessment-question-footer"
+              onPointerEnter={() => window.dispatchEvent(new Event("valases:onscreen-navigation"))}
+              onPointerMove={() => window.dispatchEvent(new Event("valases:onscreen-navigation"))}
+            >
+              <div className="assessment-question-context">
+                <button className="assessment-exit-btn" type="button" onClick={confirmExit}>Exit assessment</button>
+                <span>{(answers[current.question_id] || []).length ? "Answer selected" : "Select an answer to continue"}</span>
+              </div>
+              <div className="assessment-question-navigation">
+                <button className="secondary-btn" disabled={index === 0} onClick={() => setIndex((x) => x - 1)}>Previous</button>
+                {paper && index < paper.questions.length - 1 ? (
+                  <button className="assessment-primary-btn" onClick={() => setIndex((x) => x + 1)}>Next question</button>
+                ) : (
+                  <button className="assessment-primary-btn" onClick={() => void submit()}>Submit assessment</button>
+                )}
+              </div>
+            </footer>
+            </main>
           )}
           {!isMcqAssessment && paper.assessment_type !== "spreadsheet" && paper.task && (
             <section className="task-candidate-workspace">
@@ -591,15 +608,6 @@ export function IssuedCandidatePanel() {
               <div className="assessment-action-bar inline"><button className="assessment-primary-btn" type="button" disabled={!taskResponse.trim() && Object.keys(taxValues).length === 0} onClick={() => void submit()}>Submit Assessment</button></div>
             </section>
           )}
-          {isMcqAssessment && <div className="row assessment-question-actions">
-            <button className="assessment-exit-btn" type="button" onClick={confirmExit}>Exit Assessment</button>
-            <button disabled={index === 0} onClick={() => setIndex((x) => x - 1)}>Prev</button>
-            {paper && index < paper.questions.length - 1 ? (
-              <button onClick={() => setIndex((x) => x + 1)}>Next</button>
-            ) : (
-              <button className="assessment-primary-btn" onClick={() => void submit()}>Submit Assessment</button>
-            )}
-          </div>}
           {status && <div>{status}</div>}
             </>
           )}

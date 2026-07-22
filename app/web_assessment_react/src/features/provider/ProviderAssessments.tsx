@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { BrandLogo } from "../../components/BrandLogo";
 import { api } from "../../lib/api";
 import { CodingEnv } from "../tools/CodingEnv";
 import { ExcelAssessmentSubmission, ExcelSimulator } from "../tools/ExcelSimulator";
@@ -25,7 +26,7 @@ type Assessment = {
   questions_per_attempt: number;
   question_count: number;
   checkpoint_count?: number;
-  is_certora_default?: boolean;
+  is_platform_default?: boolean;
   template_version?: number | null;
   task?: {
     title: string;
@@ -289,7 +290,7 @@ export function ProviderAssessments() {
   const createAssessment = useMutation({
     mutationFn: async () => {
       const assessmentType = form.assessment_type;
-      const primaryTool = assessmentType === "spreadsheet" ? "Excel" : assessmentType === "coding" ? "Coding environment" : assessmentType === "accounting" ? "Accounting workspace" : assessmentType === "tax_simulator" ? "Tax software" : "Certora assessment workspace";
+      const primaryTool = assessmentType === "spreadsheet" ? "Excel" : assessmentType === "coding" ? "Coding environment" : assessmentType === "accounting" ? "Accounting workspace" : assessmentType === "tax_simulator" ? "Tax software" : "Assessment workspace";
       const payload = {
         title: form.title,
         assessment_type: assessmentType,
@@ -557,8 +558,8 @@ export function ProviderAssessments() {
     <section className="provider-workspace hrms-shell">
       <aside className="workspace-rail">
         <div className="workspace-rail-brand">
-          <span className="workspace-brand-mark" aria-hidden="true">C</span>
-          <div><strong>Certora</strong><small>Recruiting</small></div>
+          <BrandLogo className="workspace-brand-logo" />
+          <div><strong>Valases</strong><small>Recruiting</small></div>
         </div>
         <div className="workspace-rail-label">Workspace</div>
         <nav className="workspace-rail-nav" aria-label="Workspace navigation">
@@ -650,7 +651,7 @@ export function ProviderAssessments() {
                   >
                     <div>
                       <strong>{assessment.title}</strong>
-                      <small>{assessment.assessment_type}{assessment.is_certora_default ? ` | Certora default v${assessment.template_version}` : ""}</small>
+                      <small>{assessment.assessment_type}{assessment.is_platform_default ? ` | Default v${assessment.template_version}` : ""}</small>
                     </div>
                     <StatusBadge value={assessment.status} />
                     <span>{assessment.assessment_type === "mcq" ? `${assessment.question_count} questions` : `${assessment.checkpoint_count || 0} checkpoints`}</span>
@@ -755,7 +756,7 @@ export function ProviderAssessments() {
             )}
 
             <section className="workspace-surface default-library">
-              <div className="workspace-surface-head"><div><h3>Certora default assessments</h3><p>Ready-to-issue, difficult assessments with answer keys and auditable scoring checkpoints.</p></div></div>
+              <div className="workspace-surface-head"><div><h3>Default assessments</h3><p>Ready-to-issue, difficult assessments with answer keys and auditable scoring checkpoints.</p></div></div>
               <div className="default-assessment-grid">
                 {(defaultAssessments.data || []).map((template) => (
                   <article className="default-assessment-card" key={template.id}>
@@ -886,7 +887,7 @@ export function ProviderAssessments() {
                 {selectedExam && (
                   <div className="workspace-selection-summary workspace-span-2">
                     <strong>{selectedExam.title}</strong>
-                    <span>{selectedExam.assessment_type} | {selectedExam.status} | duration {selectedExam.duration_minutes} min{selectedExam.is_certora_default ? ` | Certora default v${selectedExam.template_version}` : ""}</span>
+                    <span>{selectedExam.assessment_type} | {selectedExam.status} | duration {selectedExam.duration_minutes} min{selectedExam.is_platform_default ? ` | Default v${selectedExam.template_version}` : ""}</span>
                   </div>
                 )}
               </div>
@@ -1189,7 +1190,7 @@ export function ProviderAssessments() {
               <button type="button" className="workspace-icon-btn" aria-label="Close settings" onClick={() => setShowSettings(false)}>×</button>
             </div>
             <div className="workspace-form-grid compact">
-              <label className="field-stack"><span>Workspace name</span><input defaultValue="Certora Recruiting" /></label>
+              <label className="field-stack"><span>Workspace name</span><input defaultValue="Valases Recruiting" /></label>
               <label className="field-stack"><span>Default pass score</span><input type="number" defaultValue="70" /></label>
               <label className="field-stack workspace-span-2"><span>Timezone</span><select defaultValue="Asia/Calcutta"><option value="Asia/Calcutta">India Standard Time (IST)</option><option value="UTC">UTC</option></select></label>
             </div>

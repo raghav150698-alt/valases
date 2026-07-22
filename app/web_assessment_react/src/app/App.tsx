@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { BrandLogo } from "../components/BrandLogo";
 import { AuthPanel } from "../features/auth/AuthPanel";
 import { useAssessmentSession } from "../features/assessment/useAssessmentSession";
 import { ProviderAssessments } from "../features/provider/ProviderAssessments";
@@ -21,7 +22,7 @@ function CandidatePortalRedirect({ accessKey }: { accessKey: string }) {
 
   return (
     <main className="assessment-thank-you" role="status">
-      <div className="assessment-thank-you-mark" aria-hidden="true">C</div>
+      <BrandLogo className="assessment-brand-logo" />
       <span className="launch-section-label">Candidate assessment</span>
       <h1>{candidateUrl ? "Opening secure assessment" : "Candidate portal required"}</h1>
       <p>{candidateUrl ? "You are being redirected to the isolated candidate environment." : "Ask the recruiter for a newly issued candidate link."}</p>
@@ -39,8 +40,8 @@ function AssessmentThankYou({ reason = "submitted" }: { reason?: "submitted" | "
       : "Your work was submitted successfully.";
   return (
     <main className="assessment-thank-you" role="status">
-      <div className="assessment-thank-you-mark" aria-hidden="true">C</div>
-      <span className="launch-section-label">Certora Assessments</span>
+      <BrandLogo className="assessment-brand-logo" />
+      <span className="launch-section-label">Valases Assessments</span>
       <h1>{ended ? "Assessment ended" : "Assessment submitted"}</h1>
       <p>{message}</p>
       <strong>Thank you for your time.</strong>
@@ -62,8 +63,8 @@ function EmbeddedToolShell({
   const [ended, setEnded] = useState<{ reason: "submitted" | "fullscreen" | "policy" } | null>(null);
   useEffect(() => {
     const handleCompleted = () => setEnded({ reason: "submitted" });
-    window.addEventListener("certora:assessment-completed", handleCompleted);
-    return () => window.removeEventListener("certora:assessment-completed", handleCompleted);
+    window.addEventListener("valases:assessment-completed", handleCompleted);
+    return () => window.removeEventListener("valases:assessment-completed", handleCompleted);
   }, []);
   const { fullscreenRequired, requestFullscreen, escapeWarningVisible, keepAssessmentOpen, endAssessmentFromEscape } = useAssessmentSession({
     active: sessionActive,
@@ -133,7 +134,7 @@ export function App() {
   const recruiterAuthenticated = role === "provider" || role === "admin";
   const handleToolSubmit = useCallback(() => {
     if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
-    window.dispatchEvent(new CustomEvent("certora:assessment-completed"));
+    window.dispatchEvent(new CustomEvent("valases:assessment-completed"));
   }, []);
   const recruiterWorkspaceBody = useMemo(() => {
     if (recruiterAuthenticated) {
@@ -192,9 +193,9 @@ export function App() {
       <div className="auth-page-shell">
         <header className="auth-page-topbar">
           <div className="auth-page-brand">
-            <span className="auth-logo-mark" aria-hidden="true">C</span>
+            <BrandLogo className="auth-brand-logo" />
             <div>
-              <strong>Certora</strong>
+              <strong>Valases</strong>
               <small>Assessment platform</small>
             </div>
           </div>

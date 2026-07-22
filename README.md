@@ -1,4 +1,4 @@
-# Certora MVP Backend (FastAPI)
+# Valases Assessment Platform
 
 This scaffold implements your 6 core layers:
 
@@ -211,7 +211,7 @@ Current UX focus:
 
 ## Migrate Local Data To Cloud DB
 
-If your local `certora.db` has test data and production is empty, run this one-time migration:
+If your local `valases.db` has test data and production is empty, run this one-time migration:
 
 ```bash
 python scripts/migrate_sqlite_to_database.py --target-url "<POSTGRES_DATABASE_URL>" --replace --sync-rules

@@ -19,7 +19,7 @@ export const useSessionStore = create<SessionState>()(
       clear: () => set({ token: null, role: null }),
     }),
     {
-      name: "certora-session",
+      name: "valases-session",
       partialize: (state) => ({ token: state.token, role: state.role }),
     },
   ),

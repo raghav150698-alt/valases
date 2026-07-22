@@ -160,8 +160,8 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
     };
     const handleProctorMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
-      const detail = event.data?.type === "certora:proctor-signal" ? event.data.detail : null;
-      if (detail) handleProctorSignal(new CustomEvent("certora:proctor-signal", { detail }));
+      const detail = event.data?.type === "valases:proctor-signal" ? event.data.detail : null;
+      if (detail) handleProctorSignal(new CustomEvent("valases:proctor-signal", { detail }));
     };
 
     const handlePopState = () => {
@@ -181,7 +181,7 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
     document.addEventListener("paste", handleClipboard);
     document.addEventListener("keydown", handleKeyDown);
     window.addEventListener("popstate", handlePopState);
-    window.addEventListener("certora:proctor-signal", handleProctorSignal);
+    window.addEventListener("valases:proctor-signal", handleProctorSignal);
     window.addEventListener("message", handleProctorMessage);
 
     return () => {
@@ -195,7 +195,7 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
       document.removeEventListener("paste", handleClipboard);
       document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("popstate", handlePopState);
-      window.removeEventListener("certora:proctor-signal", handleProctorSignal);
+      window.removeEventListener("valases:proctor-signal", handleProctorSignal);
       window.removeEventListener("message", handleProctorMessage);
     };
   }, [active, confirmExit, exitWarning, requestFullscreen]);

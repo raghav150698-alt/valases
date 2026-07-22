@@ -562,7 +562,7 @@ def provider_user_approval_decision(
     )
     email_result = _safe_send_email(
         user.email,
-        "Classagon Provider Approval Update",
+        "Valases Provider Approval Update",
         "Your provider profile was approved."
         if payload.approve
         else f"Your provider profile was rejected. Reason: {payload.rejection_reason or 'Not specified'}",
@@ -599,7 +599,7 @@ def student_approval_decision(
     )
     email_result = _safe_send_email(
         user.email,
-        "Classagon Profile Approval Update",
+        "Valases Profile Approval Update",
         "Your profile was approved." if payload.approve else f"Your profile was rejected. Reason: {payload.rejection_reason or 'Not specified'}",
     )
     db.commit()
@@ -640,7 +640,7 @@ def provider_approval_decision(
     email_result = (
         _safe_send_email(
             user.email,
-            "Classagon Provider Approval Update",
+            "Valases Provider Approval Update",
             "Your provider profile was approved."
             if payload.approve
             else f"Your provider profile was rejected. Reason: {payload.rejection_reason or 'Not specified'}",

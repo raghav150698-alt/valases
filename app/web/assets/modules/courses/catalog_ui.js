@@ -19,7 +19,7 @@ export function createCourseCatalogUi({
   openCourseViewer,
   refreshProviderContent,
 }) {
-  const fallbackCourseThumb = "/assets/classagon_logo.png?v=20260422c";
+  const fallbackCourseThumb = "/assets/brand/valases-logo.png";
 
   function courseThumbSrc(course, lesson = null) {
     const src = resolveCourseThumbnail(course, lesson);
