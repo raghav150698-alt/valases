@@ -1002,3 +1002,199 @@ class ProviderCourseDraft(Base):
     topics_json: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# Enterprise hiring workspace. These records are intentionally separate from
+# the legacy assessment-provider tables so organizations can have multiple
+# members, business units, and controlled access to hiring data.
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    legal_name: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="active", index=True)
+    plan_code: Mapped[str] = mapped_column(String(40), default="trial", index=True)
+    settings_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class OrganizationMembership(Base):
+    __tablename__ = "organization_memberships"
+    __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_organization_member"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    role: Mapped[str] = mapped_column(String(40), default="recruiter", index=True)
+    status: Mapped[str] = mapped_column(String(30), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class JobRequisition(Base):
+    __tablename__ = "job_requisitions"
+    __table_args__ = (UniqueConstraint("organization_id", "job_code", name="uq_organization_job_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    hiring_manager_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    job_code: Mapped[str] = mapped_column(String(60), index=True)
+    title: Mapped[str] = mapped_column(String(240), index=True)
+    department: Mapped[str] = mapped_column(String(160), default="General", index=True)
+    location: Mapped[str] = mapped_column(String(180), default="Remote")
+    employment_type: Mapped[str] = mapped_column(String(50), default="full_time")
+    work_arrangement: Mapped[str] = mapped_column(String(40), default="hybrid")
+    status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    responsibilities_json: Mapped[list] = mapped_column(JSON, default=list)
+    requirements_json: Mapped[list] = mapped_column(JSON, default=list)
+    skills_json: Mapped[list] = mapped_column(JSON, default=list)
+    assessment_template_id: Mapped[int | None] = mapped_column(ForeignKey("assessment_templates.id"), nullable=True, index=True)
+    headcount: Mapped[int] = mapped_column(Integer, default=1)
+    target_start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    compensation_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    compensation_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    compensation_currency: Mapped[str] = mapped_column(String(8), default="USD")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class HiringCandidate(Base):
+    __tablename__ = "hiring_candidates"
+    __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_organization_candidate_email"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    first_name: Mapped[str] = mapped_column(String(120))
+    last_name: Mapped[str] = mapped_column(String(120), default="")
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    phone_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    headline: Mapped[str] = mapped_column(String(300), default="")
+    location: Mapped[str] = mapped_column(String(180), default="")
+    source: Mapped[str] = mapped_column(String(80), default="manual", index=True)
+    resume_text: Mapped[str] = mapped_column(Text, default="")
+    resume_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    skills_json: Mapped[list] = mapped_column(JSON, default=list)
+    experience_years: Mapped[float | None] = mapped_column(Float, nullable=True)
+    consent_status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class HiringApplication(Base):
+    __tablename__ = "hiring_applications"
+    __table_args__ = (UniqueConstraint("job_id", "candidate_id", name="uq_job_candidate_application"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("job_requisitions.id"), index=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("hiring_candidates.id"), index=True)
+    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    stage: Mapped[str] = mapped_column(String(50), default="applied", index=True)
+    status: Mapped[str] = mapped_column(String(30), default="active", index=True)
+    source: Mapped[str] = mapped_column(String(80), default="manual", index=True)
+    ai_match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_recommendation: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    ai_rationale_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    human_decision: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class HiringStageEvent(Base):
+    __tablename__ = "hiring_stage_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("hiring_applications.id"), index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    from_stage: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    to_stage: Mapped[str] = mapped_column(String(50), index=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class HiringInterview(Base):
+    __tablename__ = "hiring_interviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("hiring_applications.id"), index=True)
+    scheduled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    interview_type: Mapped[str] = mapped_column(String(80), default="structured")
+    status: Mapped[str] = mapped_column(String(30), default="scheduled", index=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=45)
+    meeting_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    interviewers_json: Mapped[list] = mapped_column(JSON, default=list)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class HiringScorecard(Base):
+    __tablename__ = "hiring_scorecards"
+    __table_args__ = (UniqueConstraint("interview_id", "reviewer_user_id", name="uq_interview_scorecard_reviewer"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    interview_id: Mapped[int] = mapped_column(ForeignKey("hiring_interviews.id"), index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("hiring_applications.id"), index=True)
+    reviewer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    recommendation: Mapped[str] = mapped_column(String(60), default="pending")
+    overall_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    competencies_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    evidence: Mapped[str] = mapped_column(Text, default="")
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class HiringComplianceCheck(Base):
+    __tablename__ = "hiring_compliance_checks"
+    __table_args__ = (UniqueConstraint("application_id", "check_type", name="uq_application_compliance_check"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("hiring_applications.id"), index=True)
+    check_type: Mapped[str] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    details_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    reviewed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class HiringIntegration(Base):
+    __tablename__ = "hiring_integrations"
+    __table_args__ = (UniqueConstraint("organization_id", "provider", name="uq_organization_hiring_integration"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="not_connected", index=True)
+    config_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class OrganizationAuditEvent(Base):
+    __tablename__ = "organization_audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(120), index=True)
+    target_type: Mapped[str] = mapped_column(String(80), index=True)
+    target_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    details_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

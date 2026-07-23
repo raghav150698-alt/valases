@@ -74,10 +74,11 @@ all secrets after personnel changes, suspected disclosure, or an incident.
 
 ## Enterprise release gates
 
-1. **Tenant isolation:** add an organization and membership model, tenant IDs on
-   every business row, database RLS or equivalent policy enforcement, and a
-   least-privilege application database role. Today tenant isolation is mainly
-   enforced in FastAPI and the connection role can bypass Supabase RLS.
+1. **Tenant isolation:** the hiring workspace now has organization memberships,
+   organization IDs on every hiring record, and API-level tenant scoping with
+   audited writes. Before enterprise rollout, add database RLS or equivalent
+   policy enforcement with a tenant-aware least-privilege database role. The
+   current server-side connection role can bypass Supabase RLS.
 2. **Enterprise identity:** configure customer SSO (SAML/OIDC), mandatory MFA
    for Valases administrators, SCIM or controlled lifecycle automation, session
    revocation, and periodic access reviews.

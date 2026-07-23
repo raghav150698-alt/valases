@@ -4,7 +4,7 @@ import { BrandLogo } from "../components/BrandLogo";
 import { AuthPanel } from "../features/auth/AuthPanel";
 import { AdminConsole } from "../features/admin/AdminConsole";
 import { useAssessmentSession } from "../features/assessment/useAssessmentSession";
-import { ProviderAssessments } from "../features/provider/ProviderAssessments";
+import { HiringWorkspace } from "../features/hiring/HiringWorkspace";
 import { ExcelSimulator } from "../features/tools/ExcelSimulator";
 import { AccountingTool } from "../features/tools/AccountingTool";
 import { TaxTool } from "../features/tools/TaxTool";
@@ -144,7 +144,7 @@ export function App() {
   }, []);
   const recruiterWorkspaceBody = useMemo(() => {
     if (recruiterAuthenticated) {
-      return <ProviderAssessments />;
+      return <HiringWorkspace />;
     }
     return null;
   }, [recruiterAuthenticated]);

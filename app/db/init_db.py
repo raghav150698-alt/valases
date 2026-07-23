@@ -19,6 +19,17 @@ _REQUIRED_PRODUCTION_TABLES = {
     "proctor_sessions",
     "proctor_events",
     "audit_logs",
+    "organizations",
+    "organization_memberships",
+    "job_requisitions",
+    "hiring_candidates",
+    "hiring_applications",
+    "hiring_stage_events",
+    "hiring_interviews",
+    "hiring_scorecards",
+    "hiring_compliance_checks",
+    "hiring_integrations",
+    "organization_audit_events",
 }
 
 
