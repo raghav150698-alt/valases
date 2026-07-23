@@ -1,5 +1,6 @@
 import axios from "axios";
 import { useSessionStore } from "./sessionStore";
+import { supabase } from "./supabase";
 
 export const api = axios.create({
   baseURL: String(import.meta.env.VITE_API_BASE_URL || "/").trim() || "/",
@@ -22,6 +23,10 @@ api.interceptors.response.use(
       const requestAuthorization = String(error?.config?.headers?.Authorization || "");
       if (recruiterToken && requestAuthorization === `Bearer ${recruiterToken}`) {
         useSessionStore.getState().clear();
+        // Keep the app store and Supabase browser session in sync. Leaving a
+        // rejected Supabase session behind remounts AuthPanel and creates a
+        // repeated sign-in/redirect loop after a 401 response.
+        void supabase?.auth.signOut({ scope: "local" });
       }
     }
     return Promise.reject(error);

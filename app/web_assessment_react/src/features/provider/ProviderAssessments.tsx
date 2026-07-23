@@ -169,7 +169,7 @@ function formatResultDate(value?: string | null) {
   return Number.isNaN(date.getTime()) ? "--" : date.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }
 
-export function ProviderAssessments() {
+export function ProviderAssessments({ embedded = false }: { embedded?: boolean }) {
   const qc = useQueryClient();
   const clearSession = useSessionStore((state) => state.clear);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("dashboard");
@@ -578,8 +578,8 @@ export function ProviderAssessments() {
   };
 
   return (
-    <section className="provider-workspace hrms-shell">
-      <aside className="workspace-rail">
+    <section className={`provider-workspace hrms-shell ${embedded ? "provider-embedded" : ""}`}>
+      {!embedded && <aside className="workspace-rail">
         <div className="workspace-rail-brand">
           <BrandLogo className="workspace-brand-logo" />
           <div><strong>Valases</strong><small>Recruiting</small></div>
@@ -598,9 +598,17 @@ export function ProviderAssessments() {
           <button type="button" onClick={() => setShowSettings(true)}><SettingsIcon /><span>Settings</span></button>
           <div className="workspace-user-chip"><span>RA</span><div><strong>Recruiter Admin</strong><small>Workspace owner</small></div></div>
         </div>
-      </aside>
+      </aside>}
 
       <main className="workspace-product-main">
+      {embedded && <nav className="assessment-horizontal-tabs" aria-label="Assessment workspace navigation">
+        {(["dashboard", "custom", "assessments", "results"] as WorkspaceTab[]).map((tab) => (
+          <button key={tab} type="button" className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
+            <span>{tab === "custom" ? "Create" : tab === "results" ? "Results" : tab[0].toUpperCase() + tab.slice(1)}</span>
+            {tab === "assessments" && assessmentRows.length > 0 && <em>{assessmentRows.length}</em>}
+          </button>
+        ))}
+      </nav>}
       <header className="workspace-appbar">
         <div className="workspace-appbar-left">
           <div className="workspace-appbar-title">

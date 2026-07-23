@@ -169,7 +169,7 @@ export function HiringWorkspace() {
         {tab === "candidates" && <CandidatesView candidates={candidates} applications={applications} onNewCandidate={() => setDialog("candidate")} onCreateApplication={() => setDialog("application")} />}
         {tab === "pipeline" && <PipelineView stages={pipelineStages} applications={applications} onSelect={setSelectedApplication} onMove={(id, stage) => stageMutation.mutate({ id, stage })} />}
         {tab === "interviews" && <InterviewsView interviews={interviews} applications={applications} onSchedule={() => setDialog("interview")} />}
-        {tab === "assessments" && <Suspense fallback={<div className="hiring-section-empty">Loading assessment workspace...</div>}><ProviderAssessments /></Suspense>}
+        {tab === "assessments" && <Suspense fallback={<div className="hiring-section-empty">Loading assessment workspace...</div>}><ProviderAssessments embedded /></Suspense>}
         {tab === "integrations" && <IntegrationsView integrations={integrationsQuery.data || []} onConfigure={(integration) => { setSelectedIntegration(integration); setDialog("integration"); }} />}
       </main>
 
