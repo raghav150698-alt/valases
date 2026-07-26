@@ -154,6 +154,13 @@ export function App() {
       setSessionResolved(true);
       return;
     }
+    if (role === "admin" || role === "provider" || role === "student") {
+      // AuthPanel already resolved the authoritative server context before
+      // storing this session. Avoid issuing a second concurrent provisioning
+      // request immediately after sign-in.
+      setSessionResolved(true);
+      return;
+    }
 
     let active = true;
     setSessionResolved(false);
@@ -175,7 +182,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [setSession, token]);
+  }, [role, setSession, token]);
 
   if (embedded && tool === "excel") {
     return (

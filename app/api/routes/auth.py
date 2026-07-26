@@ -450,22 +450,17 @@ def me_context(
                 is_active=True,
             )
             db.add(current_user)
-            db.flush()
-            approval = db.scalar(select(UserApproval).where(UserApproval.user_id == current_user.id))
-            if not approval:
-                db.add(
-                    UserApproval(
-                        user_id=current_user.id,
-                        status=ApprovalStatus.APPROVED,
-                        rejection_reason=None,
-                    ),
-                )
-            else:
-                approval.status = ApprovalStatus.APPROVED
-                approval.rejection_reason = None
-            db.commit()
-            db.refresh(current_user)
-            _safe_sync_claims(firebase_uid, current_user, ApprovalStatus.APPROVED)
+            try:
+                db.commit()
+                db.refresh(current_user)
+            except IntegrityError:
+                # Multiple browser boot requests can provision the same
+                # configured administrator concurrently on serverless hosts.
+                # Reuse the row committed by the winning request.
+                db.rollback()
+                current_user = db.scalar(_normalized_user_query(email_norm))
+                if not current_user:
+                    raise
         else:
             current_user = User(
                 email=email_norm or _firebase_local_email(firebase_uid),
@@ -526,8 +521,17 @@ def me_context(
             rejection_reason=None,
         )
         db.add(approval)
-        db.commit()
-        db.refresh(current_user)
+        try:
+            db.commit()
+            db.refresh(current_user)
+        except IntegrityError:
+            # A concurrent context request may have created the approval after
+            # this request checked. Load that canonical row instead of
+            # returning a transient 500 to the browser.
+            db.rollback()
+            approval = db.scalar(select(UserApproval).where(UserApproval.user_id == current_user.id))
+            if not approval:
+                raise
     elif configured_admin and approval.status != ApprovalStatus.APPROVED:
         approval.status = ApprovalStatus.APPROVED
         approval.rejection_reason = None
