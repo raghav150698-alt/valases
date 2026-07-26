@@ -216,6 +216,7 @@ def health():
     payload = {
         "status": "degraded" if database_startup_failed else "ok",
         "database": "unavailable" if database_startup_failed else "ready",
+        "region": settings.resolved_deployment_region,
     }
     return JSONResponse(content=payload, status_code=503 if database_startup_failed else 200)
 

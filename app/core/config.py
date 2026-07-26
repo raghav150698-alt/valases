@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     app_name: str = "Valases API"
     app_base_url: str = "http://localhost:8000"
     candidate_app_base_url: str = ""
+    deployment_region: str = "tokyo"
     database_url: str = "sqlite:///./valases.db"
     jwt_secret_key: str = "change_me"
     jwt_algorithm: str = "HS256"
@@ -145,6 +146,13 @@ class Settings(BaseSettings):
         return v in {"prod", "production"} or vercel_env == "production"
 
     @property
+    def resolved_deployment_region(self) -> str:
+        region = (self.deployment_region or "").strip().lower()
+        if region not in {"tokyo", "mumbai"}:
+            raise RuntimeError("DEPLOYMENT_REGION must be either 'tokyo' or 'mumbai'")
+        return region
+
+    @property
     def resolved_database_url(self) -> str:
         raw = (self.database_url or "").strip()
         if raw.startswith("postgres://"):
@@ -229,6 +237,10 @@ class Settings(BaseSettings):
             return []
 
         errors: list[str] = []
+        try:
+            self.resolved_deployment_region
+        except RuntimeError as exc:
+            errors.append(str(exc))
         auth_mode = (self.auth_mode or "").strip().lower()
         if auth_mode != "supabase":
             errors.append("AUTH_MODE must be supabase in production")
