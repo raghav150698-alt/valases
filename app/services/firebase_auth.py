@@ -3,13 +3,20 @@ import secrets
 from pathlib import Path
 from typing import Any
 
-import firebase_admin
-from firebase_admin import auth, credentials
+try:
+    import firebase_admin
+    from firebase_admin import auth, credentials
+except ImportError:  # Firebase is disabled in the production Supabase boundary.
+    firebase_admin = None
+    auth = None
+    credentials = None
 
 from app.core.config import get_settings
 
 
 def init_firebase() -> None:
+    if firebase_admin is None or auth is None or credentials is None:
+        raise RuntimeError("Firebase support is not installed in this deployment.")
     if firebase_admin._apps:
         return
     settings = get_settings()

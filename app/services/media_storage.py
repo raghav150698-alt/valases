@@ -16,7 +16,10 @@ try:
     import boto3
 except ImportError:  # pragma: no cover - runtime dependency safety
     boto3 = None
-from firebase_admin import storage
+try:
+    from firebase_admin import storage
+except ImportError:  # Firebase storage is not part of the Supabase production runtime.
+    storage = None
 
 from app.core.config import get_settings
 from app.services.firebase_auth import init_firebase
@@ -53,6 +56,8 @@ def _upload_file_to_firebase_storage(
     object_path: str,
     content_type: str | None = None,
 ) -> str:
+    if storage is None:
+        raise RuntimeError("Firebase Storage support is not installed in this deployment.")
     if not local_path.exists():
         raise RuntimeError(f"Local file not found for upload: {local_path}")
     init_firebase()
