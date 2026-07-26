@@ -185,7 +185,9 @@ def on_startup() -> None:
     global database_startup_failed
     security_errors = settings.production_security_errors()
     if security_errors:
-        raise RuntimeError("Unsafe production configuration: " + "; ".join(security_errors))
+        message = "Unsafe production configuration: " + "; ".join(security_errors)
+        print(message, flush=True)
+        raise RuntimeError(message)
     try:
         if settings.is_production and not settings.enable_startup_database_management:
             verify_database_schema()
@@ -203,6 +205,7 @@ def on_startup() -> None:
             except Exception as retry_exc:
                 exc = retry_exc
         database_startup_failed = True
+        print(f"Database startup check failed: {type(exc).__name__}: {exc}", flush=True)
         request_logger.exception("database_initialization_failed")
         # Vercel should still be able to serve the assessment shell while a
         # database configuration problem is being diagnosed. Local startup
