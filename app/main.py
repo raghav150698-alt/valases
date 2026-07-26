@@ -27,6 +27,7 @@ app = FastAPI(
 )
 request_logger = logging.getLogger("valases.request")
 database_startup_failed = False
+startup_configuration_errors: list[str] = []
 WEB_DIR = Path(__file__).resolve().parent / "web"
 ASSETS_DIR = WEB_DIR / "assets"
 ASSESSMENT_WEB_DIST_DIR = Path(__file__).resolve().parent / "web_assessment_react" / "dist"
@@ -49,6 +50,20 @@ async def apply_security_headers(request: Request, call_next):
     method = request.method
     path = request.url.path or "/"
     status_code = 500
+    if startup_configuration_errors and path != "/health":
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "Service unavailable until production configuration is corrected.",
+                "status": "configuration_blocked",
+            },
+            headers={
+                "Cache-Control": "no-store, max-age=0",
+                "Pragma": "no-cache",
+                "X-Request-ID": request_id,
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
     try:
         response = await call_next(request)
         status_code = int(response.status_code)
@@ -182,11 +197,16 @@ async def enforce_basic_rate_limits(request: Request, call_next):
 
 @app.on_event("startup")
 def on_startup() -> None:
-    global database_startup_failed
+    global database_startup_failed, startup_configuration_errors
+    database_startup_failed = False
+    startup_configuration_errors = []
     security_errors = settings.production_security_errors()
     if security_errors:
+        startup_configuration_errors = list(security_errors)
         message = "Unsafe production configuration: " + "; ".join(security_errors)
         print(message, flush=True)
+        if settings.is_vercel:
+            return
         raise RuntimeError(message)
     try:
         if settings.is_production and not settings.enable_startup_database_management:
@@ -216,12 +236,23 @@ def on_startup() -> None:
 
 @app.get("/health")
 def health():
+    try:
+        region = settings.resolved_deployment_region
+    except RuntimeError:
+        region = "invalid"
+    configuration_blocked = bool(startup_configuration_errors)
     payload = {
-        "status": "degraded" if database_startup_failed else "ok",
-        "database": "unavailable" if database_startup_failed else "ready",
-        "region": settings.resolved_deployment_region,
+        "status": "blocked" if configuration_blocked else ("degraded" if database_startup_failed else "ok"),
+        "database": "not_checked" if configuration_blocked else ("unavailable" if database_startup_failed else "ready"),
+        "configuration": "invalid" if configuration_blocked else "ready",
+        "region": region,
     }
-    return JSONResponse(content=payload, status_code=503 if database_startup_failed else 200)
+    if configuration_blocked:
+        payload["configuration_errors"] = startup_configuration_errors
+    return JSONResponse(
+        content=payload,
+        status_code=503 if configuration_blocked or database_startup_failed else 200,
+    )
 
 
 @app.get("/favicon.ico")

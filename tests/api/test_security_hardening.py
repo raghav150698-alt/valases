@@ -67,6 +67,27 @@ class SecurityConfigurationTest(unittest.TestCase):
         verify_mock.assert_called_once_with()
         init_mock.assert_not_called()
 
+    def test_vercel_reports_invalid_configuration_without_crashing(self) -> None:
+        import app.main as main
+
+        try:
+            with (
+                patch.dict("os.environ", {"VERCEL": "1"}),
+                patch.object(
+                    Settings,
+                    "production_security_errors",
+                    return_value=["AUTH_MODE must be supabase in production"],
+                ),
+            ):
+                main.on_startup()
+                response = main.health()
+
+            self.assertEqual(response.status_code, 503)
+            self.assertIn(b'"status":"blocked"', response.body)
+            self.assertIn(b"AUTH_MODE must be supabase in production", response.body)
+        finally:
+            main.startup_configuration_errors = []
+
 
 class ProvisioningAndApprovalTest(unittest.TestCase):
     def setUp(self) -> None:
