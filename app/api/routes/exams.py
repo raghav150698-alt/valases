@@ -274,6 +274,19 @@ def _latest_invite_delivery(issue: AssessmentIssue) -> dict | None:
     return None
 
 
+def _request_origin(request: Request) -> str:
+    scheme = str(request.scope.get("scheme") or "http").strip().lower()
+    host = str(request.headers.get("host") or "").strip()
+    if not host:
+        server = request.scope.get("server")
+        if isinstance(server, (tuple, list)) and server:
+            hostname = str(server[0]).strip()
+            port = int(server[1]) if len(server) > 1 and server[1] else None
+            default_port = 443 if scheme == "https" else 80
+            host = f"{hostname}:{port}" if port and port != default_port else hostname
+    return f"{scheme}://{host}".rstrip("/") if host else ""
+
+
 def _create_issued_candidate_token(issue_id: int, session_token: str) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
@@ -1333,7 +1346,7 @@ def issue_assessment_to_candidate(
     configured_candidate_url = str(settings.candidate_app_base_url or "").strip()
     if settings.is_production and not configured_candidate_url:
         raise HTTPException(status_code=503, detail="Candidate portal URL is not configured")
-    base_url = (configured_candidate_url or f"{request.url.scheme}://{request.headers.get('host')}").rstrip("/")
+    base_url = (configured_candidate_url or _request_origin(request)).rstrip("/")
     parsed_candidate_url = urlsplit(base_url)
     if parsed_candidate_url.scheme not in {"http", "https"} or not parsed_candidate_url.netloc:
         raise HTTPException(status_code=503, detail="Candidate portal URL is invalid")
@@ -1495,7 +1508,7 @@ def resend_issued_assessment_invitation(
     settings = get_settings()
     base_url = str(settings.candidate_app_base_url or "").strip().rstrip("/")
     if not base_url and not settings.is_production:
-        base_url = f"{request.url.scheme}://{request.headers.get('host')}".rstrip("/")
+        base_url = _request_origin(request)
     parsed_candidate_url = urlsplit(base_url)
     if parsed_candidate_url.scheme not in {"http", "https"} or not parsed_candidate_url.netloc:
         raise HTTPException(status_code=503, detail="Candidate portal URL is invalid")
