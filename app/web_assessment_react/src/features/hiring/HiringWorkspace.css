@@ -1,7 +1,7 @@
 .hiring-shell { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); background: #f6f8f7; color: #17211d; }
 .hiring-sidebar { min-height: 100vh; background: #fff; color: #28483d; padding: 24px 14px; display: flex; flex-direction: column; gap: 26px; position: sticky; top: 0; height: 100vh; box-sizing: border-box; border-right: 1px solid #dbe7e1; }
 .hiring-brand { display: flex; align-items: center; gap: 10px; padding: 0 10px; font-weight: 750; font-size: 19px; color: #173b31; }
-.hiring-brand-logo { width: 32px; height: 32px; object-fit: contain; }
+.hiring-company-logo { width: 38px; height: 38px; flex: none; object-fit: contain; border: 1px solid #d9e5df; border-radius: 6px; background: #fff; }
 .hiring-org-switch { margin: 0 6px; padding: 14px; border: 1px solid #cfe1d9; background: #f4faf7; display: grid; gap: 4px; border-radius: 6px; }
 .hiring-org-switch small, .hiring-org-switch span { color: #61766d; font-size: 12px; text-transform: capitalize; }
 .hiring-org-switch strong { color: #173b31; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -9,13 +9,17 @@
 .hiring-sidebar nav button { border: 0; border-radius: 5px; background: transparent; color: #48665b; text-align: left; padding: 11px 12px; font-size: 14px; cursor: pointer; }
 .hiring-sidebar nav button:hover, .hiring-sidebar nav button.active { background: #e8f4ee; color: #12624e; }
 .hiring-sidebar nav button.active { box-shadow: inset 3px 0 #168062; }
-.hiring-sidebar-foot { margin-top: auto; border-top: 1px solid #dbe7e1; padding: 16px 10px 0; font-size: 12px; color: #31584a; line-height: 1.5; }
+.hiring-sidebar-foot { margin-top: auto; border-top: 1px solid #dbe7e1; padding: 12px 10px 0; display: flex; align-items: center; gap: 7px; font-size: 12px; color: #31584a; }
 .hiring-sidebar-foot span { color: #72857d; }
+.hiring-footer-logo { width: 30px; height: 24px; }
 .hiring-main { padding: 34px clamp(20px, 4vw, 58px) 48px; min-width: 0; }
 .hiring-topbar { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; padding-bottom: 30px; }
 .hiring-topbar p { margin: 0 0 7px; color: #567083; font-size: 14px; }
 .hiring-topbar h1 { margin: 0; font-size: 29px; letter-spacing: 0; color: #173b31; }
 .hiring-topbar-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.hiring-search { width: min(320px, 34vw); min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #cbd9d2; border-radius: 5px; background: #fff; }
+.hiring-search svg { width: 17px; height: 17px; flex: none; color: #587267; }
+.hiring-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #173b31; font: inherit; font-size: 13px; }
 .hiring-button, .hiring-panel button, .hiring-table button { min-height: 34px; border-radius: 5px; padding: 7px 12px; font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
 .hiring-button.primary { border: 1px solid #176b57; background: #176b57; color: #fff; }
 .hiring-button.primary:hover { background: #105543; }
@@ -110,6 +114,14 @@
 .hiring-settings-row strong { color: #173b31; }
 .hiring-settings-row span, .hiring-settings-row small { color: #687e75; text-transform: capitalize; }
 .hiring-settings-row.danger { margin-top: 32px; border-top: 1px solid #e3ebe7; }
+.hiring-organization-profile { display: grid; gap: 16px; padding: 20px 0; border-bottom: 1px solid #e3ebe7; }
+.hiring-organization-profile > label { display: grid; gap: 7px; color: #36584c; font-size: 13px; font-weight: 700; }
+.hiring-organization-profile input[type="text"], .hiring-organization-profile input:not([type]) { min-height: 40px; padding: 8px 10px; border: 1px solid #c7d6df; border-radius: 5px; font: inherit; }
+.hiring-organization-profile > div { display: flex; align-items: center; gap: 12px; color: #557067; font-size: 12px; }
+.hiring-organization-logo { grid-template-columns: 74px minmax(0, 1fr); align-items: center; }
+.hiring-organization-logo img { width: 74px; height: 74px; object-fit: contain; border: 1px solid #d5e1db; border-radius: 6px; background: #f7faf8; }
+.hiring-organization-logo > span { display: grid; gap: 6px; }
+.hiring-organization-logo small { color: #72857d; font-weight: 400; }
 .hiring-integration-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-top: 18px; }
 .hiring-integration-row { border: 1px solid #dbe4eb; border-radius: 6px; min-height: 92px; padding: 14px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
 .hiring-integration-row div { display: grid; gap: 4px; min-width: 0; }

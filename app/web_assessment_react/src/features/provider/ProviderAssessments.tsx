@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "../../components/BrandLogo";
+import { AssessmentToolIcon } from "../../components/AssessmentToolIcon";
 import { api } from "../../lib/api";
 import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
@@ -231,7 +232,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     red_flags: "",
     manual_review: true,
   });
-  const [showTools, setShowTools] = useState(false);
+  const [showTools, setShowTools] = useState(true);
   const [selectedTools, setSelectedTools] = useState<string[]>([]);
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [excelTemplate, setExcelTemplate] = useState<ExcelAssessmentSubmission | null>(null);
@@ -560,6 +561,10 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     () => assessmentRows.find((x) => x.exam_id === selectedExamId) || null,
     [assessmentRows, selectedExamId],
   );
+  const issueSelectedExam = useMemo(
+    () => assessmentRows.find((assessment) => assessment.exam_id === issueExamId) || null,
+    [assessmentRows, issueExamId],
+  );
   const publishedCount = assessmentRows.filter((x) => x.status === "published").length;
   const draftCount = assessmentRows.filter((x) => x.status !== "published").length;
   const activeIssueCount = issuedRows.filter((row) => !["review_pending", "reviewed", "completed"].includes(row.status)).length;
@@ -662,6 +667,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
           </div>
         </div>
         <div className="workspace-appbar-right">
+          <span className="workspace-tools-mark" title="Assessment tools"><AssessmentToolIcon /></span>
           <label className="workspace-search">
             <SearchIcon />
             <input
@@ -793,15 +799,6 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
         <section className="workspace-custom-grid">
           <div className="workspace-main-column">
             <section className="workspace-surface">
-              <div className="workspace-surface-head">
-                <div>
-                  <h3>Custom tools</h3>
-                  <p>Choose the assessment environment that should be attached to the test.</p>
-                </div>
-                <button type="button" className="secondary-btn" onClick={() => setShowTools((v) => !v)}>
-                  {showTools ? "Hide tools" : "Show tools"}
-                </button>
-              </div>
               {showTools && (
                 <div className="tool-lab-grid hrms-tools-grid">
                   {toolTypes.map((tool) => {
@@ -816,9 +813,12 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                             : "Tax and accounting workflow simulator";
                     return (
                       <article key={tool} className={`tool-lab-card${active ? " selected" : ""}`}>
-                        <div>
+                        <div className="tool-lab-identity">
+                          <AssessmentToolIcon toolName={tool} />
+                          <span>
                           <strong>{tool}</strong>
                           <small>{description}</small>
+                          </span>
                         </div>
                         <div className="tool-lab-actions">
                           <label className="toggle-row">
@@ -959,8 +959,8 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                       setActiveTab("assessments");
                     }}
                   >
-                    <strong>{assessment.title}</strong>
-                    <small>{assessment.assessment_type} | {assessment.status}</small>
+                    <AssessmentToolIcon assessmentType={assessment.assessment_type} title={assessment.title} />
+                    <span><strong>{assessment.title}</strong><small>{assessment.status}</small></span>
                   </button>
                 ))}
               </div>
@@ -982,14 +982,17 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
               <div className="workspace-form-grid compact">
                 <label className="field-stack workspace-span-2">
                   <span>Selected assessment</span>
-                  <select value={selectedExamId ?? ""} onChange={(e) => setSelectedExamId(Number(e.target.value))}>
-                    <option value="">Select assessment</option>
-                    {filteredAssessments.map((x) => (
-                      <option key={x.exam_id} value={x.exam_id}>
-                        {x.title} ({x.status}) {x.assessment_type === "mcq" ? `${x.question_count} questions` : `${x.checkpoint_count || 0} checkpoints`}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="assessment-select-with-icon">
+                    {selectedExam && <AssessmentToolIcon assessmentType={selectedExam.assessment_type} title={selectedExam.title} />}
+                    <select value={selectedExamId ?? ""} onChange={(e) => setSelectedExamId(Number(e.target.value))}>
+                      <option value="">Select assessment</option>
+                      {filteredAssessments.map((x) => (
+                        <option key={x.exam_id} value={x.exam_id}>
+                          {x.title} ({x.status}) {x.assessment_type === "mcq" ? `${x.question_count} questions` : `${x.checkpoint_count || 0} checkpoints`}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
                 </label>
                 {selectedExam && (
                   <div className="workspace-selection-summary workspace-span-2">
@@ -1101,15 +1104,18 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 </div>
               </div>
               <div className="workspace-form-grid compact">
-                <label className="field-stack">
+                <div className="field-stack">
                   <span>Published assessment</span>
-                  <select value={issueExamId ?? ""} onChange={(e) => setIssueExamId(Number(e.target.value))}>
-                    <option value="">Select published assessment</option>
+                  <div className="issue-assessment-picker" role="listbox" aria-label="Published assessment">
                     {assessmentRows.filter((x) => x.status === "published").map((x) => (
-                      <option key={x.exam_id} value={x.exam_id}>{x.title}</option>
+                      <button type="button" role="option" aria-selected={issueExamId === x.exam_id} className={issueExamId === x.exam_id ? "active" : ""} key={x.exam_id} onClick={() => setIssueExamId(x.exam_id)}>
+                        <AssessmentToolIcon assessmentType={x.assessment_type} title={x.title} />
+                        <span><strong>{x.title}</strong><small>{x.duration_minutes} min</small></span>
+                      </button>
                     ))}
-                  </select>
-                </label>
+                  </div>
+                  {issueSelectedExam && <small className="issue-selected-note">Selected: {issueSelectedExam.title}</small>}
+                </div>
                 <label className="field-stack">
                   <span>Screening candidate</span>
                   <select
@@ -1160,8 +1166,8 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                     className={`assessment-list-item${selectedExamId === assessment.exam_id ? " active" : ""}`}
                     onClick={() => setSelectedExamId(assessment.exam_id)}
                   >
-                    <strong>{assessment.title}</strong>
-                    <small>{assessment.assessment_type} | {assessment.status}</small>
+                    <AssessmentToolIcon assessmentType={assessment.assessment_type} title={assessment.title} />
+                    <span><strong>{assessment.title}</strong><small>{assessment.status}</small></span>
                   </button>
                 ))}
               </div>

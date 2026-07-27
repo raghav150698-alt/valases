@@ -42,6 +42,7 @@ from app.models.entities import (
     UserRole,
 )
 from app.services.supabase_auth import invite_supabase_user
+from app.services.organization_branding import normalize_organization_logo, organization_logo_url
 
 router = APIRouter(prefix="/hiring", tags=["hiring-workspace"])
 
@@ -104,6 +105,11 @@ _INTEGRATION_PROVIDERS = set(_INTEGRATION_CATALOG)
 class OrganizationCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     legal_name: str | None = Field(default=None, max_length=240)
+
+
+class OrganizationProfileUpdate(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+    logo_data_url: str = Field(default="", max_length=400000)
 
 
 class MembershipCreate(BaseModel):
@@ -536,7 +542,13 @@ def hiring_workspace(
         .group_by(HiringApplication.stage),
     ).all()
     return {
-        "organization": {"id": organization.id, "name": organization.name, "slug": organization.slug, "plan_code": organization.plan_code},
+        "organization": {
+            "id": organization.id,
+            "name": organization.name,
+            "slug": organization.slug,
+            "plan_code": organization.plan_code,
+            "logo_url": organization_logo_url(organization.settings_json),
+        },
         "membership_role": membership.role if membership else "platform_admin",
         "permissions": sorted(_membership_permissions(current_user, membership)),
         "permission_catalog": sorted(_PERMISSIONS),
@@ -544,6 +556,43 @@ def hiring_workspace(
         "metrics": {"open_jobs": int(active_jobs), "applications": int(app_count), "scheduled_interviews": int(interview_count)},
         "pipeline": {stage: int(count) for stage, count in stage_rows},
         "recent_jobs": [_serialize_job(job) for job in jobs],
+    }
+
+
+@router.patch("/organization/profile")
+def update_organization_profile(
+    payload: OrganizationProfileUpdate,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "organization.manage")
+    name = payload.name.strip()
+    logo = normalize_organization_logo(payload.logo_data_url)
+    previous_name = organization.name
+    organization.name = name
+    organization_settings = dict(organization.settings_json or {})
+    if logo:
+        organization_settings["branding"] = {
+            **dict(organization_settings.get("branding") or {}),
+            "logo_data_url": logo,
+        }
+        organization.settings_json = organization_settings
+    _write_audit(
+        db,
+        organization.id,
+        current_user.id,
+        "organization_profile_updated",
+        "organization",
+        organization.id,
+        {"name_changed": previous_name != name, "logo_changed": bool(logo)},
+    )
+    db.commit()
+    return {
+        "id": organization.id,
+        "name": organization.name,
+        "logo_url": organization_logo_url(organization.settings_json),
     }
 
 

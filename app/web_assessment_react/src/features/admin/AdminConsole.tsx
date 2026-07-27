@@ -6,6 +6,7 @@ import { BrandLogo } from "../../components/BrandLogo";
 import { api } from "../../lib/api";
 import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
+import { readCompanyLogo } from "../../lib/imageFile";
 import "./AdminConsole.css";
 
 type AdminTab = "overview" | "companies" | "users" | "usage" | "billing" | "governance" | "requests" | "audit" | "settings";
@@ -183,7 +184,8 @@ export function AdminConsole() {
   const [showNewCompany, setShowNewCompany] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [createdCompany, setCreatedCompany] = useState<{ business_name: string; email: string } | null>(null);
-  const [newCompany, setNewCompany] = useState({ business_name: "", email: "", password: "" });
+  const [newCompany, setNewCompany] = useState({ business_name: "", email: "", password: "", logo_data_url: "" });
+  const [companyLogoError, setCompanyLogoError] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null);
   const [billingForm, setBillingForm] = useState<Billing>(emptyBilling);
   const [governanceForm, setGovernanceForm] = useState(emptyGovernance);
@@ -269,7 +271,8 @@ export function AdminConsole() {
     mutationFn: async () => (await api.post("/admin/workspace/companies", newCompany)).data as { business_name: string; email: string },
     onSuccess: async (data) => {
       setCreatedCompany(data);
-      setNewCompany({ business_name: "", email: "", password: "" });
+      setNewCompany({ business_name: "", email: "", password: "", logo_data_url: "" });
+      setCompanyLogoError("");
       setShowPassword(false);
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["admin-overview"] }),
@@ -587,12 +590,31 @@ export function AdminConsole() {
               </div>
             ) : (
               <form onSubmit={handleCreateCompany} className="admin-user-form">
-                <label>Business name<input required minLength={2} maxLength={200} autoFocus value={newCompany.business_name} onChange={(event) => setNewCompany((value) => ({ ...value, business_name: event.target.value }))} /></label>
+                <label>Company profile name<input required minLength={2} maxLength={200} autoFocus value={newCompany.business_name} onChange={(event) => setNewCompany((value) => ({ ...value, business_name: event.target.value }))} /></label>
+                <label className="admin-company-logo-field">
+                  Company logo
+                  <span className="admin-company-logo-control">
+                    <span className="admin-company-logo-preview">{newCompany.logo_data_url ? <img src={newCompany.logo_data_url} alt="Company logo preview" /> : <span aria-hidden="true">+</span>}</span>
+                    <span><input required type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const logo_data_url = await readCompanyLogo(file);
+                        setNewCompany((value) => ({ ...value, logo_data_url }));
+                        setCompanyLogoError("");
+                      } catch (reason) {
+                        setNewCompany((value) => ({ ...value, logo_data_url: "" }));
+                        setCompanyLogoError(reason instanceof Error ? reason.message : "The logo could not be used.");
+                      }
+                    }} /><small>PNG, JPEG, or WebP. Maximum 256 KB.</small></span>
+                  </span>
+                </label>
                 <label>Email<input required type="email" autoComplete="email" value={newCompany.email} onChange={(event) => setNewCompany((value) => ({ ...value, email: event.target.value }))} /></label>
                 <label>Password<input required type={showPassword ? "text" : "password"} autoComplete="new-password" minLength={12} maxLength={128} value={newCompany.password} onChange={(event) => setNewCompany((value) => ({ ...value, password: event.target.value }))} /><small>Use at least 12 characters.</small></label>
                 <label className="admin-password-toggle"><input type="checkbox" checked={showPassword} onChange={(event) => setShowPassword(event.target.checked)} /><span>Show password</span></label>
+                {companyLogoError && <div className="admin-error">{companyLogoError}</div>}
                 {createCompany.isError && <div className="admin-error">{apiMessage(createCompany.error, "The company could not be created.")}</div>}
-                <div className="admin-form-actions"><button type="button" onClick={() => setShowNewCompany(false)}>Cancel</button><button className="admin-primary" type="submit" disabled={createCompany.isPending}>{createCompany.isPending ? "Creating..." : "Create company"}</button></div>
+                <div className="admin-form-actions"><button type="button" onClick={() => setShowNewCompany(false)}>Cancel</button><button className="admin-primary" type="submit" disabled={createCompany.isPending || !newCompany.logo_data_url}>{createCompany.isPending ? "Creating..." : "Create company"}</button></div>
               </form>
             )}
           </section>

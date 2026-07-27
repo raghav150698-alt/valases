@@ -53,6 +53,7 @@ from app.schemas import (
 )
 from app.services.notifications import send_email
 from app.services.account_rules import sync_existing_accounts
+from app.services.organization_branding import normalize_organization_logo
 from app.services.supabase_auth import ensure_supabase_user
 from app.core.config import get_settings
 
@@ -70,6 +71,7 @@ class AdminCompanyCreate(BaseModel):
     business_name: str = Field(min_length=2, max_length=200)
     email: EmailStr
     password: str = Field(min_length=12, max_length=128)
+    logo_data_url: str = Field(default="", max_length=400000)
 
 
 class BillingAccountUpdate(BaseModel):
@@ -245,6 +247,7 @@ def _create_company_account(
     account_name: str | None,
     db: Session,
     current_user: User,
+    logo_data_url: str = "",
 ) -> dict:
     email = email_address.strip().lower()
     company_name = business_name.strip()
@@ -315,6 +318,14 @@ def _create_company_account(
         owner=user,
         actor_user_id=current_user.id,
     )
+    logo = normalize_organization_logo(logo_data_url)
+    if logo:
+        organization_settings = dict(organization.settings_json or {})
+        organization_settings["branding"] = {
+            **dict(organization_settings.get("branding") or {}),
+            "logo_data_url": logo,
+        }
+        organization.settings_json = organization_settings
     _audit(
         db,
         current_user.id,
@@ -798,6 +809,7 @@ def admin_workspace_create_company(
         account_name=None,
         db=db,
         current_user=current_user,
+        logo_data_url=payload.logo_data_url,
     )
 
 

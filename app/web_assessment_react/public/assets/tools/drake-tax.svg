@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Drake Tax">
+  <circle cx="24" cy="24" r="22" fill="#ba1f2e"/>
+  <circle cx="24" cy="24" r="18" fill="none" stroke="#fff" stroke-width="1.5" opacity=".65"/>
+  <path fill="#fff" d="M14 13h9.5c7.6 0 12.5 4.1 12.5 11s-4.9 11-12.5 11H14V13Zm6 5v12h3.2c4.2 0 6.7-2 6.7-6s-2.5-6-6.7-6H20Z"/>
+  <path fill="#fff" d="M13 37h22v2H13z"/>
+</svg>

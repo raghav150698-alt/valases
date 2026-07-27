@@ -11,6 +11,7 @@ from app.api.routes.hiring import (
     CandidateCreate,
     IntegrationUpdate,
     MembershipCreate,
+    OrganizationProfileUpdate,
     InterviewCreate,
     JobCreate,
     ScorecardCreate,
@@ -29,6 +30,7 @@ from app.api.routes.hiring import (
     screen_application,
     submit_scorecard,
     update_application_stage,
+    update_organization_profile,
 )
 from app.api.routes.exams import (
     AssessmentReviewFinalizeRequest,
@@ -76,6 +78,34 @@ class HiringWorkspaceTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.db.close()
         self.engine.dispose()
+
+    def test_owner_can_update_company_profile_and_logo(self) -> None:
+        workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)
+        organization_id = workspace["organization"]["id"]
+        self.assertEqual(workspace["organization"]["logo_url"], "/assets/brand/valases-logo.png")
+
+        logo = "data:image/png;base64,iVBORw0KGgo="
+        updated = update_organization_profile(
+            OrganizationProfileUpdate(name="Example Hiring Company", logo_data_url=logo),
+            organization_id=organization_id,
+            db=self.db,
+            current_user=self.recruiter,
+        )
+
+        self.assertEqual(updated["name"], "Example Hiring Company")
+        self.assertEqual(updated["logo_url"], logo)
+        refreshed = hiring_workspace(organization_id=organization_id, db=self.db, current_user=self.recruiter)
+        self.assertEqual(refreshed["organization"]["name"], "Example Hiring Company")
+        self.assertEqual(refreshed["organization"]["logo_url"], logo)
+
+        with self.assertRaises(HTTPException) as invalid_logo:
+            update_organization_profile(
+                OrganizationProfileUpdate(name="Example Hiring Company", logo_data_url="data:image/png;base64,SGVsbG8="),
+                organization_id=organization_id,
+                db=self.db,
+                current_user=self.recruiter,
+            )
+        self.assertEqual(invalid_logo.exception.status_code, 422)
 
     def test_recruiting_workflow_remains_organization_scoped_and_human_reviewed(self) -> None:
         workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)

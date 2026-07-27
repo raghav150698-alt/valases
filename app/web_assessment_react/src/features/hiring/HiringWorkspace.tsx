@@ -1,16 +1,17 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { BrandLogo } from "../../components/BrandLogo";
 import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
+import { readCompanyLogo } from "../../lib/imageFile";
 import "./HiringWorkspace.css";
 
 const ProviderAssessments = lazy(() => import("../provider/ProviderAssessments").then((module) => ({ default: module.ProviderAssessments })));
 
 type Workspace = {
-  organization: { id: number; name: string; slug: string; plan_code: string };
+  organization: { id: number; name: string; slug: string; plan_code: string; logo_url: string };
   membership_role: string;
   permissions: string[];
   permission_catalog: string[];
@@ -149,10 +150,14 @@ type SsoConfiguration = {
   status: string;
 };
 
-type Tab = "overview" | "jobs" | "candidates" | "pipeline" | "interviews" | "assessments" | "integrations" | "settings";
+type Tab = "overview" | "jobs" | "candidates" | "pipeline" | "interviews" | "assessments" | "integrations" | "team" | "settings";
 
 const stageLabel = (stage: string) => stage.replace(/_/g, " ").replace(/\b\w/g, (value) => value.toUpperCase());
 const splitList = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
+
+function SearchIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" /><path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
+}
 
 function apiError(error: unknown, fallback: string) {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -178,6 +183,7 @@ export function HiringWorkspace() {
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
   const [notice, setNotice] = useState("");
   const [stageError, setStageError] = useState("");
+  const [workspaceSearch, setWorkspaceSearch] = useState("");
   const clearSession = useSessionStore((state) => state.clear);
   const queryClient = useQueryClient();
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["hiring"] });
@@ -205,6 +211,12 @@ export function HiringWorkspace() {
   const workspace = workspaceQuery.data;
   const pipelineStages = workspace?.pipeline_stages || ["applied", "screening", "assessment", "interview", "offer", "hired"];
   const activeJobs = jobs.filter((job) => job.status === "open");
+  const searchTerm = workspaceSearch.trim().toLowerCase();
+  const filteredJobs = searchTerm ? jobs.filter((job) => `${job.title} ${job.job_code} ${job.department} ${job.location} ${job.skills.join(" ")}`.toLowerCase().includes(searchTerm)) : jobs;
+  const filteredCandidates = searchTerm ? candidates.filter((candidate) => `${candidate.full_name} ${candidate.email} ${candidate.headline} ${candidate.skills.join(" ")}`.toLowerCase().includes(searchTerm)) : candidates;
+  const filteredApplications = searchTerm ? applications.filter((application) => `${application.candidate.full_name} ${application.candidate.email} ${application.job_title} ${application.stage}`.toLowerCase().includes(searchTerm)) : applications;
+  const filteredInterviews = searchTerm ? interviews.filter((interview) => `${interview.candidate_name} ${interview.job_title} ${interview.interview_type} ${interview.status}`.toLowerCase().includes(searchTerm)) : interviews;
+  const filteredIntegrations = searchTerm ? (integrationsQuery.data || []).filter((integration) => `${integration.provider} ${integration.category} ${integration.status} ${integration.capabilities.join(" ")}`.toLowerCase().includes(searchTerm)) : (integrationsQuery.data || []);
   const busy = workspaceQuery.isLoading;
 
   const screenMutation = useMutation({
@@ -260,6 +272,7 @@ export function HiringWorkspace() {
     ["interviews", "Interviews", "interviews.view"],
     ["assessments", "Assessments", "assessments.view"],
     ["integrations", "Integrations", "integrations.view"],
+    ["team", "Team", "members.manage"],
     ["settings", "Settings", ""],
   ] as Array<[Tab, string, string]>).filter(([, , permission]) => !permission || can(permission));
 
@@ -280,20 +293,21 @@ export function HiringWorkspace() {
   return (
     <div className="hiring-shell">
       <aside className="hiring-sidebar">
-        <div className="hiring-brand"><BrandLogo className="hiring-brand-logo" /><span>Valases</span></div>
-        <div className="hiring-org-switch"><small>Organization</small><strong>{workspace?.organization.name || "Your organization"}</strong><span>{workspace?.membership_role.replace(/_/g, " ") || "Recruiter"}</span></div>
+        <div className="hiring-brand"><img className="hiring-company-logo" src={workspace?.organization.logo_url || "/assets/brand/valases-logo.png"} alt="" /><span>{workspace?.organization.name || "Your organization"}</span></div>
+        <div className="hiring-org-switch"><small>Workspace access</small><strong>{stageLabel(workspace?.membership_role || "recruiter")}</strong></div>
         <nav aria-label="Hiring navigation">
           {navigation.map(([id, label]) => (
             <button type="button" className={tab === id ? "active" : ""} key={id} onClick={() => setTab(id)}>{label}</button>
           ))}
         </nav>
-        <div className="hiring-sidebar-foot">{workspace?.organization.name || "Valases"}<br /><span>{workspace?.organization.plan_code || "Workspace"}</span></div>
+        <div className="hiring-sidebar-foot"><BrandLogo className="hiring-footer-logo" /><span>Valases</span></div>
       </aside>
 
       <main className="hiring-main">
         <header className="hiring-topbar">
           <div><p>{tab === "overview" ? "Hiring command center" : stageLabel(tab)}</p><h1>{tab === "overview" ? "Build a stronger hiring signal" : stageLabel(tab)}</h1></div>
           <div className="hiring-topbar-actions">
+            {["jobs", "candidates", "pipeline", "interviews", "integrations"].includes(tab) && <label className="hiring-search"><SearchIcon /><input value={workspaceSearch} onChange={(event) => setWorkspaceSearch(event.target.value)} placeholder={`Search ${stageLabel(tab).toLowerCase()}`} aria-label={`Search ${tab}`} /></label>}
             {can("candidates.manage") && <button type="button" className="hiring-button secondary" onClick={() => setDialog("candidate")}>Add candidate</button>}
             {can("jobs.manage") && <button type="button" className="hiring-button primary" onClick={() => setDialog("job")}>New job</button>}
           </div>
@@ -302,13 +316,14 @@ export function HiringWorkspace() {
         {notice && <div className="hiring-notice" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice("")}>Dismiss</button></div>}
 
         {tab === "overview" && <Overview workspace={workspace} jobs={jobs} applications={applications} interviews={interviews} onTab={setTab} onNewJob={() => setDialog("job")} onNewApplication={() => setDialog("application")} />}
-        {tab === "jobs" && <JobsView jobs={jobs} applications={applications} onNewJob={() => setDialog("job")} onCreateApplication={() => setDialog("application")} onStatusChange={(id, status) => jobStatusMutation.mutate({ id, status })} />}
-        {tab === "candidates" && <CandidatesView candidates={candidates} applications={applications} onNewCandidate={() => setDialog("candidate")} onCreateApplication={() => setDialog("application")} />}
-        {tab === "pipeline" && <PipelineView stages={pipelineStages} applications={applications} movingId={stageMutation.isPending ? stageMutation.variables?.id : undefined} onSelect={(application) => { setStageError(""); setSelectedApplication(application); }} onMove={(id, stage) => stageMutation.mutate({ id, stage })} onOpenAssessments={() => setTab("assessments")} />}
-        {tab === "interviews" && <InterviewsView interviews={interviews} applications={applications} onSchedule={() => setDialog("interview")} onScorecard={(interview) => { setSelectedInterview(interview); setDialog("scorecard"); }} />}
+        {tab === "jobs" && <JobsView jobs={filteredJobs} applications={applications} onNewJob={() => setDialog("job")} onCreateApplication={() => setDialog("application")} onStatusChange={(id, status) => jobStatusMutation.mutate({ id, status })} />}
+        {tab === "candidates" && <CandidatesView candidates={filteredCandidates} applications={applications} onNewCandidate={() => setDialog("candidate")} onCreateApplication={() => setDialog("application")} />}
+        {tab === "pipeline" && <PipelineView stages={pipelineStages} applications={filteredApplications} movingId={stageMutation.isPending ? stageMutation.variables?.id : undefined} onSelect={(application) => { setStageError(""); setSelectedApplication(application); }} onMove={(id, stage) => stageMutation.mutate({ id, stage })} onOpenAssessments={() => setTab("assessments")} />}
+        {tab === "interviews" && <InterviewsView interviews={filteredInterviews} applications={filteredApplications} onSchedule={() => setDialog("interview")} onScorecard={(interview) => { setSelectedInterview(interview); setDialog("scorecard"); }} />}
         {tab === "assessments" && <Suspense fallback={<div className="hiring-section-empty">Loading assessment workspace...</div>}><ProviderAssessments embedded /></Suspense>}
-        {tab === "integrations" && <IntegrationsView integrations={integrationsQuery.data || []} canManage={can("integrations.manage")} onConnect={(integration) => void connectIntegration(integration)} onConfigure={(integration) => { setSelectedIntegration(integration); setDialog("integration"); }} />}
-        {tab === "settings" && <SettingsView organization={workspace?.organization} role={workspace?.membership_role || "recruiter"} permissions={workspace?.permissions || []} members={membersQuery.data || []} sso={ssoQuery.data} onAddMember={() => setDialog("member")} onRefresh={refresh} onSignOut={async () => { try { if (supabase) await supabase.auth.signOut(); } finally { clearSession(); } }} />}
+        {tab === "integrations" && <IntegrationsView integrations={filteredIntegrations} canManage={can("integrations.manage")} onConnect={(integration) => void connectIntegration(integration)} onConfigure={(integration) => { setSelectedIntegration(integration); setDialog("integration"); }} />}
+        {tab === "team" && <TeamView members={membersQuery.data || []} onAddMember={() => setDialog("member")} onRefresh={refresh} />}
+        {tab === "settings" && <SettingsView organization={workspace?.organization} role={workspace?.membership_role || "recruiter"} permissions={workspace?.permissions || []} sso={ssoQuery.data} onRefresh={refresh} onSignOut={async () => { try { if (supabase) await supabase.auth.signOut(); } finally { clearSession(); } }} />}
       </main>
 
       {selectedDetails && <ApplicationDrawer key={selectedDetails.id} application={selectedDetails} detail={applicationDetailQuery.data} loading={applicationDetailQuery.isLoading} transitionError={stageError} stages={pipelineStages} onClose={() => { setStageError(""); setSelectedApplication(null); }} onScreen={() => screenMutation.mutate(selectedDetails.id)} onCompliance={() => complianceMutation.mutate(selectedDetails.id)} onOpenInterviews={() => { setSelectedApplication(null); setTab("interviews"); }} onAddScorecard={() => {
@@ -445,47 +460,92 @@ function IntegrationsView({ integrations, canManage, onConnect, onConfigure }: {
   </section>;
 }
 
-function SettingsView({ organization, role, permissions, members, sso, onAddMember, onRefresh, onSignOut }: {
+function SettingsView({ organization, role, permissions, sso, onRefresh, onSignOut }: {
   organization?: Workspace["organization"];
   role: string;
   permissions: string[];
-  members: Member[];
   sso?: SsoConfiguration;
-  onAddMember: () => void;
   onRefresh: () => void;
   onSignOut: () => Promise<void>;
 }) {
-  const [section, setSection] = useState<"profile" | "people" | "sso">("profile");
-  const canManageMembers = permissions.includes("members.manage");
+  const [section, setSection] = useState<"profile" | "sso">("profile");
   const canManageSso = permissions.includes("sso.manage");
+  const canManageOrganization = permissions.includes("organization.manage");
+  return <div className="hiring-settings-layout">
+    <aside className="hiring-settings-nav" aria-label="Workspace settings">
+      <button type="button" className={section === "profile" ? "active" : ""} onClick={() => setSection("profile")}>Workspace</button>
+      {canManageSso && <button type="button" className={section === "sso" ? "active" : ""} onClick={() => setSection("sso")}>Single sign-on</button>}
+    </aside>
+    <section className="hiring-panel hiring-full-panel hiring-settings">
+      {section === "profile" && <>
+        <div className="hiring-panel-header"><div><h2>Company profile</h2><p>The identity shown to your hiring team across Valases.</p></div></div>
+        {organization && canManageOrganization ? <OrganizationProfileForm organization={organization} onSaved={onRefresh} /> : <div className="hiring-settings-row"><div><strong>Company</strong><span>{organization?.name || "Your organization"}</span></div></div>}
+        <div className="hiring-settings-row"><div><strong>Access role</strong><span>{stageLabel(role)}</span></div><small>{permissions.length} permissions</small></div>
+        <div className="hiring-settings-row danger"><div><strong>Sign out</strong><span>End this browser session on this device.</span></div><button type="button" className="hiring-button secondary" onClick={() => void onSignOut()}>Sign out</button></div>
+      </>}
+      {section === "sso" && <SsoForm value={sso} onSaved={onRefresh} />}
+    </section>
+  </div>;
+}
+
+function TeamView({ members, onAddMember, onRefresh }: { members: Member[]; onAddMember: () => void; onRefresh: () => void }) {
   const removeMember = async (member: Member) => {
     if (!window.confirm(`Remove ${member.full_name || member.email} from this organization?`)) return;
     await api.delete(`/hiring/members/${member.id}`);
     onRefresh();
   };
-  return <div className="hiring-settings-layout">
-    <aside className="hiring-settings-nav" aria-label="Workspace settings">
-      <button type="button" className={section === "profile" ? "active" : ""} onClick={() => setSection("profile")}>Workspace</button>
-      {canManageMembers && <button type="button" className={section === "people" ? "active" : ""} onClick={() => setSection("people")}>People & access</button>}
-      {canManageSso && <button type="button" className={section === "sso" ? "active" : ""} onClick={() => setSection("sso")}>Single sign-on</button>}
-    </aside>
-    <section className="hiring-panel hiring-full-panel hiring-settings">
-      {section === "profile" && <>
-        <div className="hiring-panel-header"><div><h2>Workspace</h2><p>Organization identity and your current access.</p></div></div>
-        <div className="hiring-settings-row"><div><strong>Organization</strong><span>{organization?.name || "Your organization"}</span></div><small>{organization?.plan_code || "trial"} plan</small></div>
-        <div className="hiring-settings-row"><div><strong>Access role</strong><span>{stageLabel(role)}</span></div><small>{permissions.length} permissions</small></div>
-        <div className="hiring-settings-row danger"><div><strong>Sign out</strong><span>End this browser session on this device.</span></div><button type="button" className="hiring-button secondary" onClick={() => void onSignOut()}>Sign out</button></div>
-      </>}
-      {section === "people" && <>
-        <div className="hiring-panel-header"><div><h2>People & access</h2><p>Invite colleagues and control what they can view or change.</p></div><button type="button" className="hiring-button primary" onClick={onAddMember}>Invite member</button></div>
-        <div className="hiring-member-table">
-          <div className="hiring-member-head"><span>Member</span><span>Role</span><span>Status</span><span></span></div>
-          {members.map((member) => <div className="hiring-member-row" key={member.id}><div><strong>{member.full_name}</strong><small>{member.email}</small></div><span>{stageLabel(member.role)}</span><StatusPill status={member.status} /><button type="button" disabled={member.role === "owner" || member.is_current_user} onClick={() => void removeMember(member)}>Remove</button></div>)}
-        </div>
-      </>}
-      {section === "sso" && <SsoForm value={sso} onSaved={onRefresh} />}
-    </section>
-  </div>;
+  return <section className="hiring-panel hiring-full-panel">
+    <div className="hiring-panel-header"><div><h2>Team access</h2><p>Add recruiters and assign organization-wide or custom permissions.</p></div><button type="button" className="hiring-button primary" onClick={onAddMember}>Add team member</button></div>
+    <div className="hiring-member-table">
+      <div className="hiring-member-head"><span>Member</span><span>Role</span><span>Status</span><span>Access</span></div>
+      {members.map((member) => <div className="hiring-member-row" key={member.id}><div><strong>{member.full_name}</strong><small>{member.email}</small></div><span>{stageLabel(member.role)}</span><StatusPill status={member.status} /><button type="button" disabled={member.role === "owner" || member.is_current_user} onClick={() => void removeMember(member)}>Remove</button></div>)}
+    </div>
+    {!members.length && <Empty text="No organization members have been added yet." action="Add team member" onClick={onAddMember} />}
+  </section>;
+}
+
+function OrganizationProfileForm({ organization, onSaved }: { organization: Workspace["organization"]; onSaved: () => void }) {
+  const [name, setName] = useState(organization.name);
+  const [logo, setLogo] = useState(organization.logo_url);
+  const [newLogo, setNewLogo] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    setName(organization.name);
+    setLogo(organization.logo_url);
+  }, [organization.logo_url, organization.name]);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+    try {
+      await api.patch("/hiring/organization/profile", { name: name.trim(), logo_data_url: newLogo });
+      setNewLogo("");
+      setMessage("Company profile updated.");
+      onSaved();
+    } catch (reason) {
+      setMessage(apiError(reason, "Company profile could not be updated."));
+    } finally {
+      setLoading(false);
+    }
+  };
+  return <form className="hiring-organization-profile" onSubmit={submit}>
+    <label className="hiring-organization-logo">
+      <img src={newLogo || logo} alt="Company logo" />
+      <span><strong>Company logo</strong><input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        try {
+          setNewLogo(await readCompanyLogo(file));
+          setMessage("");
+        } catch (reason) {
+          setMessage(reason instanceof Error ? reason.message : "The logo could not be used.");
+        }
+      }} /><small>PNG, JPEG, or WebP. Maximum 256 KB.</small></span>
+    </label>
+    <label>Company profile name<input required minLength={2} maxLength={200} value={name} onChange={(event) => setName(event.target.value)} /></label>
+    <div><button type="submit" className="hiring-button primary" disabled={loading || name.trim().length < 2}>{loading ? "Saving..." : "Save profile"}</button>{message && <span role="status">{message}</span>}</div>
+  </form>;
 }
 
 function SsoForm({ value, onSaved }: { value?: SsoConfiguration; onSaved: () => void }) {
