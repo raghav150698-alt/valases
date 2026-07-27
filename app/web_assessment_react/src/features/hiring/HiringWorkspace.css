@@ -100,17 +100,43 @@
 .hiring-shortlist-row span b { color: #294b3f; }
 .hiring-shortlist-row em { color: #12624e; font-size: 20px; font-style: normal; font-weight: 800; text-align: right; }
 .hiring-settings { max-width: 900px; }
+.hiring-settings-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; align-items: start; }
+.hiring-settings-nav { display: grid; gap: 3px; padding: 8px; border: 1px solid #d8e2dd; background: #fff; position: sticky; top: 24px; }
+.hiring-settings-nav button { min-height: 38px; padding: 0 10px; border: 0; border-left: 3px solid transparent; background: transparent; color: #557067; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.hiring-settings-nav button:hover { background: #f1f7f4; }
+.hiring-settings-nav button.active { border-left-color: #168062; background: #eaf5f0; color: #125341; font-weight: 700; }
 .hiring-settings-row { min-height: 78px; padding: 0 2px; border-bottom: 1px solid #e3ebe7; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .hiring-settings-row > div { display: grid; gap: 5px; }
 .hiring-settings-row strong { color: #173b31; }
 .hiring-settings-row span, .hiring-settings-row small { color: #687e75; text-transform: capitalize; }
 .hiring-settings-row.danger { margin-top: 32px; border-top: 1px solid #e3ebe7; }
 .hiring-integration-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-top: 18px; }
-.hiring-integration-row { border: 1px solid #dbe4eb; border-radius: 6px; min-height: 74px; padding: 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; }
+.hiring-integration-row { border: 1px solid #dbe4eb; border-radius: 6px; min-height: 92px; padding: 14px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
 .hiring-integration-row div { display: grid; gap: 4px; min-width: 0; }
 .hiring-integration-row strong { color: #16314a; text-transform: capitalize; }
 .hiring-integration-row small { color: #748694; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hiring-integration-row button { border: 0; background: transparent; color: #6d7f8e; }
+.hiring-integration-actions { grid-column: 1 / -1; display: flex !important; flex-direction: row; justify-content: flex-end; border-top: 1px solid #edf1ef; padding-top: 10px; }
+.hiring-member-table { width: 100%; }
+.hiring-member-head, .hiring-member-row { display: grid; grid-template-columns: minmax(220px, 1.5fr) .7fr .55fr .45fr; gap: 14px; align-items: center; }
+.hiring-member-head { padding: 13px 0 8px; color: #6c8192; font-size: 11px; text-transform: uppercase; }
+.hiring-member-row { min-height: 68px; border-top: 1px solid #e5ece8; font-size: 13px; }
+.hiring-member-row > div { display: grid; gap: 4px; min-width: 0; }
+.hiring-member-row strong { color: #173b31; }
+.hiring-member-row small { color: #72857d; overflow: hidden; text-overflow: ellipsis; }
+.hiring-member-row > button { border: 0; background: transparent; color: #a33a32; font: inherit; font-size: 12px; cursor: pointer; }
+.hiring-member-row > button:disabled { color: #9ba8a3; cursor: not-allowed; }
+.hiring-sso-form { padding: 0; max-width: 680px; }
+.hiring-sso-form .hiring-panel-header { margin-bottom: 4px; }
+.hiring-role-options, .hiring-permission-grid { margin: 0; padding: 0; border: 0; display: grid; gap: 8px; }
+.hiring-role-options legend, .hiring-permission-grid legend { margin-bottom: 8px; color: #36584c; font-size: 13px; font-weight: 700; }
+.hiring-role-options > label { grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 10px; padding: 12px; border: 1px solid #d7e3de; cursor: pointer; }
+.hiring-role-options > label:has(input:checked) { border-color: #69a996; background: #f0f8f4; }
+.hiring-role-options input, .hiring-permission-grid input { width: 16px; height: 16px; margin: 1px 0 0; }
+.hiring-role-options span { display: grid; gap: 4px; }
+.hiring-role-options strong { color: #173b31; }
+.hiring-role-options small { color: #6b7f77; font-weight: 400; line-height: 1.4; }
+.hiring-permission-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; border: 1px solid #d7e3de; max-height: 280px; overflow-y: auto; }
+.hiring-permission-grid label { grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: 8px; font-weight: 500; }
 .hiring-drawer { position: fixed; z-index: 20; right: 0; top: 0; height: 100vh; width: min(430px, 100vw); background: #fff; border-left: 1px solid #cfdce5; box-shadow: -8px 0 28px rgba(16, 42, 67, .12); overflow-y: auto; }
 .hiring-drawer > header { padding: 28px 26px 21px; display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid #e4ebf0; }
 .hiring-drawer header small { color: #647d90; }
@@ -134,6 +160,10 @@
 .hiring-scorecard-summary:first-of-type { border-top: 0; }
 .hiring-check-list { display: grid; gap: 9px; }
 .hiring-drawer textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid #c7d6cf; border-radius: 5px; padding: 9px 10px; font: inherit; line-height: 1.4; }
+.hiring-transition-blocker { display: grid; gap: 8px; padding: 11px; border: 1px solid #e2c46f; border-radius: 6px; background: #fff9e8; color: #624a0c; }
+.hiring-transition-blocker p { color: #624a0c; }
+.hiring-transition-blocker > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.hiring-transition-error { padding: 9px 10px; border-left: 3px solid #b63838; background: #fff4f4; color: #8c2626 !important; }
 .hiring-activity-list { display: grid; }
 .hiring-activity-list > div { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 9px; padding: 8px 0; }
 .hiring-activity-list i { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: #188163; }
@@ -172,4 +202,4 @@
 .hiring-main .provider-embedded .workspace-new-btn { background: #14785f; }
 .hiring-main .provider-embedded .workspace-new-btn:hover { background: #0e604b; }
 @media (max-width: 1100px) { .hiring-metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hiring-overview-grid { grid-template-columns: 1fr; } .hiring-table { min-width: 820px; } .hiring-full-panel { overflow-x: auto; } }
-@media (max-width: 760px) { .hiring-shell { grid-template-columns: 1fr; } .hiring-sidebar { min-height: auto; height: auto; position: static; padding: 14px; gap: 13px; } .hiring-sidebar nav { display: flex; overflow-x: auto; } .hiring-sidebar nav button { white-space: nowrap; } .hiring-sidebar-foot, .hiring-org-switch span { display: none; } .hiring-main { padding: 22px 16px 34px; } .hiring-topbar { display: grid; } .hiring-topbar-actions { width: 100%; } .hiring-topbar-actions button { flex: 1; } .hiring-metrics-grid { grid-template-columns: 1fr 1fr; } .hiring-metric { min-height: 144px; padding: 15px; } .hiring-stage-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hiring-panel { padding: 16px; } .hiring-form-grid { grid-template-columns: 1fr; } .hiring-description-label { grid-template-columns: 1fr; } .hiring-description-label > button { justify-self: start; } .hiring-integration-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .hiring-shell { grid-template-columns: 1fr; } .hiring-sidebar { min-height: auto; height: auto; position: static; padding: 14px; gap: 13px; } .hiring-sidebar nav { display: flex; overflow-x: auto; } .hiring-sidebar nav button { white-space: nowrap; } .hiring-sidebar-foot, .hiring-org-switch span { display: none; } .hiring-main { padding: 22px 16px 34px; } .hiring-topbar { display: grid; } .hiring-topbar-actions { width: 100%; } .hiring-topbar-actions button { flex: 1; } .hiring-metrics-grid { grid-template-columns: 1fr 1fr; } .hiring-metric { min-height: 144px; padding: 15px; } .hiring-stage-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hiring-panel { padding: 16px; } .hiring-form-grid, .hiring-permission-grid { grid-template-columns: 1fr; } .hiring-description-label { grid-template-columns: 1fr; } .hiring-description-label > button { justify-self: start; } .hiring-integration-grid { grid-template-columns: 1fr; } .hiring-settings-layout { grid-template-columns: 1fr; } .hiring-settings-nav { display: flex; overflow-x: auto; position: static; } .hiring-settings-nav button { white-space: nowrap; border-left: 0; border-bottom: 2px solid transparent; } .hiring-settings-nav button.active { border-bottom-color: #168062; } .hiring-member-head, .hiring-member-row { min-width: 650px; } .hiring-settings { overflow-x: auto; } }

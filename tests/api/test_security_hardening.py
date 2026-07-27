@@ -12,7 +12,7 @@ from app.api.deps import get_current_user
 from app.api.routes.exams import _session_token_digest, _session_token_matches
 from app.api.routes.tools import CodingPreviewFile, CodingPreviewSyncRequest, CodingRunRequest, coding_preview_file, coding_preview_sync, coding_run
 from app.core.config import Settings
-from app.models.entities import ApprovalStatus, Base, User, UserApproval, UserRole
+from app.models.entities import ApprovalStatus, Base, Organization, OrganizationMembership, User, UserApproval, UserRole
 from app.services.account_rules import sync_existing_accounts
 from app.services.proctoring_ai import _file_matches_sha256
 from app.services.supabase_auth import verify_supabase_token
@@ -131,6 +131,53 @@ class ProvisioningAndApprovalTest(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 403)
         self.assertIsNone(self.db.scalar(select(User).where(User.email == "unknown@example.com")))
+
+    @patch("app.api.deps.verify_supabase_token")
+    @patch("app.api.deps.get_settings")
+    def test_enforced_organization_sso_rejects_password_session(self, settings_mock, verify_mock) -> None:
+        settings_mock.return_value = _production_settings()
+        user = User(
+            email="member@example.com",
+            full_name="Organization Member",
+            password_hash="supabase",
+            role=UserRole.PROVIDER,
+            is_active=True,
+            account_state="active",
+        )
+        self.db.add(user)
+        self.db.flush()
+        self.db.add(UserApproval(user_id=user.id, status=ApprovalStatus.APPROVED))
+        organization = Organization(
+            name="Example",
+            slug="example",
+            settings_json={
+                "sso": {
+                    "enabled": True,
+                    "enforce_for_members": True,
+                    "domains": ["example.com"],
+                },
+            },
+        )
+        self.db.add(organization)
+        self.db.flush()
+        self.db.add(OrganizationMembership(organization_id=organization.id, user_id=user.id, role="recruiter"))
+        self.db.commit()
+
+        verify_mock.return_value = {
+            "uid": "member-id",
+            "email": user.email,
+            "name": user.full_name,
+            "role": "provider",
+            "app_metadata": {"provider": "email"},
+        }
+        with self.assertRaises(HTTPException) as raised:
+            get_current_user("password-token", self.db, None, None, None, None)
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertIn("company SSO", raised.exception.detail)
+
+        verify_mock.return_value["app_metadata"] = {"provider": "sso:saml"}
+        authenticated = get_current_user("sso-token", self.db, None, None, None, None)
+        self.assertEqual(authenticated.id, user.id)
 
     @patch("app.services.account_rules.get_settings")
     def test_startup_sync_preserves_rejected_approval(self, settings_mock) -> None:

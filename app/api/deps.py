@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.entities import ApprovalStatus, BannedIdentity, ProviderProfile, User, UserApproval, UserRole
+from app.models.entities import ApprovalStatus, BannedIdentity, Organization, OrganizationMembership, ProviderProfile, User, UserApproval, UserRole
 from app.services.account_rules import is_configured_admin_email, resolve_identity_role
 from app.services.firebase_auth import set_firebase_custom_claims, verify_firebase_token
 from app.services.supabase_auth import verify_supabase_token
@@ -112,6 +112,7 @@ def get_current_user(
         name = payload.get("name") or (email.split("@")[0] if email else "Authenticated User")
         role_claim = str(payload.get("role") or "").strip().lower()
         approval_claim = str(payload.get("approval_status") or "").strip().lower()
+        auth_provider = str((payload.get("app_metadata") or {}).get("provider") or "").strip().lower()
         if not firebase_uid:
             raise credentials_exception
     except Exception as exc:
@@ -192,6 +193,28 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account is not allowed to access the platform.")
     if state == "frozen":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account is temporarily frozen.")
+
+    if settings.auth_mode.lower() == "supabase" and user.role != UserRole.ADMIN:
+        organizations = list(
+            db.scalars(
+                select(Organization)
+                .join(OrganizationMembership, OrganizationMembership.organization_id == Organization.id)
+                .where(
+                    OrganizationMembership.user_id == user.id,
+                    OrganizationMembership.status == "active",
+                    Organization.status == "active",
+                ),
+            ).all(),
+        )
+        email_domain = str(user.email or "").rsplit("@", 1)[-1].lower()
+        for organization in organizations:
+            sso = dict((organization.settings_json or {}).get("sso") or {})
+            domains = {str(domain).strip().lower() for domain in sso.get("domains") or []}
+            if sso.get("enabled") and sso.get("enforce_for_members") and email_domain in domains and auth_provider != "sso:saml":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your organization requires company SSO. Sign out and use Continue with company SSO.",
+                )
 
     approval = db.scalar(select(UserApproval).where(UserApproval.user_id == user.id))
     if not approval:

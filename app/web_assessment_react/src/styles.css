@@ -711,6 +711,13 @@ body { margin: 0; background: #f6f8fb; }
   color: #1a73e8;
   font-weight: 800;
 }
+.auth-sso-mark {
+  min-width: 34px;
+  color: #176b57;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
 .assessment-question-actions {
   justify-content: space-between;
   align-items: center;

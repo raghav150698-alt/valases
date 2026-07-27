@@ -101,6 +101,66 @@ def _provider_profile_or_404(db: Session, user_id: int) -> ProviderProfile:
     return profile
 
 
+def _organization_membership(db: Session, current_user: User) -> OrganizationMembership | None:
+    return db.scalar(
+        select(OrganizationMembership)
+        .where(
+            OrganizationMembership.user_id == current_user.id,
+            OrganizationMembership.status == "active",
+        )
+        .order_by(OrganizationMembership.id.asc()),
+    )
+
+
+def _organization_user_ids(db: Session, current_user: User) -> list[int]:
+    membership = _organization_membership(db, current_user)
+    if not membership:
+        return [current_user.id]
+    return list(
+        db.scalars(
+            select(OrganizationMembership.user_id).where(
+                OrganizationMembership.organization_id == membership.organization_id,
+                OrganizationMembership.status == "active",
+            ),
+        ).all(),
+    )
+
+
+def _organization_provider_ids(db: Session, current_user: User) -> list[int]:
+    user_ids = _organization_user_ids(db, current_user)
+    return list(db.scalars(select(ProviderProfile.id).where(ProviderProfile.user_id.in_(user_ids))).all())
+
+
+def _assessment_permissions(db: Session, current_user: User) -> set[str]:
+    if current_user.role == UserRole.ADMIN:
+        return {"assessments.view", "assessments.manage", "assessment_results.view"}
+    membership = _organization_membership(db, current_user)
+    if not membership:
+        if current_user.role == UserRole.PROVIDER:
+            return {"assessments.view", "assessments.manage", "assessment_results.view"}
+        return set()
+    if membership.role in {"owner", "org_admin", "recruiter"}:
+        return {"assessments.view", "assessments.manage", "assessment_results.view"}
+    permissions = set(membership.permissions_json or [])
+    if membership.role == "hiring_manager":
+        permissions.update({"assessments.view", "assessments.manage", "assessment_results.view"})
+    elif membership.role == "interviewer":
+        permissions.add("assessment_results.view")
+    elif membership.role == "viewer":
+        permissions.update({"assessments.view", "assessment_results.view"})
+    return permissions
+
+
+def _require_assessment_permission(db: Session, current_user: User, permission: str) -> None:
+    permissions = _assessment_permissions(db, current_user)
+    if permission not in permissions:
+        raise HTTPException(status_code=403, detail=f"Your organization role does not allow {permission.replace('.', ' ')}")
+
+
+def _can_access_issue(db: Session, current_user: User, issue: AssessmentIssue) -> bool:
+    return current_user.role == UserRole.ADMIN or int(issue.issuer_user_id) in set(_organization_user_ids(db, current_user))
+
+
 def _provider_exam_or_403(db: Session, exam_id: int, current_user: User) -> tuple[ProviderProfile, Exam, Course]:
     profile = _provider_profile_or_404(db, current_user.id)
     exam = db.get(Exam, exam_id)
@@ -111,7 +171,7 @@ def _provider_exam_or_403(db: Session, exam_id: int, current_user: User) -> tupl
         raise HTTPException(status_code=404, detail="Course not found")
     if current_user.role == UserRole.ADMIN:
         return profile, exam, course
-    if course.provider_id != profile.id:
+    if course.provider_id not in set(_organization_provider_ids(db, current_user)):
         raise HTTPException(status_code=403, detail="Access denied")
     return profile, exam, course
 
@@ -687,7 +747,7 @@ def default_assessment_library(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
-    del current_user
+    _require_assessment_permission(db, current_user, "assessments.view")
     output = []
     for template_row in seed_default_assessment_templates(db):
         template = template_row.definition_json or {}
@@ -721,7 +781,7 @@ def get_default_assessment_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
-    del current_user
+    _require_assessment_permission(db, current_user, "assessments.view")
     template_row = next((row for row in seed_default_assessment_templates(db) if row.template_key == template_id and row.is_active), None)
     if not template_row:
         raise HTTPException(status_code=404, detail="Default assessment not found")
@@ -735,6 +795,7 @@ def install_default_assessment(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.manage")
     profile = _provider_profile_or_404(db, current_user.id)
     try:
         exam, template = install_default_assessment_for_provider(db, profile, template_id)
@@ -753,6 +814,7 @@ def create_exam(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.manage")
     profile = _provider_profile_or_404(db, current_user.id)
     assessment_type = str(payload.assessment_type.value if hasattr(payload.assessment_type, "value") else payload.assessment_type)
     if assessment_type not in ALLOWED_ASSESSMENT_TYPES:
@@ -768,7 +830,7 @@ def create_exam(
         payload.course_id = int(course.id)
     else:
         course = db.get(Course, payload.course_id)
-        if not course or course.provider_id != profile.id:
+        if not course or course.provider_id not in set(_organization_provider_ids(db, current_user)):
             raise HTTPException(status_code=404, detail="Course not found")
     if assessment_type != AssessmentType.MCQ.value:
         payload.timing_mode = "assessment"
@@ -814,6 +876,7 @@ def update_exam(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.manage")
     _, exam, _ = _provider_exam_or_403(db, exam_id, current_user)
     if exam.status == ExamStatus.PUBLISHED:
         raise HTTPException(status_code=400, detail="Published exam cannot be edited")
@@ -873,6 +936,7 @@ def delete_exam(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.manage")
     _, exam, _ = _provider_exam_or_403(db, exam_id, current_user)
     if exam.status == ExamStatus.PUBLISHED:
         raise HTTPException(status_code=400, detail="Published exam cannot be deleted")
@@ -893,9 +957,10 @@ def update_exam_rule(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.manage")
     profile, exam, _ = _provider_exam_or_403(db, exam_id, current_user)
     course = db.get(Course, exam.course_id)
-    if not course or course.provider_id != profile.id:
+    if not course or course.provider_id not in set(_organization_provider_ids(db, current_user)):
         raise HTTPException(status_code=403, detail="Access denied")
     try:
         rule = db.scalar(select(ExamRule).where(ExamRule.exam_id == exam.id))
@@ -919,12 +984,13 @@ def add_question(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.manage")
     profile = _provider_profile_or_404(db, current_user.id)
     exam = db.get(Exam, exam_id)
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
     course = db.get(Course, exam.course_id)
-    if not course or course.provider_id != profile.id:
+    if not course or course.provider_id not in set(_organization_provider_ids(db, current_user)):
         raise HTTPException(status_code=403, detail="Access denied")
 
     if payload.question_type != QuestionType.SHORT_ANSWER and not payload.options:
@@ -1005,6 +1071,7 @@ def list_questions(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.view")
     _, exam, _ = _provider_exam_or_403(db, exam_id, current_user)
     questions = list(db.scalars(select(Question).where(Question.exam_id == exam.id)).all())
     out = []
@@ -1035,6 +1102,7 @@ def delete_question(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.manage")
     _, exam, _ = _provider_exam_or_403(db, exam_id, current_user)
     if exam.status == ExamStatus.PUBLISHED:
         raise HTTPException(status_code=400, detail="Published exam cannot be edited")
@@ -1055,6 +1123,7 @@ def upsert_assessment_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.manage")
     _, exam, _ = _provider_exam_or_403(db, exam_id, current_user)
     if exam.status == ExamStatus.PUBLISHED:
         raise HTTPException(status_code=400, detail="Published assessment cannot be edited")
@@ -1093,13 +1162,14 @@ def get_assessment_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.view")
     exam = db.get(Exam, exam_id)
     if not exam:
         raise HTTPException(status_code=404, detail="Assessment not found")
     if current_user.role == UserRole.PROVIDER:
         profile = _provider_profile_or_404(db, current_user.id)
         course = db.get(Course, exam.course_id)
-        if not course or course.provider_id != profile.id:
+        if not course or course.provider_id not in set(_organization_provider_ids(db, current_user)):
             raise HTTPException(status_code=403, detail="Access denied")
     task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == exam.id))
     if not task:
@@ -1113,6 +1183,7 @@ def request_ai_review(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.manage")
     settings = get_settings()
     if not settings.enable_ai_review:
         return {"enabled": False, "status": "skipped", "message": "AI review is disabled for this phase."}
@@ -1124,7 +1195,7 @@ def request_ai_review(
     if current_user.role == UserRole.PROVIDER:
         profile = _provider_profile_or_404(db, current_user.id)
         course = db.get(Course, exam.course_id)
-        if not course or course.provider_id != profile.id:
+        if not course or course.provider_id not in set(_organization_provider_ids(db, current_user)):
             raise HTTPException(status_code=403, detail="Access denied")
 
     exam.status = ExamStatus.IN_REVIEW
@@ -1145,6 +1216,7 @@ def get_ai_review(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.view")
     settings = get_settings()
     if not settings.enable_ai_review:
         return {"enabled": False, "status": "skipped", "message": "AI review is disabled for this phase."}
@@ -1163,6 +1235,7 @@ def publish_exam(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.manage")
     settings = get_settings()
     profile = _provider_profile_or_404(db, current_user.id)
     exam = db.get(Exam, exam_id)
@@ -1171,7 +1244,7 @@ def publish_exam(
     course = db.get(Course, exam.course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    if current_user.role != UserRole.ADMIN and course.provider_id != profile.id:
+    if current_user.role != UserRole.ADMIN and course.provider_id not in set(_organization_provider_ids(db, current_user)):
         raise HTTPException(status_code=403, detail="Access denied")
     _validate_exam_metadata(exam)
 
@@ -1230,6 +1303,7 @@ def issue_assessment_to_candidate(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.manage")
     profile = _provider_profile_or_404(db, current_user.id)
     exam = db.get(Exam, exam_id)
     if not exam:
@@ -1355,9 +1429,12 @@ def list_issued_assessments_for_provider(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _require_assessment_permission(db, current_user, "assessments.view")
+    can_view_results = "assessment_results.view" in _assessment_permissions(db, current_user)
+    issuer_user_ids = _organization_user_ids(db, current_user)
     rows = db.scalars(
         select(AssessmentIssue)
-        .where(AssessmentIssue.issuer_user_id == current_user.id)
+        .where(AssessmentIssue.issuer_user_id.in_(issuer_user_ids))
         .order_by(AssessmentIssue.id.desc()),
     ).all()
     out = []
@@ -1380,12 +1457,12 @@ def list_issued_assessments_for_provider(
                 "candidate_name": row.candidate_name,
                 "candidate_email": row.candidate_email,
                 "status": row.status,
-                "score_pct": row.score_pct,
-                "passed": row.passed,
+                "score_pct": row.score_pct if can_view_results else None,
+                "passed": row.passed if can_view_results else None,
                 "issued_at": row.issued_at,
                 "access_expires_at": row.access_expires_at,
                 "completed_at": row.completed_at,
-                "time_taken_seconds": submission.time_taken_seconds if submission else None,
+                "time_taken_seconds": submission.time_taken_seconds if submission and can_view_results else None,
                 "submission_status": submission.status if submission else None,
                 "invite_delivery": _latest_invite_delivery(row),
             },
@@ -1403,7 +1480,8 @@ def resend_issued_assessment_invitation(
     issue = db.get(AssessmentIssue, issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issued assessment not found")
-    if current_user.role != UserRole.ADMIN and int(issue.issuer_user_id) != int(current_user.id):
+    _require_assessment_permission(db, current_user, "assessments.manage")
+    if not _can_access_issue(db, current_user, issue):
         raise HTTPException(status_code=403, detail="Access denied")
     if issue.status not in {"issued", "revoked"}:
         raise HTTPException(status_code=409, detail="Only an unused or revoked invitation can be reissued")
@@ -1485,7 +1563,8 @@ def revoke_issued_assessment_invitation(
     issue = db.get(AssessmentIssue, issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issued assessment not found")
-    if current_user.role != UserRole.ADMIN and int(issue.issuer_user_id) != int(current_user.id):
+    _require_assessment_permission(db, current_user, "assessments.manage")
+    if not _can_access_issue(db, current_user, issue):
         raise HTTPException(status_code=403, detail="Access denied")
     if issue.status in {"completed", "manual_review", "review_pending", "reviewed"}:
         raise HTTPException(status_code=409, detail="A submitted assessment cannot be revoked")
@@ -1524,7 +1603,8 @@ def review_issued_assessment_attempt(
     issue = db.get(AssessmentIssue, issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issued assessment not found")
-    if current_user.role != UserRole.ADMIN and int(issue.issuer_user_id) != int(current_user.id):
+    _require_assessment_permission(db, current_user, "assessment_results.view")
+    if not _can_access_issue(db, current_user, issue):
         raise HTTPException(status_code=403, detail="Access denied")
     exam = db.get(Exam, issue.exam_id)
     submission = db.scalar(
@@ -1569,7 +1649,8 @@ def finalize_issued_assessment_review(
     issue = db.get(AssessmentIssue, issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issued assessment not found")
-    if current_user.role != UserRole.ADMIN and int(issue.issuer_user_id) != int(current_user.id):
+    _require_assessment_permission(db, current_user, "assessment_results.view")
+    if not _can_access_issue(db, current_user, issue):
         raise HTTPException(status_code=403, detail="Access denied")
     exam = db.get(Exam, issue.exam_id)
     submission = db.scalar(
@@ -1664,11 +1745,17 @@ def list_published_assessment_catalog(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
-    rows = list(db.scalars(
+    _require_assessment_permission(db, current_user, "assessments.view")
+    exam_query = (
         select(Exam)
+        .join(Course, Course.id == Exam.course_id)
         .where(Exam.status == ExamStatus.PUBLISHED)
-        .order_by(Exam.id.desc()),
-    ).all())
+        .order_by(Exam.id.desc())
+    )
+    if current_user.role != UserRole.ADMIN:
+        exam_query = exam_query.where(Course.provider_id.in_(_organization_provider_ids(db, current_user)))
+    rows = list(db.scalars(exam_query).all())
+    issuer_user_ids = _organization_user_ids(db, current_user)
     needle = str(q or "").strip().lower()
     if needle:
         rows = [
@@ -1687,7 +1774,7 @@ def list_published_assessment_catalog(
         int(row._mapping["exam_id"]): int(row._mapping["count"] or 0)
         for row in db.execute(
             select(AssessmentIssue.exam_id, func.count(AssessmentIssue.id).label("count"))
-            .where(AssessmentIssue.issuer_user_id == current_user.id)
+            .where(AssessmentIssue.issuer_user_id.in_(issuer_user_ids))
             .group_by(AssessmentIssue.exam_id),
         ).all()
     }
@@ -1696,7 +1783,7 @@ def list_published_assessment_catalog(
         for row in db.execute(
             select(AssessmentIssue.exam_id, func.count(AssessmentIssue.id).label("count"))
             .where(
-                AssessmentIssue.issuer_user_id == current_user.id,
+                AssessmentIssue.issuer_user_id.in_(issuer_user_ids),
                 AssessmentIssue.status.in_(["completed", "manual_review", "review_pending", "reviewed"]),
             )
             .group_by(AssessmentIssue.exam_id),

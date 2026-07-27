@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 
 from app.core.config import Settings, get_settings
@@ -137,6 +138,35 @@ def evaluate_launch_readiness(
             ),
         )
 
+    oauth_raw = str(active_settings.integration_oauth_config_json or "").strip()
+    oauth_valid = False
+    if oauth_raw:
+        try:
+            oauth_config = json.loads(oauth_raw)
+            oauth_valid = isinstance(oauth_config, dict) and bool(oauth_config)
+        except json.JSONDecodeError:
+            oauth_valid = False
+    oauth_encryption_ready = bool(str(active_settings.integration_token_encryption_key or "").strip())
+    if oauth_raw and (not oauth_valid or not oauth_encryption_ready):
+        integration_check = LaunchCheck(
+            "external_integrations",
+            "fail",
+            "Integration OAuth configuration is invalid or INTEGRATION_TOKEN_ENCRYPTION_KEY is missing.",
+        )
+    elif oauth_valid and oauth_encryption_ready:
+        integration_check = LaunchCheck(
+            "external_integrations",
+            "pass",
+            "OAuth connectors and encrypted token storage are configured.",
+        )
+    else:
+        integration_check = LaunchCheck(
+            "external_integrations",
+            "warning",
+            "ATS, calendar, Teams, and voice connectors remain disabled until OAuth applications are configured.",
+            critical=False,
+        )
+
     checks.extend(
         (
             LaunchCheck(
@@ -155,12 +185,7 @@ def evaluate_launch_readiness(
                 "Customer SSO, MFA enforcement, and SCIM require provider configuration before enterprise rollout.",
                 critical=False,
             ),
-            LaunchCheck(
-                "external_integrations",
-                "warning",
-                "ATS, calendar, Teams, and voice connectors remain disabled until OAuth applications are configured.",
-                critical=False,
-            ),
+            integration_check,
             LaunchCheck(
                 "backup_restore",
                 "warning",

@@ -533,6 +533,26 @@ def _migrate_provider_feedback_schema_postgres(conn) -> None:
             pass
 
 
+def _migrate_organization_access_schema_sqlite(conn) -> None:
+    _sqlite_add_column_if_missing(conn, "organization_memberships", "permissions_json", "JSON NOT NULL DEFAULT '[]'")
+    try:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_organization_memberships_role_status ON organization_memberships (organization_id, role, status)"))
+    except Exception:
+        pass
+
+
+def _migrate_organization_access_schema_postgres(conn) -> None:
+    statements = [
+        "ALTER TABLE organization_memberships ADD COLUMN IF NOT EXISTS permissions_json JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "CREATE INDEX IF NOT EXISTS ix_organization_memberships_role_status ON organization_memberships (organization_id, role, status)",
+    ]
+    for statement in statements:
+        try:
+            conn.execute(text(statement))
+        except Exception:
+            pass
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     if engine.dialect.name == "sqlite":
@@ -550,6 +570,7 @@ def init_db() -> None:
             _migrate_stream_market_schema_sqlite(conn)
             _migrate_admin_user_controls_sqlite(conn)
             _migrate_provider_feedback_schema_sqlite(conn)
+            _migrate_organization_access_schema_sqlite(conn)
     elif engine.dialect.name == "postgresql":
         with engine.begin() as conn:
             try:
@@ -562,6 +583,7 @@ def init_db() -> None:
             _migrate_stream_market_schema_postgres(conn)
             _migrate_admin_user_controls_postgres(conn)
             _migrate_provider_feedback_schema_postgres(conn)
+            _migrate_organization_access_schema_postgres(conn)
 
     # Backfill and normalize existing accounts to current role/approval rules, then sync Firebase claims.
     db = SessionLocal()

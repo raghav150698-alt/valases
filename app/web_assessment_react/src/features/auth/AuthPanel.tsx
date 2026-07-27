@@ -66,10 +66,11 @@ function isSupabaseNetworkError(err: unknown): boolean {
 
 export function AuthPanel() {
   const legalBase = `${import.meta.env.BASE_URL}legal`;
-  const { register, handleSubmit, formState } = useForm<Form>({ resolver: zodResolver(schema) });
+  const { register, handleSubmit, getValues, formState } = useForm<Form>({ resolver: zodResolver(schema) });
   const setSession = useSessionStore((s) => s.setSession);
   const [error, setError] = useState("");
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isSsoLoading, setIsSsoLoading] = useState(false);
 
   const completeSupabaseSession = async (accessToken: string) => {
     const context = await api.get("/auth/me/context", {
@@ -172,6 +173,29 @@ export function AuthPanel() {
     }
   };
 
+  const signInWithCompanySso = async () => {
+    if (!supabaseConfigured || !supabase) return;
+    const email = String(getValues("email") || "").trim().toLowerCase();
+    const domain = email.split("@")[1] || "";
+    if (!domain || !domain.includes(".")) {
+      setError("Enter your work email first, then continue with company SSO.");
+      return;
+    }
+    setError("");
+    setIsSsoLoading(true);
+    try {
+      const redirectTo = `${window.location.origin}/assessment/`;
+      const { error: ssoError } = await supabase.auth.signInWithSSO({
+        domain,
+        options: { redirectTo },
+      });
+      if (ssoError) throw ssoError;
+    } catch (ssoError) {
+      setError(humanizeAuthError(ssoError));
+      setIsSsoLoading(false);
+    }
+  };
+
   return (
     <section className="auth-panel">
       <div className="auth-panel-copy">
@@ -217,6 +241,10 @@ export function AuthPanel() {
             <button className="auth-google-btn" type="button" onClick={() => void signInWithGoogle()} disabled={isGoogleLoading || formState.isSubmitting}>
               <span className="google-mark" aria-hidden="true">G</span>
               {isGoogleLoading ? "Opening Google..." : "Continue with Google"}
+            </button>
+            <button className="auth-google-btn" type="button" onClick={() => void signInWithCompanySso()} disabled={isSsoLoading || formState.isSubmitting}>
+              <span className="auth-sso-mark" aria-hidden="true">SSO</span>
+              {isSsoLoading ? "Opening company sign-in..." : "Continue with company SSO"}
             </button>
           </>}
           {error && <div className="inline-error">{error}</div>}

@@ -2,7 +2,7 @@ import unittest
 
 from fastapi import HTTPException
 from starlette.requests import Request
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -10,6 +10,7 @@ from app.api.routes.hiring import (
     ApplicationCreate,
     CandidateCreate,
     IntegrationUpdate,
+    MembershipCreate,
     InterviewCreate,
     JobCreate,
     ScorecardCreate,
@@ -19,6 +20,7 @@ from app.api.routes.hiring import (
     create_interview,
     create_job,
     configure_integration,
+    add_member,
     get_application_detail,
     hiring_workspace,
     list_candidates,
@@ -43,6 +45,7 @@ from app.models.entities import (
     Exam,
     ExamStatus,
     HiringApplication,
+    OrganizationMembership,
     ProviderProfile,
     ProviderType,
     User,
@@ -211,6 +214,73 @@ class HiringWorkspaceTest(unittest.TestCase):
                 current_user=self.recruiter,
             )
         self.assertEqual(unverified_connection.exception.status_code, 409)
+
+    def test_organization_roles_enforce_member_and_custom_access(self) -> None:
+        workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)
+        organization_id = workspace["organization"]["id"]
+        custom_user = User(
+            email="manager@example.com",
+            full_name="Hiring Manager",
+            password_hash="supabase",
+            role=UserRole.PROVIDER,
+            is_active=True,
+            account_state="active",
+        )
+        recruiter_user = User(
+            email="team-recruiter@example.com",
+            full_name="Team Recruiter",
+            password_hash="supabase",
+            role=UserRole.PROVIDER,
+            is_active=True,
+            account_state="active",
+        )
+        self.db.add_all([custom_user, recruiter_user])
+        self.db.commit()
+
+        custom = add_member(
+            MembershipCreate(
+                email=custom_user.email,
+                role="custom",
+                permissions=["assessments.view", "assessments.manage", "assessment_results.view", "interviews.view", "interviews.manage"],
+            ),
+            organization_id=organization_id,
+            db=self.db,
+            current_user=self.recruiter,
+        )
+        self.assertIn("assessment_results.view", custom["permissions"])
+        add_member(
+            MembershipCreate(email=recruiter_user.email, role="recruiter"),
+            organization_id=organization_id,
+            db=self.db,
+            current_user=self.recruiter,
+        )
+
+        custom_workspace = hiring_workspace(organization_id=organization_id, db=self.db, current_user=custom_user)
+        self.assertIn("assessments.manage", custom_workspace["permissions"])
+        self.assertNotIn("jobs.manage", custom_workspace["permissions"])
+        with self.assertRaises(HTTPException) as custom_job_denied:
+            create_job(
+                JobCreate(job_code="DENIED-1", title="Restricted role"),
+                organization_id=organization_id,
+                db=self.db,
+                current_user=custom_user,
+            )
+        self.assertEqual(custom_job_denied.exception.status_code, 403)
+        with self.assertRaises(HTTPException) as recruiter_member_denied:
+            add_member(
+                MembershipCreate(email="another@example.com", role="recruiter"),
+                organization_id=organization_id,
+                db=self.db,
+                current_user=recruiter_user,
+            )
+        self.assertEqual(recruiter_member_denied.exception.status_code, 403)
+        membership = self.db.scalar(
+            select(OrganizationMembership).where(
+                OrganizationMembership.organization_id == organization_id,
+                OrganizationMembership.user_id == recruiter_user.id,
+            ),
+        )
+        self.assertEqual(membership.role, "recruiter")
 
     def test_passing_linked_assessment_advances_candidate_to_interview(self) -> None:
         workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)

@@ -1035,6 +1035,7 @@ class OrganizationMembership(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     role: Mapped[str] = mapped_column(String(40), default="recruiter", index=True)
+    permissions_json: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(30), default="active", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

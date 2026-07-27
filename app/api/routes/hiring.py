@@ -1,18 +1,28 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import re
 from datetime import datetime, timezone
 from typing import Literal
+from urllib.parse import urlencode
 
+import httpx
+from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
+from jose import JWTError, jwt
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
+from app.core.config import get_settings
 from app.db.session import get_db, set_database_organization_context
 from app.models.entities import (
+    ApprovalStatus,
     AssessmentIssue,
     HiringApplication,
     HiringCandidate,
@@ -26,13 +36,53 @@ from app.models.entities import (
     OrganizationAuditEvent,
     OrganizationMembership,
     ProviderProfile,
+    ProviderType,
     User,
+    UserApproval,
     UserRole,
 )
+from app.services.supabase_auth import invite_supabase_user
 
 router = APIRouter(prefix="/hiring", tags=["hiring-workspace"])
 
-_MEMBER_ROLES = {"owner", "org_admin", "recruiter", "hiring_manager", "interviewer", "viewer"}
+_MEMBER_ROLES = {"owner", "org_admin", "recruiter", "custom", "hiring_manager", "interviewer", "viewer"}
+_PERMISSIONS = {
+    "jobs.view",
+    "jobs.manage",
+    "candidates.view",
+    "candidates.manage",
+    "pipeline.view",
+    "pipeline.manage",
+    "assessments.view",
+    "assessments.manage",
+    "assessment_results.view",
+    "interviews.view",
+    "interviews.manage",
+    "integrations.view",
+    "integrations.manage",
+    "reports.view",
+    "members.manage",
+    "organization.manage",
+    "billing.manage",
+    "sso.manage",
+}
+_ROLE_PERMISSIONS = {
+    "owner": _PERMISSIONS,
+    "org_admin": _PERMISSIONS,
+    "recruiter": _PERMISSIONS - {"members.manage", "organization.manage", "billing.manage", "sso.manage"},
+    "hiring_manager": {
+        "candidates.view",
+        "pipeline.view",
+        "assessments.view",
+        "assessments.manage",
+        "assessment_results.view",
+        "interviews.view",
+        "interviews.manage",
+        "reports.view",
+    },
+    "interviewer": {"candidates.view", "pipeline.view", "assessment_results.view", "interviews.view", "interviews.manage"},
+    "viewer": {"jobs.view", "candidates.view", "pipeline.view", "assessments.view", "assessment_results.view", "interviews.view", "reports.view"},
+}
 _PIPELINE_STAGES = ["applied", "screening", "assessment", "interview", "offer", "hired", "rejected", "withdrawn"]
 _INTEGRATION_CATALOG = {
     "greenhouse": {"category": "ats", "connection_mode": "oauth_or_api_key", "capabilities": ["jobs", "candidates", "applications", "stage_updates"]},
@@ -58,7 +108,22 @@ class OrganizationCreate(BaseModel):
 
 class MembershipCreate(BaseModel):
     email: str = Field(min_length=5, max_length=320)
-    role: Literal["owner", "org_admin", "recruiter", "hiring_manager", "interviewer", "viewer"] = "recruiter"
+    full_name: str = Field(default="", max_length=200)
+    role: Literal["org_admin", "recruiter", "custom"] = "recruiter"
+    permissions: list[str] = Field(default_factory=list, max_length=40)
+
+
+class MembershipUpdate(BaseModel):
+    role: Literal["org_admin", "recruiter", "custom"]
+    permissions: list[str] = Field(default_factory=list, max_length=40)
+    status: Literal["active", "suspended"] = "active"
+
+
+class SsoConfigurationUpdate(BaseModel):
+    provider: Literal["azure_ad", "okta", "google_workspace", "generic_saml"]
+    domains: list[str] = Field(min_length=1, max_length=20)
+    enabled: bool = False
+    enforce_for_members: bool = False
 
 
 class JobCreate(BaseModel):
@@ -173,8 +238,78 @@ def _write_audit(db: Session, organization_id: int, actor_user_id: int | None, a
     )
 
 
-def _is_org_admin(current_user: User, membership: OrganizationMembership | None) -> bool:
-    return current_user.role == UserRole.ADMIN or bool(membership and membership.role in {"owner", "org_admin"})
+def _clean_permissions(role: str, permissions: list[str] | None = None) -> list[str]:
+    if role != "custom":
+        return sorted(_ROLE_PERMISSIONS.get(role, set()))
+    return sorted({str(item).strip() for item in permissions or [] if str(item).strip() in _PERMISSIONS})
+
+
+def _membership_permissions(current_user: User, membership: OrganizationMembership | None) -> set[str]:
+    if current_user.role == UserRole.ADMIN:
+        return set(_PERMISSIONS)
+    if not membership:
+        return set()
+    if membership.role == "custom":
+        return set(_clean_permissions("custom", membership.permissions_json or []))
+    return set(_ROLE_PERMISSIONS.get(membership.role, set()))
+
+
+def _require_permission(
+    current_user: User,
+    membership: OrganizationMembership | None,
+    permission: str,
+) -> None:
+    if permission not in _membership_permissions(current_user, membership):
+        raise HTTPException(status_code=403, detail=f"Your organization role does not allow {permission.replace('.', ' ')}")
+
+
+def _public_integration_config(record: HiringIntegration | None) -> dict:
+    config = dict(record.config_json or {}) if record else {}
+    return {
+        "external_account_name": str(config.get("external_account_name") or ""),
+        "sync_scope": list(config.get("sync_scope") or []),
+        "connected_at": config.get("connected_at"),
+    }
+
+
+def _oauth_catalog() -> dict:
+    raw = str(get_settings().integration_oauth_config_json or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _oauth_state(provider: str, organization_id: int, actor_user_id: int) -> str:
+    settings = get_settings()
+    return jwt.encode(
+        {
+            "purpose": "integration_oauth",
+            "provider": provider,
+            "organization_id": organization_id,
+            "actor_user_id": actor_user_id,
+            "exp": int(datetime.now(timezone.utc).timestamp()) + 600,
+        },
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def _integration_fernet() -> Fernet:
+    settings = get_settings()
+    configured = str(settings.integration_token_encryption_key or "").strip()
+    if configured:
+        try:
+            return Fernet(configured.encode("ascii"))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=503, detail="Integration token encryption key is invalid") from exc
+    if settings.is_production:
+        raise HTTPException(status_code=503, detail="Integration token encryption is not configured")
+    derived = base64.urlsafe_b64encode(hashlib.sha256(settings.jwt_secret_key.encode("utf-8")).digest())
+    return Fernet(derived)
 
 
 def _ensure_bootstrap_organization(db: Session, user: User) -> tuple[Organization, OrganizationMembership]:
@@ -403,6 +538,8 @@ def hiring_workspace(
     return {
         "organization": {"id": organization.id, "name": organization.name, "slug": organization.slug, "plan_code": organization.plan_code},
         "membership_role": membership.role if membership else "platform_admin",
+        "permissions": sorted(_membership_permissions(current_user, membership)),
+        "permission_catalog": sorted(_PERMISSIONS),
         "pipeline_stages": _PIPELINE_STAGES,
         "metrics": {"open_jobs": int(active_jobs), "applications": int(app_count), "scheduled_interviews": int(interview_count)},
         "pipeline": {stage: int(count) for stage, count in stage_rows},
@@ -451,20 +588,147 @@ def add_member(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
-    if not _is_org_admin(current_user, membership):
-        raise HTTPException(status_code=403, detail="Only organization administrators can add members")
+    _require_permission(current_user, membership, "members.manage")
+    role = payload.role.strip().lower()
+    permissions = _clean_permissions(role, payload.permissions)
+    if role == "custom" and not permissions:
+        raise HTTPException(status_code=422, detail="Choose at least one permission for a custom role")
     user = db.scalar(select(User).where(func.lower(User.email) == payload.email.strip().lower()))
+    invitation_sent = False
     if not user:
-        raise HTTPException(status_code=404, detail="User must be provisioned before being added to an organization")
+        email = payload.email.strip().lower()
+        full_name = payload.full_name.strip() or email.split("@", 1)[0]
+        try:
+            invitation = invite_supabase_user(
+                email=email,
+                full_name=full_name,
+                redirect_to=f"{get_settings().app_base_url.rstrip('/')}/assessment/",
+                settings=get_settings(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail=f"Could not send the member invitation: {exc}") from exc
+        if not invitation.get("configured"):
+            raise HTTPException(status_code=503, detail="Supabase member invitations are not configured")
+        user = User(
+            email=email,
+            full_name=full_name,
+            password_hash="supabase",
+            role=UserRole.PROVIDER,
+            is_active=True,
+            account_state="active",
+        )
+        db.add(user)
+        db.flush()
+        db.add(
+            UserApproval(
+                user_id=user.id,
+                status=ApprovalStatus.APPROVED,
+                reviewed_by_admin_id=current_user.id,
+                reviewed_at=datetime.now(timezone.utc),
+            ),
+        )
+        db.add(
+            ProviderProfile(
+                user_id=user.id,
+                provider_type=ProviderType.BUSINESS,
+                display_name=organization.name,
+                description="Valases organization member",
+                approval_status=ApprovalStatus.APPROVED,
+                reviewed_by_admin_id=current_user.id,
+                reviewed_at=datetime.now(timezone.utc),
+            ),
+        )
+        invitation_sent = bool(invitation.get("sent"))
     existing = db.scalar(select(OrganizationMembership).where(OrganizationMembership.organization_id == organization.id, OrganizationMembership.user_id == user.id))
     if existing:
-        existing.role = payload.role
+        if existing.role == "owner":
+            raise HTTPException(status_code=409, detail="The organization owner role cannot be replaced")
+        existing.role = role
+        existing.permissions_json = permissions
         existing.status = "active"
     else:
-        db.add(OrganizationMembership(organization_id=organization.id, user_id=user.id, role=payload.role))
-    _write_audit(db, organization.id, current_user.id, "organization_member_added", "user", user.id, {"role": payload.role})
+        db.add(OrganizationMembership(organization_id=organization.id, user_id=user.id, role=role, permissions_json=permissions))
+    _write_audit(db, organization.id, current_user.id, "organization_member_added", "user", user.id, {"role": role, "permissions": permissions})
     db.commit()
-    return {"user_id": user.id, "email": user.email, "role": payload.role}
+    return {"user_id": user.id, "email": user.email, "full_name": user.full_name, "role": role, "permissions": permissions, "invitation_sent": invitation_sent}
+
+
+@router.get("/members")
+def list_members(
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "members.manage")
+    rows = db.execute(
+        select(OrganizationMembership, User)
+        .join(User, User.id == OrganizationMembership.user_id)
+        .where(OrganizationMembership.organization_id == organization.id)
+        .order_by(User.full_name.asc(), User.email.asc()),
+    ).all()
+    return [
+        {
+            "id": member.id,
+            "user_id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": member.role,
+            "permissions": sorted(_membership_permissions(user, member)) if user.role == UserRole.ADMIN else _clean_permissions(member.role, member.permissions_json or []),
+            "status": member.status,
+            "is_current_user": user.id == current_user.id,
+        }
+        for member, user in rows
+    ]
+
+
+@router.patch("/members/{membership_id}")
+def update_member(
+    membership_id: int,
+    payload: MembershipUpdate,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "members.manage")
+    target = db.get(OrganizationMembership, membership_id)
+    if not target or target.organization_id != organization.id:
+        raise HTTPException(status_code=404, detail="Organization member not found")
+    if target.role == "owner":
+        raise HTTPException(status_code=409, detail="The organization owner cannot be modified")
+    if target.user_id == current_user.id and payload.status != "active":
+        raise HTTPException(status_code=409, detail="You cannot suspend your own organization access")
+    permissions = _clean_permissions(payload.role, payload.permissions)
+    if payload.role == "custom" and not permissions:
+        raise HTTPException(status_code=422, detail="Choose at least one permission for a custom role")
+    target.role = payload.role
+    target.permissions_json = permissions
+    target.status = payload.status
+    _write_audit(db, organization.id, current_user.id, "organization_member_updated", "membership", target.id, {"role": target.role, "status": target.status, "permissions": permissions})
+    db.commit()
+    return {"id": target.id, "role": target.role, "permissions": permissions, "status": target.status}
+
+
+@router.delete("/members/{membership_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_member(
+    membership_id: int,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "members.manage")
+    target = db.get(OrganizationMembership, membership_id)
+    if not target or target.organization_id != organization.id:
+        raise HTTPException(status_code=404, detail="Organization member not found")
+    if target.role == "owner":
+        raise HTTPException(status_code=409, detail="The organization owner cannot be removed")
+    if target.user_id == current_user.id:
+        raise HTTPException(status_code=409, detail="You cannot remove your own organization access")
+    target.status = "removed"
+    _write_audit(db, organization.id, current_user.id, "organization_member_removed", "membership", target.id)
+    db.commit()
 
 
 @router.get("/jobs")
@@ -474,7 +738,8 @@ def list_jobs(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
-    organization, _ = _organization_context(db, current_user, organization_id)
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "jobs.view")
     query = select(JobRequisition).where(JobRequisition.organization_id == organization.id)
     if job_status:
         query = query.where(JobRequisition.status == job_status)
@@ -490,8 +755,7 @@ def create_job(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
-    if membership and membership.role == "viewer":
-        raise HTTPException(status_code=403, detail="View-only members cannot create jobs")
+    _require_permission(current_user, membership, "jobs.manage")
     job = JobRequisition(
         organization_id=organization.id,
         created_by_user_id=current_user.id,
@@ -534,8 +798,7 @@ def update_job(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
-    if membership and membership.role in {"viewer", "interviewer"}:
-        raise HTTPException(status_code=403, detail="Your organization role cannot edit jobs")
+    _require_permission(current_user, membership, "jobs.manage")
     job = _job_or_404(db, organization.id, job_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
         if field in {"responsibilities", "requirements", "skills"}:
@@ -553,8 +816,12 @@ def update_job(
 @router.post("/jobs/draft-description")
 def draft_job_description(
     payload: JobDescriptionDraftRequest,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
+    _, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "jobs.manage")
     skills = _list_strings(payload.skills)
     responsibilities = _list_strings(payload.responsibilities)
     requirements = _list_strings(payload.requirements)
@@ -578,7 +845,8 @@ def list_candidates(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
-    organization, _ = _organization_context(db, current_user, organization_id)
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "candidates.view")
     query = select(HiringCandidate).where(HiringCandidate.organization_id == organization.id)
     if search:
         term = f"%{search.strip().lower()}%"
@@ -598,8 +866,7 @@ def create_candidate(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
-    if membership and membership.role == "viewer":
-        raise HTTPException(status_code=403, detail="View-only members cannot add candidates")
+    _require_permission(current_user, membership, "candidates.manage")
     email = payload.email.strip().lower()
     candidate = HiringCandidate(
         organization_id=organization.id,
@@ -636,8 +903,7 @@ def create_application(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
-    if membership and membership.role == "viewer":
-        raise HTTPException(status_code=403, detail="View-only members cannot create applications")
+    _require_permission(current_user, membership, "pipeline.manage")
     _job_or_404(db, organization.id, payload.job_id)
     _candidate_or_404(db, organization.id, payload.candidate_id)
     application = HiringApplication(
@@ -668,7 +934,8 @@ def list_applications(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
-    organization, _ = _organization_context(db, current_user, organization_id)
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "pipeline.view")
     query = (
         select(HiringApplication, HiringCandidate, JobRequisition)
         .join(HiringCandidate, HiringCandidate.id == HiringApplication.candidate_id)
@@ -728,7 +995,8 @@ def get_application_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
-    organization, _ = _organization_context(db, current_user, organization_id)
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "pipeline.view")
     application = _application_or_404(db, organization.id, application_id)
     candidate = _candidate_or_404(db, organization.id, application.candidate_id)
     job = _job_or_404(db, organization.id, application.job_id)
@@ -830,8 +1098,7 @@ def update_application_stage(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
-    if membership and membership.role in {"viewer", "interviewer"}:
-        raise HTTPException(status_code=403, detail="Your organization role cannot move candidates")
+    _require_permission(current_user, membership, "pipeline.manage")
     application = _application_or_404(db, organization.id, application_id)
     reason = payload.reason.strip()
     if application.status == "closed" and payload.stage != application.stage:
@@ -873,8 +1140,7 @@ def screen_application(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
-    if membership and membership.role in {"viewer", "interviewer"}:
-        raise HTTPException(status_code=403, detail="Your organization role cannot run screening")
+    _require_permission(current_user, membership, "pipeline.manage")
     application = _application_or_404(db, organization.id, application_id)
     job = _job_or_404(db, organization.id, application.job_id)
     candidate = _candidate_or_404(db, organization.id, application.candidate_id)
@@ -894,7 +1160,8 @@ def list_interviews(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
-    organization, _ = _organization_context(db, current_user, organization_id)
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "interviews.view")
     rows = db.execute(
         select(HiringInterview, HiringApplication, HiringCandidate, JobRequisition)
         .join(HiringApplication, HiringApplication.id == HiringInterview.application_id)
@@ -928,8 +1195,7 @@ def create_interview(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
-    if membership and membership.role in {"viewer", "interviewer"}:
-        raise HTTPException(status_code=403, detail="Your organization role cannot schedule interviews")
+    _require_permission(current_user, membership, "interviews.manage")
     application = _application_or_404(db, organization.id, payload.application_id)
     if application.status != "active" or application.stage != "interview":
         raise HTTPException(status_code=409, detail="Interviews can only be scheduled for active candidates in the interview stage")
@@ -963,8 +1229,7 @@ def submit_scorecard(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
-    if membership and membership.role == "viewer":
-        raise HTTPException(status_code=403, detail="View-only members cannot submit scorecards")
+    _require_permission(current_user, membership, "interviews.manage")
     interview = db.scalar(select(HiringInterview).where(HiringInterview.id == interview_id, HiringInterview.organization_id == organization.id))
     if not interview:
         raise HTTPException(status_code=404, detail="Interview not found")
@@ -992,8 +1257,7 @@ def run_compliance_checks(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
-    if membership and membership.role in {"viewer", "interviewer"}:
-        raise HTTPException(status_code=403, detail="Your organization role cannot run compliance checks")
+    _require_permission(current_user, membership, "pipeline.manage")
     application = _application_or_404(db, organization.id, application_id)
     candidate = _candidate_or_404(db, organization.id, application.candidate_id)
     scorecards = db.scalar(select(func.count(HiringScorecard.id)).where(HiringScorecard.application_id == application.id)) or 0
@@ -1016,21 +1280,74 @@ def run_compliance_checks(
     return {"application_id": application.id, "checks": results, "manual_review_required": any(item[0] != "passed" for item in checks.values())}
 
 
+@router.get("/sso")
+def get_sso_configuration(
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "sso.manage")
+    sso = dict((organization.settings_json or {}).get("sso") or {})
+    return {
+        "provider": sso.get("provider", "azure_ad"),
+        "domains": list(sso.get("domains") or []),
+        "enabled": bool(sso.get("enabled")),
+        "enforce_for_members": bool(sso.get("enforce_for_members")),
+        "status": "configured" if sso.get("enabled") and sso.get("domains") else "not_configured",
+    }
+
+
+@router.put("/sso")
+def update_sso_configuration(
+    payload: SsoConfigurationUpdate,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "sso.manage")
+    domains = sorted(
+        {
+            str(domain).strip().lower().lstrip("@")
+            for domain in payload.domains
+            if "." in str(domain).strip() and "@" not in str(domain).strip()
+        },
+    )
+    if not domains:
+        raise HTTPException(status_code=422, detail="Add at least one valid company email domain")
+    settings_json = dict(organization.settings_json or {})
+    settings_json["sso"] = {
+        "provider": payload.provider,
+        "domains": domains,
+        "enabled": payload.enabled,
+        "enforce_for_members": payload.enforce_for_members if payload.enabled else False,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    organization.settings_json = settings_json
+    _write_audit(db, organization.id, current_user.id, "organization_sso_updated", "organization", organization.id, {"provider": payload.provider, "domains": domains, "enabled": payload.enabled, "enforced": payload.enforce_for_members})
+    db.commit()
+    return {**settings_json["sso"], "status": "configured" if payload.enabled else "disabled"}
+
+
 @router.get("/integrations")
 def list_integrations(
     organization_id: int | None = Query(default=None, gt=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
-    organization, _ = _organization_context(db, current_user, organization_id)
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "integrations.view")
     rows = list(db.scalars(select(HiringIntegration).where(HiringIntegration.organization_id == organization.id).order_by(HiringIntegration.provider.asc())).all())
     configured = {row.provider: row for row in rows}
+    oauth_catalog = _oauth_catalog()
     return [
         {
             "provider": provider,
             **_INTEGRATION_CATALOG[provider],
             "status": configured[provider].status if provider in configured else "not_connected",
-            "config": configured[provider].config_json if provider in configured else {},
+            "config": _public_integration_config(configured.get(provider)),
+            "connect_available": provider in oauth_catalog,
             "last_synced_at": configured[provider].last_synced_at if provider in configured else None,
         }
         for provider in sorted(_INTEGRATION_PROVIDERS)
@@ -1045,8 +1362,7 @@ def configure_integration(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
-    if not _is_org_admin(current_user, membership):
-        raise HTTPException(status_code=403, detail="Only organization administrators can configure integrations")
+    _require_permission(current_user, membership, "integrations.manage")
     provider = payload.provider.strip().lower()
     if provider not in _INTEGRATION_PROVIDERS:
         raise HTTPException(status_code=422, detail="Unsupported integration provider")
@@ -1056,10 +1372,117 @@ def configure_integration(
     if not record:
         record = HiringIntegration(organization_id=organization.id, provider=provider)
         db.add(record)
+    existing_config = dict(record.config_json or {})
     record.status = payload.status
     # Credentials are intentionally never accepted or stored here. Connection
     # secrets belong in the deployment secret manager/OAuth flow.
-    record.config_json = {"external_account_name": payload.external_account_name.strip(), "sync_scope": _list_strings(payload.sync_scope)}
+    record.config_json = {
+        "external_account_name": payload.external_account_name.strip(),
+        "sync_scope": _list_strings(payload.sync_scope),
+        **({"credentials_encrypted": existing_config["credentials_encrypted"]} if existing_config.get("credentials_encrypted") else {}),
+        **({"connected_at": existing_config["connected_at"]} if existing_config.get("connected_at") else {}),
+    }
     _write_audit(db, organization.id, current_user.id, "integration_configured", "integration", record.id, {"provider": provider, "status": record.status})
     db.commit()
-    return {"provider": provider, "status": record.status, "config": record.config_json}
+    return {"provider": provider, "status": record.status, "config": _public_integration_config(record)}
+
+
+@router.post("/integrations/{provider}/connect")
+def begin_integration_connection(
+    provider: str,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "integrations.manage")
+    provider = provider.strip().lower()
+    if provider not in _INTEGRATION_PROVIDERS:
+        raise HTTPException(status_code=404, detail="Integration provider not found")
+    config = _oauth_catalog().get(provider)
+    if not isinstance(config, dict):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{provider.replace('_', ' ').title()} OAuth is not configured for this deployment",
+        )
+    client_id = str(config.get("client_id") or "").strip()
+    authorization_url = str(config.get("authorization_url") or "").strip()
+    if not client_id or not authorization_url.startswith("https://"):
+        raise HTTPException(status_code=503, detail="The integration OAuth configuration is incomplete")
+    callback_url = str(config.get("redirect_uri") or f"{get_settings().app_base_url.rstrip('/')}/hiring/integrations/oauth/callback")
+    query = {
+        "client_id": client_id,
+        "redirect_uri": callback_url,
+        "response_type": "code",
+        "scope": " ".join(config.get("scopes") or []),
+        "state": _oauth_state(provider, organization.id, current_user.id),
+    }
+    query.update({str(key): str(value) for key, value in dict(config.get("authorize_params") or {}).items()})
+    record = db.scalar(select(HiringIntegration).where(HiringIntegration.organization_id == organization.id, HiringIntegration.provider == provider))
+    if not record:
+        record = HiringIntegration(organization_id=organization.id, provider=provider, status="ready_to_connect")
+        db.add(record)
+    else:
+        record.status = "ready_to_connect"
+    _write_audit(db, organization.id, current_user.id, "integration_connection_started", "integration", record.id, {"provider": provider})
+    db.commit()
+    return {"provider": provider, "authorization_url": f"{authorization_url}?{urlencode(query)}"}
+
+
+@router.get("/integrations/oauth/callback", include_in_schema=False)
+def complete_integration_connection(
+    code: str = Query(min_length=4, max_length=4000),
+    state_token: str = Query(alias="state", min_length=20, max_length=5000),
+    db: Session = Depends(get_db),
+):
+    settings = get_settings()
+    try:
+        state_payload = jwt.decode(state_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    except JWTError as exc:
+        raise HTTPException(status_code=400, detail="Invalid or expired integration connection state") from exc
+    if state_payload.get("purpose") != "integration_oauth":
+        raise HTTPException(status_code=400, detail="Invalid integration connection purpose")
+    provider = str(state_payload.get("provider") or "").strip().lower()
+    organization_id = int(state_payload.get("organization_id") or 0)
+    actor_user_id = int(state_payload.get("actor_user_id") or 0)
+    config = _oauth_catalog().get(provider)
+    if not isinstance(config, dict):
+        raise HTTPException(status_code=503, detail="Integration OAuth is no longer configured")
+    token_url = str(config.get("token_url") or "").strip()
+    client_id = str(config.get("client_id") or "").strip()
+    client_secret = str(config.get("client_secret") or "").strip()
+    callback_url = str(config.get("redirect_uri") or f"{settings.app_base_url.rstrip('/')}/hiring/integrations/oauth/callback")
+    if not token_url.startswith("https://") or not client_id or not client_secret:
+        raise HTTPException(status_code=503, detail="Integration token exchange is not configured")
+    response = httpx.post(
+        token_url,
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": callback_url,
+        },
+        headers={"Accept": "application/json"},
+        timeout=20,
+    )
+    if response.status_code not in {200, 201}:
+        raise HTTPException(status_code=502, detail="The provider did not complete the integration connection")
+    token_payload = response.json()
+    if not token_payload.get("access_token"):
+        raise HTTPException(status_code=502, detail="The provider did not return an access token")
+    set_database_organization_context(db, organization_id)
+    record = db.scalar(select(HiringIntegration).where(HiringIntegration.organization_id == organization_id, HiringIntegration.provider == provider))
+    if not record:
+        record = HiringIntegration(organization_id=organization_id, provider=provider)
+        db.add(record)
+    public_config = _public_integration_config(record)
+    record.status = "connected"
+    record.config_json = {
+        **public_config,
+        "credentials_encrypted": _integration_fernet().encrypt(json.dumps(token_payload).encode("utf-8")).decode("ascii"),
+        "connected_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _write_audit(db, organization_id, actor_user_id, "integration_connected", "integration", record.id, {"provider": provider})
+    db.commit()
+    return RedirectResponse(url=f"{settings.app_base_url.rstrip('/')}/assessment/?integration={provider}&connection=success", status_code=303)

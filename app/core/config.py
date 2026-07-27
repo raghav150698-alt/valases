@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     supabase_url: str = Field(default="", validation_alias=AliasChoices("SUPABASE_URL", "VITE_SUPABASE_URL"))
     supabase_publishable_key: str = Field(default="", validation_alias=AliasChoices("SUPABASE_PUBLISHABLE_KEY", "VITE_SUPABASE_PUBLISHABLE_KEY"))
     supabase_secret_key: str = ""
+    integration_oauth_config_json: str = ""
+    integration_token_encryption_key: str = ""
     object_storage_backend: str = "s3"  # s3 | firebase | bunny | local | auto
     aws_region: str = ""
     aws_s3_bucket_name: str = ""

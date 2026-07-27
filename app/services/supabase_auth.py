@@ -118,3 +118,37 @@ def ensure_supabase_user(
     if response.status_code in {400, 422} and any(term in detail.lower() for term in {"already", "registered", "exists"}):
         return {"configured": True, "created": False, "existing": True}
     raise ValueError(detail or f"Supabase user provisioning failed with status {response.status_code}.")
+
+
+def invite_supabase_user(
+    *,
+    email: str,
+    full_name: str,
+    redirect_to: str,
+    settings: Settings,
+) -> dict[str, Any]:
+    """Send a Supabase invite without exposing the service key to the browser."""
+    if not settings.supabase_url or not settings.supabase_secret_key:
+        return {"configured": False, "sent": False, "reason": "Supabase admin invitations are not configured."}
+    secret = settings.supabase_secret_key
+    endpoint = f"{settings.supabase_url.rstrip('/')}/auth/v1/invite"
+    response = httpx.post(
+        endpoint,
+        params={"redirect_to": redirect_to} if redirect_to else None,
+        headers={"apikey": secret, "Authorization": f"Bearer {secret}"},
+        json={
+            "email": email,
+            "data": {"full_name": full_name, "invited_by": "valases"},
+        },
+        timeout=15,
+    )
+    if response.status_code in {200, 201}:
+        return {"configured": True, "sent": True, "user_id": response.json().get("id")}
+    try:
+        data = response.json()
+        detail = str(data.get("msg") or data.get("message") or data.get("error_description") or "")
+    except Exception:
+        detail = response.text
+    if response.status_code in {400, 422} and any(term in detail.lower() for term in {"already", "registered", "exists"}):
+        return {"configured": True, "sent": False, "existing": True}
+    raise ValueError(detail or f"Supabase invitation failed with status {response.status_code}.")

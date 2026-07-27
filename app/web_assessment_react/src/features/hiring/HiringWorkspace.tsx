@@ -12,6 +12,8 @@ const ProviderAssessments = lazy(() => import("../provider/ProviderAssessments")
 type Workspace = {
   organization: { id: number; name: string; slug: string; plan_code: string };
   membership_role: string;
+  permissions: string[];
+  permission_catalog: string[];
   pipeline_stages: string[];
   metrics: { open_jobs: number; applications: number; scheduled_interviews: number };
   pipeline: Record<string, number>;
@@ -124,7 +126,27 @@ type Integration = {
   capabilities: string[];
   status: string;
   config: { external_account_name?: string; sync_scope?: string[] };
+  connect_available: boolean;
   last_synced_at?: string | null;
+};
+
+type Member = {
+  id: number;
+  user_id: number;
+  email: string;
+  full_name: string;
+  role: string;
+  permissions: string[];
+  status: string;
+  is_current_user: boolean;
+};
+
+type SsoConfiguration = {
+  provider: string;
+  domains: string[];
+  enabled: boolean;
+  enforce_for_members: boolean;
+  status: string;
 };
 
 type Tab = "overview" | "jobs" | "candidates" | "pipeline" | "interviews" | "assessments" | "integrations" | "settings";
@@ -150,21 +172,26 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
 
 export function HiringWorkspace() {
   const [tab, setTab] = useState<Tab>("overview");
-  const [dialog, setDialog] = useState<"job" | "candidate" | "application" | "interview" | "scorecard" | "integration" | null>(null);
+  const [dialog, setDialog] = useState<"job" | "candidate" | "application" | "interview" | "scorecard" | "integration" | "member" | null>(null);
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
   const [selectedInterview, setSelectedInterview] = useState<Interview | null>(null);
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
   const [notice, setNotice] = useState("");
+  const [stageError, setStageError] = useState("");
   const clearSession = useSessionStore((state) => state.clear);
   const queryClient = useQueryClient();
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["hiring"] });
 
   const workspaceQuery = useQuery({ queryKey: ["hiring", "workspace"], queryFn: async () => (await api.get<Workspace>("/hiring/workspace")).data });
-  const jobsQuery = useQuery({ queryKey: ["hiring", "jobs"], queryFn: async () => (await api.get<Job[]>("/hiring/jobs")).data });
-  const candidatesQuery = useQuery({ queryKey: ["hiring", "candidates"], queryFn: async () => (await api.get<Candidate[]>("/hiring/candidates")).data });
-  const applicationsQuery = useQuery({ queryKey: ["hiring", "applications"], queryFn: async () => (await api.get<Application[]>("/hiring/applications")).data });
-  const interviewsQuery = useQuery({ queryKey: ["hiring", "interviews"], queryFn: async () => (await api.get<Interview[]>("/hiring/interviews")).data });
-  const integrationsQuery = useQuery({ queryKey: ["hiring", "integrations"], queryFn: async () => (await api.get<Integration[]>("/hiring/integrations")).data });
+  const permissions = new Set(workspaceQuery.data?.permissions || []);
+  const can = (permission: string) => permissions.has(permission);
+  const jobsQuery = useQuery({ queryKey: ["hiring", "jobs"], queryFn: async () => (await api.get<Job[]>("/hiring/jobs")).data, enabled: can("jobs.view") });
+  const candidatesQuery = useQuery({ queryKey: ["hiring", "candidates"], queryFn: async () => (await api.get<Candidate[]>("/hiring/candidates")).data, enabled: can("candidates.view") });
+  const applicationsQuery = useQuery({ queryKey: ["hiring", "applications"], queryFn: async () => (await api.get<Application[]>("/hiring/applications")).data, enabled: can("pipeline.view") });
+  const interviewsQuery = useQuery({ queryKey: ["hiring", "interviews"], queryFn: async () => (await api.get<Interview[]>("/hiring/interviews")).data, enabled: can("interviews.view") });
+  const integrationsQuery = useQuery({ queryKey: ["hiring", "integrations"], queryFn: async () => (await api.get<Integration[]>("/hiring/integrations")).data, enabled: can("integrations.view") });
+  const membersQuery = useQuery({ queryKey: ["hiring", "members"], queryFn: async () => (await api.get<Member[]>("/hiring/members")).data, enabled: can("members.manage") });
+  const ssoQuery = useQuery({ queryKey: ["hiring", "sso"], queryFn: async () => (await api.get<SsoConfiguration>("/hiring/sso")).data, enabled: can("sso.manage") });
   const applicationDetailQuery = useQuery({
     queryKey: ["hiring", "application-detail", selectedApplication?.id],
     queryFn: async () => (await api.get<ApplicationDetail>(`/hiring/applications/${selectedApplication?.id}`)).data,
@@ -178,7 +205,7 @@ export function HiringWorkspace() {
   const workspace = workspaceQuery.data;
   const pipelineStages = workspace?.pipeline_stages || ["applied", "screening", "assessment", "interview", "offer", "hired"];
   const activeJobs = jobs.filter((job) => job.status === "open");
-  const busy = workspaceQuery.isLoading || jobsQuery.isLoading || candidatesQuery.isLoading || applicationsQuery.isLoading;
+  const busy = workspaceQuery.isLoading;
 
   const screenMutation = useMutation({
     mutationFn: async (applicationId: number) => (await api.post(`/hiring/applications/${applicationId}/screen`)).data,
@@ -188,17 +215,28 @@ export function HiringWorkspace() {
   const stageMutation = useMutation({
     mutationFn: async ({ id, stage, reason = "Progressed by the recruiter from the hiring workspace" }: { id: number; stage: string; reason?: string }) => api.patch(`/hiring/applications/${id}/stage`, { stage, reason }),
     onMutate: async ({ id, stage }) => {
+      setStageError("");
       await queryClient.cancelQueries({ queryKey: ["hiring", "applications"] });
       const previous = queryClient.getQueryData<Application[]>(["hiring", "applications"]);
-      queryClient.setQueryData<Application[]>(["hiring", "applications"], (rows = []) =>
-        rows.map((application) => application.id === id ? { ...application, stage } : application),
-      );
+      if (!["offer", "hired", "rejected", "withdrawn"].includes(stage)) {
+        queryClient.setQueryData<Application[]>(["hiring", "applications"], (rows = []) =>
+          rows.map((application) => application.id === id ? { ...application, stage } : application),
+        );
+      }
       return { previous };
     },
-    onSuccess: () => { setNotice("Candidate stage updated."); refresh(); void applicationDetailQuery.refetch(); },
+    onSuccess: (_data, variables) => {
+      setStageError("");
+      setNotice(`Candidate moved to ${stageLabel(variables.stage)}.`);
+      if (["offer", "hired", "rejected", "withdrawn"].includes(variables.stage)) setSelectedApplication(null);
+      refresh();
+      void applicationDetailQuery.refetch();
+    },
     onError: (error, _variables, context) => {
       if (context?.previous) queryClient.setQueryData(["hiring", "applications"], context.previous);
-      setNotice(apiError(error, "Could not update the stage."));
+      const message = apiError(error, "Could not update the stage.");
+      setStageError(message);
+      setNotice(message);
     },
     onSettled: () => void queryClient.invalidateQueries({ queryKey: ["hiring", "applications"] }),
   });
@@ -214,6 +252,26 @@ export function HiringWorkspace() {
   });
 
   const selectedDetails = useMemo(() => applications.find((item) => item.id === selectedApplication?.id) || selectedApplication, [applications, selectedApplication]);
+  const navigation = ([
+    ["overview", "Overview", "pipeline.view"],
+    ["jobs", "Jobs", "jobs.view"],
+    ["candidates", "Candidates", "candidates.view"],
+    ["pipeline", "Pipeline", "pipeline.view"],
+    ["interviews", "Interviews", "interviews.view"],
+    ["assessments", "Assessments", "assessments.view"],
+    ["integrations", "Integrations", "integrations.view"],
+    ["settings", "Settings", ""],
+  ] as Array<[Tab, string, string]>).filter(([, , permission]) => !permission || can(permission));
+
+  const connectIntegration = async (integration: Integration) => {
+    setNotice("");
+    try {
+      const { data } = await api.post<{ authorization_url: string }>(`/hiring/integrations/${integration.provider}/connect`);
+      window.location.assign(data.authorization_url);
+    } catch (error) {
+      setNotice(apiError(error, `Could not connect ${stageLabel(integration.provider)}.`));
+    }
+  };
 
   if (busy && !workspace) {
     return <main className="hiring-loading" role="status"><BrandLogo /><p>Opening hiring workspace...</p></main>;
@@ -225,9 +283,7 @@ export function HiringWorkspace() {
         <div className="hiring-brand"><BrandLogo className="hiring-brand-logo" /><span>Valases</span></div>
         <div className="hiring-org-switch"><small>Organization</small><strong>{workspace?.organization.name || "Your organization"}</strong><span>{workspace?.membership_role.replace(/_/g, " ") || "Recruiter"}</span></div>
         <nav aria-label="Hiring navigation">
-          {([
-            ["overview", "Overview"], ["jobs", "Jobs"], ["candidates", "Candidates"], ["pipeline", "Pipeline"], ["interviews", "Interviews"], ["assessments", "Assessments"], ["integrations", "Integrations"], ["settings", "Settings"],
-          ] as Array<[Tab, string]>).map(([id, label]) => (
+          {navigation.map(([id, label]) => (
             <button type="button" className={tab === id ? "active" : ""} key={id} onClick={() => setTab(id)}>{label}</button>
           ))}
         </nav>
@@ -238,8 +294,8 @@ export function HiringWorkspace() {
         <header className="hiring-topbar">
           <div><p>{tab === "overview" ? "Hiring command center" : stageLabel(tab)}</p><h1>{tab === "overview" ? "Build a stronger hiring signal" : stageLabel(tab)}</h1></div>
           <div className="hiring-topbar-actions">
-            <button type="button" className="hiring-button secondary" onClick={() => setDialog("candidate")}>Add candidate</button>
-            <button type="button" className="hiring-button primary" onClick={() => setDialog("job")}>New job</button>
+            {can("candidates.manage") && <button type="button" className="hiring-button secondary" onClick={() => setDialog("candidate")}>Add candidate</button>}
+            {can("jobs.manage") && <button type="button" className="hiring-button primary" onClick={() => setDialog("job")}>New job</button>}
           </div>
         </header>
 
@@ -248,20 +304,31 @@ export function HiringWorkspace() {
         {tab === "overview" && <Overview workspace={workspace} jobs={jobs} applications={applications} interviews={interviews} onTab={setTab} onNewJob={() => setDialog("job")} onNewApplication={() => setDialog("application")} />}
         {tab === "jobs" && <JobsView jobs={jobs} applications={applications} onNewJob={() => setDialog("job")} onCreateApplication={() => setDialog("application")} onStatusChange={(id, status) => jobStatusMutation.mutate({ id, status })} />}
         {tab === "candidates" && <CandidatesView candidates={candidates} applications={applications} onNewCandidate={() => setDialog("candidate")} onCreateApplication={() => setDialog("application")} />}
-        {tab === "pipeline" && <PipelineView stages={pipelineStages} applications={applications} movingId={stageMutation.isPending ? stageMutation.variables?.id : undefined} onSelect={setSelectedApplication} onMove={(id, stage) => stageMutation.mutate({ id, stage })} onOpenAssessments={() => setTab("assessments")} />}
+        {tab === "pipeline" && <PipelineView stages={pipelineStages} applications={applications} movingId={stageMutation.isPending ? stageMutation.variables?.id : undefined} onSelect={(application) => { setStageError(""); setSelectedApplication(application); }} onMove={(id, stage) => stageMutation.mutate({ id, stage })} onOpenAssessments={() => setTab("assessments")} />}
         {tab === "interviews" && <InterviewsView interviews={interviews} applications={applications} onSchedule={() => setDialog("interview")} onScorecard={(interview) => { setSelectedInterview(interview); setDialog("scorecard"); }} />}
         {tab === "assessments" && <Suspense fallback={<div className="hiring-section-empty">Loading assessment workspace...</div>}><ProviderAssessments embedded /></Suspense>}
-        {tab === "integrations" && <IntegrationsView integrations={integrationsQuery.data || []} onConfigure={(integration) => { setSelectedIntegration(integration); setDialog("integration"); }} />}
-        {tab === "settings" && <SettingsView organization={workspace?.organization} role={workspace?.membership_role || "recruiter"} onSignOut={async () => { try { if (supabase) await supabase.auth.signOut(); } finally { clearSession(); } }} />}
+        {tab === "integrations" && <IntegrationsView integrations={integrationsQuery.data || []} canManage={can("integrations.manage")} onConnect={(integration) => void connectIntegration(integration)} onConfigure={(integration) => { setSelectedIntegration(integration); setDialog("integration"); }} />}
+        {tab === "settings" && <SettingsView organization={workspace?.organization} role={workspace?.membership_role || "recruiter"} permissions={workspace?.permissions || []} members={membersQuery.data || []} sso={ssoQuery.data} onAddMember={() => setDialog("member")} onRefresh={refresh} onSignOut={async () => { try { if (supabase) await supabase.auth.signOut(); } finally { clearSession(); } }} />}
       </main>
 
-      {selectedDetails && <ApplicationDrawer key={selectedDetails.id} application={selectedDetails} detail={applicationDetailQuery.data} loading={applicationDetailQuery.isLoading} stages={pipelineStages} onClose={() => setSelectedApplication(null)} onScreen={() => screenMutation.mutate(selectedDetails.id)} onCompliance={() => complianceMutation.mutate(selectedDetails.id)} onMove={(stage, reason) => stageMutation.mutate({ id: selectedDetails.id, stage, reason })} />}
+      {selectedDetails && <ApplicationDrawer key={selectedDetails.id} application={selectedDetails} detail={applicationDetailQuery.data} loading={applicationDetailQuery.isLoading} transitionError={stageError} stages={pipelineStages} onClose={() => { setStageError(""); setSelectedApplication(null); }} onScreen={() => screenMutation.mutate(selectedDetails.id)} onCompliance={() => complianceMutation.mutate(selectedDetails.id)} onOpenInterviews={() => { setSelectedApplication(null); setTab("interviews"); }} onAddScorecard={() => {
+        const interview = interviews.find((item) => item.application_id === selectedDetails.id);
+        if (interview) {
+          setSelectedInterview(interview);
+          setDialog("scorecard");
+        } else {
+          setSelectedApplication(null);
+          setTab("interviews");
+          setNotice("Schedule the interview before recording a scorecard.");
+        }
+      }} onMove={(stage, reason) => stageMutation.mutate({ id: selectedDetails.id, stage, reason })} />}
       {dialog === "job" && <JobForm onClose={() => setDialog(null)} onSaved={() => { setDialog(null); setNotice("Job published and ready for candidate intake."); refresh(); setTab("jobs"); }} />}
       {dialog === "candidate" && <CandidateForm jobs={activeJobs} onClose={() => setDialog(null)} onSaved={(addedToPipeline) => { setDialog(null); setNotice(addedToPipeline ? "Candidate added to Screening and is available for assessment." : "Candidate added. Assign an open role to make them assessment-eligible."); refresh(); setTab(addedToPipeline ? "pipeline" : "candidates"); }} />}
       {dialog === "application" && <ApplicationForm jobs={activeJobs.length ? activeJobs : jobs} candidates={candidates} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); setNotice("Application added to the pipeline."); refresh(); setTab("pipeline"); }} />}
       {dialog === "interview" && <InterviewForm applications={applications} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); setNotice("Interview scheduled and the candidate moved to interview stage."); refresh(); setTab("interviews"); }} />}
       {dialog === "scorecard" && selectedInterview && <ScorecardForm interview={selectedInterview} onClose={() => { setDialog(null); setSelectedInterview(null); }} onSaved={() => { setDialog(null); setSelectedInterview(null); setNotice("Structured interview scorecard saved."); refresh(); }} />}
       {dialog === "integration" && selectedIntegration && <IntegrationForm integration={selectedIntegration} onClose={() => { setDialog(null); setSelectedIntegration(null); }} onSaved={() => { setDialog(null); setSelectedIntegration(null); setNotice("Integration record updated. Connect credentials only through the approved OAuth or secret-management flow."); refresh(); }} />}
+      {dialog === "member" && workspace && <MemberForm permissionCatalog={workspace.permission_catalog} onClose={() => setDialog(null)} onSaved={(message) => { setDialog(null); setNotice(message); refresh(); }} />}
     </div>
   );
 }
@@ -333,7 +400,7 @@ function PipelineView({ stages, applications, movingId, onSelect, onMove, onOpen
         <span>{application.ranking.assessment_score !== null ? `${application.ranking.assessment_score.toFixed(0)}%` : "--"}</span>
         <strong className="hiring-rank-score">{application.ranking.average_score.toFixed(0)}</strong>
         <div className="hiring-pipeline-action">
-          {selectedStage === "screening" ? <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAssessments(); }}>Send assessment</button> : selectedStage === "assessment" ? <small>Awaiting result</small> : nextStage && selectedStage !== "offer" ? <button type="button" disabled={movingId === application.id} onClick={(event) => { event.stopPropagation(); onMove(application.id, nextStage); }}>{movingId === application.id ? "Moving..." : `Move to ${stageLabel(nextStage)}`}</button> : <button type="button" onClick={(event) => { event.stopPropagation(); onSelect(application); }}>Review</button>}
+          {selectedStage === "screening" ? <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAssessments(); }}>Send assessment</button> : selectedStage === "assessment" ? <small>Awaiting result</small> : selectedStage === "interview" ? <button type="button" onClick={(event) => { event.stopPropagation(); onSelect(application); }}>Review decision</button> : nextStage && selectedStage !== "offer" ? <button type="button" disabled={movingId === application.id} onClick={(event) => { event.stopPropagation(); onMove(application.id, nextStage); }}>{movingId === application.id ? "Moving..." : `Move to ${stageLabel(nextStage)}`}</button> : <button type="button" onClick={(event) => { event.stopPropagation(); onSelect(application); }}>Review</button>}
         </div>
       </article>)}
       {!stageRows.length && <Empty text={`No candidates in ${stageLabel(selectedStage)}.`} />}
@@ -364,21 +431,110 @@ function InterviewsView({ interviews, applications, onSchedule, onScorecard }: {
   </section>;
 }
 
-function IntegrationsView({ integrations, onConfigure }: { integrations: Integration[]; onConfigure: (integration: Integration) => void }) { return <section className="hiring-panel hiring-full-panel"><div className="hiring-panel-header"><div><h2>Integration center</h2><p>Approve connection scope now. OAuth credentials stay in the provider flow or deployment secret manager.</p></div></div><div className="hiring-integration-grid">{integrations.map((integration) => <div className="hiring-integration-row" key={integration.provider}><div><strong>{stageLabel(integration.provider)}</strong><small>{stageLabel(integration.category)} | {integration.config.external_account_name || stageLabel(integration.connection_mode)}</small><span>{integration.capabilities.slice(0, 3).map(stageLabel).join(", ")}</span></div><StatusPill status={integration.status} /><button type="button" onClick={() => onConfigure(integration)}>Configure</button></div>)}</div></section>; }
-
-function SettingsView({ organization, role, onSignOut }: { organization?: Workspace["organization"]; role: string; onSignOut: () => Promise<void> }) {
-  return <section className="hiring-panel hiring-full-panel hiring-settings">
-    <div className="hiring-panel-header"><div><h2>Workspace settings</h2><p>Account and organization controls for this Valases workspace.</p></div></div>
-    <div className="hiring-settings-row"><div><strong>Organization</strong><span>{organization?.name || "Your organization"}</span></div><small>{organization?.plan_code || "trial"} plan</small></div>
-    <div className="hiring-settings-row"><div><strong>Access role</strong><span>{stageLabel(role)}</span></div></div>
-    <div className="hiring-settings-row danger"><div><strong>Sign out</strong><span>End this browser session on this device.</span></div><button type="button" className="hiring-button secondary" onClick={() => void onSignOut()}>Sign out</button></div>
+function IntegrationsView({ integrations, canManage, onConnect, onConfigure }: { integrations: Integration[]; canManage: boolean; onConnect: (integration: Integration) => void; onConfigure: (integration: Integration) => void }) {
+  return <section className="hiring-panel hiring-full-panel">
+    <div className="hiring-panel-header"><div><h2>Integration center</h2><p>Connect recruiting, calendar, meeting, and voice systems to this organization.</p></div></div>
+    <div className="hiring-integration-grid">{integrations.map((integration) => <div className="hiring-integration-row" key={integration.provider}>
+      <div><strong>{stageLabel(integration.provider)}</strong><small>{stageLabel(integration.category)} | {integration.config.external_account_name || stageLabel(integration.connection_mode)}</small><span>{integration.capabilities.slice(0, 3).map(stageLabel).join(", ")}</span></div>
+      <StatusPill status={integration.status} />
+      <div className="hiring-integration-actions">
+        {integration.status !== "connected" && <button className="hiring-button primary" type="button" disabled={!canManage} onClick={() => onConnect(integration)}>{integration.connect_available ? "Connect" : "Set up"}</button>}
+        <button className="hiring-button secondary" type="button" disabled={!canManage} onClick={() => onConfigure(integration)}>{integration.status === "connected" ? "Manage" : "Scope"}</button>
+      </div>
+    </div>)}</div>
   </section>;
 }
 
-function ApplicationDrawer({ application, detail, loading, stages, onClose, onScreen, onCompliance, onMove }: { application: Application; detail?: ApplicationDetail; loading: boolean; stages: string[]; onClose: () => void; onScreen: () => void; onCompliance: () => void; onMove: (stage: string, reason: string) => void }) {
+function SettingsView({ organization, role, permissions, members, sso, onAddMember, onRefresh, onSignOut }: {
+  organization?: Workspace["organization"];
+  role: string;
+  permissions: string[];
+  members: Member[];
+  sso?: SsoConfiguration;
+  onAddMember: () => void;
+  onRefresh: () => void;
+  onSignOut: () => Promise<void>;
+}) {
+  const [section, setSection] = useState<"profile" | "people" | "sso">("profile");
+  const canManageMembers = permissions.includes("members.manage");
+  const canManageSso = permissions.includes("sso.manage");
+  const removeMember = async (member: Member) => {
+    if (!window.confirm(`Remove ${member.full_name || member.email} from this organization?`)) return;
+    await api.delete(`/hiring/members/${member.id}`);
+    onRefresh();
+  };
+  return <div className="hiring-settings-layout">
+    <aside className="hiring-settings-nav" aria-label="Workspace settings">
+      <button type="button" className={section === "profile" ? "active" : ""} onClick={() => setSection("profile")}>Workspace</button>
+      {canManageMembers && <button type="button" className={section === "people" ? "active" : ""} onClick={() => setSection("people")}>People & access</button>}
+      {canManageSso && <button type="button" className={section === "sso" ? "active" : ""} onClick={() => setSection("sso")}>Single sign-on</button>}
+    </aside>
+    <section className="hiring-panel hiring-full-panel hiring-settings">
+      {section === "profile" && <>
+        <div className="hiring-panel-header"><div><h2>Workspace</h2><p>Organization identity and your current access.</p></div></div>
+        <div className="hiring-settings-row"><div><strong>Organization</strong><span>{organization?.name || "Your organization"}</span></div><small>{organization?.plan_code || "trial"} plan</small></div>
+        <div className="hiring-settings-row"><div><strong>Access role</strong><span>{stageLabel(role)}</span></div><small>{permissions.length} permissions</small></div>
+        <div className="hiring-settings-row danger"><div><strong>Sign out</strong><span>End this browser session on this device.</span></div><button type="button" className="hiring-button secondary" onClick={() => void onSignOut()}>Sign out</button></div>
+      </>}
+      {section === "people" && <>
+        <div className="hiring-panel-header"><div><h2>People & access</h2><p>Invite colleagues and control what they can view or change.</p></div><button type="button" className="hiring-button primary" onClick={onAddMember}>Invite member</button></div>
+        <div className="hiring-member-table">
+          <div className="hiring-member-head"><span>Member</span><span>Role</span><span>Status</span><span></span></div>
+          {members.map((member) => <div className="hiring-member-row" key={member.id}><div><strong>{member.full_name}</strong><small>{member.email}</small></div><span>{stageLabel(member.role)}</span><StatusPill status={member.status} /><button type="button" disabled={member.role === "owner" || member.is_current_user} onClick={() => void removeMember(member)}>Remove</button></div>)}
+        </div>
+      </>}
+      {section === "sso" && <SsoForm value={sso} onSaved={onRefresh} />}
+    </section>
+  </div>;
+}
+
+function SsoForm({ value, onSaved }: { value?: SsoConfiguration; onSaved: () => void }) {
+  const [form, setForm] = useState({ provider: value?.provider || "azure_ad", domains: (value?.domains || []).join(", "), enabled: Boolean(value?.enabled), enforce_for_members: Boolean(value?.enforce_for_members) });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      await api.put("/hiring/sso", { ...form, domains: splitList(form.domains) });
+      onSaved();
+    } catch (reason) {
+      setError(apiError(reason, "Could not save the SSO configuration."));
+    } finally {
+      setLoading(false);
+    }
+  };
+  return <form className="hiring-form hiring-sso-form" onSubmit={submit}>
+    <div className="hiring-panel-header"><div><h2>Single sign-on</h2><p>Route members through the identity provider associated with their company email domain.</p></div><StatusPill status={value?.status || "not_configured"} /></div>
+    <label>Identity provider<select value={form.provider} onChange={(event) => setForm({ ...form, provider: event.target.value })}><option value="azure_ad">Microsoft Entra ID</option><option value="okta">Okta</option><option value="google_workspace">Google Workspace</option><option value="generic_saml">SAML 2.0 provider</option></select></label>
+    <label>Company domains<input required value={form.domains} onChange={(event) => setForm({ ...form, domains: event.target.value })} placeholder="company.com, subsidiary.com" /></label>
+    <label className="hiring-checkbox"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} />Enable SSO for these domains</label>
+    <label className="hiring-checkbox"><input type="checkbox" checked={form.enforce_for_members} disabled={!form.enabled} onChange={(event) => setForm({ ...form, enforce_for_members: event.target.checked })} />Require organization members to use SSO</label>
+    {error && <p className="hiring-form-error">{error}</p>}
+    <footer><button type="submit" className="hiring-button primary" disabled={loading}>{loading ? "Saving..." : "Save SSO policy"}</button></footer>
+  </form>;
+}
+
+function ApplicationDrawer({ application, detail, loading, transitionError, stages, onClose, onScreen, onCompliance, onAddScorecard, onOpenInterviews, onMove }: {
+  application: Application;
+  detail?: ApplicationDetail;
+  loading: boolean;
+  transitionError: string;
+  stages: string[];
+  onClose: () => void;
+  onScreen: () => void;
+  onCompliance: () => void;
+  onAddScorecard: () => void;
+  onOpenInterviews: () => void;
+  onMove: (stage: string, reason: string) => void;
+}) {
   const [nextStage, setNextStage] = useState(application.stage);
   const [reason, setReason] = useState("");
   const terminal = ["offer", "hired", "rejected", "withdrawn"].includes(nextStage);
+  const requiresScorecard = ["offer", "hired"].includes(nextStage);
+  const checkingScorecard = requiresScorecard && !detail;
+  const missingScorecard = requiresScorecard && Boolean(detail) && detail!.evidence_summary.scorecard_count < 1;
   const screening = detail?.screening || { match_score: application.ai_match_score, recommendation: application.ai_recommendation, rationale: application.ai_rationale };
   return <aside className="hiring-drawer" aria-label="Candidate application details">
     <header><div><small>{application.job_title}</small><h2>{application.candidate.full_name}</h2><span>{application.candidate.headline || application.candidate.email}</span></div><button type="button" className="hiring-icon-button" aria-label="Close candidate details" onClick={onClose}>x</button></header>
@@ -391,7 +547,15 @@ function ApplicationDrawer({ application, detail, loading, stages, onClose, onSc
     <section><h3>Screening signal</h3>{screening.match_score !== null ? <><strong className="hiring-score">{screening.match_score}%</strong><p>{screening.recommendation?.replace(/_/g, " ")}</p><div className="hiring-skill-detail"><span>Matched</span>{(screening.rationale.matched_skills || []).join(", ") || "No matched skills recorded"}</div><div className="hiring-skill-detail"><span>Still to verify</span>{(screening.rationale.missing_skills || []).join(", ") || "No gaps recorded"}</div></> : <p>No screening signal yet. Use it as a review aid, never a decision-maker.</p>}<button type="button" className="hiring-button secondary" onClick={onScreen}>Run evidence screen</button></section>
     <section><h3>Interview evidence</h3>{detail?.scorecards.length ? detail.scorecards.map((scorecard) => <article className="hiring-scorecard-summary" key={scorecard.id}><div><strong>{scorecard.overall_score?.toFixed(1) || "-"} / 5</strong><StatusPill status={scorecard.recommendation} /></div><p>{scorecard.evidence}</p></article>) : <p>No structured scorecard has been submitted.</p>}</section>
     <section><h3>Compliance</h3>{detail?.compliance_checks.length ? <div className="hiring-check-list">{detail.compliance_checks.map((check) => <div key={check.check_type}><span>{stageLabel(check.check_type)}</span><StatusPill status={check.status} /></div>)}</div> : <p>Consent, structured evidence and automated-decision guardrails have not been checked yet.</p>}<button type="button" className="hiring-button secondary" onClick={onCompliance}>Run checks</button></section>
-    <section><h3>Record stage decision</h3><select value={nextStage} disabled={application.status === "closed"} onChange={(event) => setNextStage(event.target.value)}>{stages.map((stage) => <option key={stage} value={stage}>{stageLabel(stage)}</option>)}</select><textarea rows={3} value={reason} disabled={application.status === "closed"} onChange={(event) => setReason(event.target.value)} placeholder="Reason and supporting evidence" /><button type="button" className="hiring-button primary" disabled={application.status === "closed" || nextStage === application.stage || (terminal && reason.trim().length < 10)} onClick={() => onMove(nextStage, reason.trim() || "Progressed by the recruiter from the hiring workspace")}>Save stage</button>{terminal && reason.trim().length < 10 && <small>Offer and final decisions require a rationale of at least 10 characters.</small>}</section>
+    <section>
+      <h3>Record stage decision</h3>
+      <select value={nextStage} disabled={application.status === "closed"} onChange={(event) => setNextStage(event.target.value)}>{stages.map((stage) => <option key={stage} value={stage}>{stageLabel(stage)}</option>)}</select>
+      {missingScorecard && <div className="hiring-transition-blocker" role="note"><strong>Interview scorecard required</strong><p>Add structured interview evidence before moving this candidate to {stageLabel(nextStage)}.</p><div><button type="button" className="hiring-button secondary" onClick={onAddScorecard}>Add scorecard</button><button type="button" className="hiring-button secondary" onClick={onOpenInterviews}>Open interviews</button></div></div>}
+      <textarea rows={3} value={reason} disabled={application.status === "closed"} onChange={(event) => setReason(event.target.value)} placeholder="Reason and supporting evidence" />
+      {transitionError && <p className="hiring-transition-error" role="alert">{transitionError}</p>}
+      <button type="button" className="hiring-button primary" disabled={application.status === "closed" || nextStage === application.stage || checkingScorecard || missingScorecard || (terminal && reason.trim().length < 10)} onClick={() => onMove(nextStage, reason.trim() || "Progressed by the recruiter from the hiring workspace")}>{checkingScorecard ? "Checking evidence..." : "Save stage"}</button>
+      {terminal && reason.trim().length < 10 && <small>Offer and final decisions require a rationale of at least 10 characters.</small>}
+    </section>
     {detail && <section><h3>Activity</h3><div className="hiring-activity-list">{detail.stage_history.map((event) => <div key={event.id}><i aria-hidden="true" /><span><strong>{stageLabel(event.to_stage)}</strong><small>{event.reason || "No reason recorded"} | {new Date(event.created_at).toLocaleString()}</small></span></div>)}</div></section>}
   </aside>;
 }
@@ -454,6 +618,64 @@ function ScorecardForm({ interview, onClose, onSaved }: { interview: Interview; 
       <p className="hiring-form-hint">This scorecard is decision evidence. It does not send a result to the candidate.</p>
       {error && <p className="hiring-form-error">{error}</p>}
       <footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading || form.evidence.trim().length < 10}>{loading ? "Saving..." : "Save scorecard"}</button></footer>
+    </form>
+  </Modal>;
+}
+
+const permissionDescription: Record<string, string> = {
+  "jobs.view": "View job requisitions",
+  "jobs.manage": "Create and edit jobs",
+  "candidates.view": "View candidate records",
+  "candidates.manage": "Add and edit candidates",
+  "pipeline.view": "View hiring pipelines",
+  "pipeline.manage": "Move and screen candidates",
+  "assessments.view": "Open the assessment workspace",
+  "assessments.manage": "Build and issue assessments",
+  "assessment_results.view": "Review assessment results",
+  "interviews.view": "View interview schedules",
+  "interviews.manage": "Schedule and score interviews",
+  "integrations.view": "View connected systems",
+  "integrations.manage": "Connect and manage integrations",
+  "reports.view": "View hiring reports",
+  "members.manage": "Invite and remove organization members",
+  "organization.manage": "Manage organization settings",
+  "billing.manage": "Manage billing",
+  "sso.manage": "Configure single sign-on",
+};
+
+function MemberForm({ permissionCatalog, onClose, onSaved }: { permissionCatalog: string[]; onClose: () => void; onSaved: (message: string) => void }) {
+  const [form, setForm] = useState({ full_name: "", email: "", role: "recruiter", permissions: [] as string[] });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const togglePermission = (permission: string) => setForm((current) => ({
+    ...current,
+    permissions: current.permissions.includes(permission) ? current.permissions.filter((item) => item !== permission) : [...current.permissions, permission],
+  }));
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const { data } = await api.post("/hiring/members", form);
+      onSaved(data.invitation_sent ? `Invitation sent to ${form.email}.` : `${form.email} now has organization access.`);
+    } catch (reason) {
+      setError(apiError(reason, "Could not add this organization member."));
+    } finally {
+      setLoading(false);
+    }
+  };
+  return <Modal title="Invite organization member" onClose={onClose}>
+    <form className="hiring-form" onSubmit={submit}>
+      <div className="hiring-form-grid"><label>Full name<input required value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label><label>Work email<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label></div>
+      <fieldset className="hiring-role-options">
+        <legend>Access role</legend>
+        <label><input type="radio" name="member-role" value="org_admin" checked={form.role === "org_admin"} onChange={(event) => setForm({ ...form, role: event.target.value })} /><span><strong>Organization admin</strong><small>All organization controls, including people, SSO, integrations, and billing.</small></span></label>
+        <label><input type="radio" name="member-role" value="recruiter" checked={form.role === "recruiter"} onChange={(event) => setForm({ ...form, role: event.target.value })} /><span><strong>Recruiter</strong><small>Complete hiring access without member, organization security, or billing administration.</small></span></label>
+        <label><input type="radio" name="member-role" value="custom" checked={form.role === "custom"} onChange={(event) => setForm({ ...form, role: event.target.value })} /><span><strong>Other</strong><small>Choose exactly what this person can access.</small></span></label>
+      </fieldset>
+      {form.role === "custom" && <fieldset className="hiring-permission-grid"><legend>Custom access</legend>{permissionCatalog.map((permission) => <label key={permission}><input type="checkbox" checked={form.permissions.includes(permission)} onChange={() => togglePermission(permission)} /><span>{permissionDescription[permission] || stageLabel(permission)}</span></label>)}</fieldset>}
+      {error && <p className="hiring-form-error">{error}</p>}
+      <footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading || (form.role === "custom" && !form.permissions.length)}>{loading ? "Sending invitation..." : "Send invitation"}</button></footer>
     </form>
   </Modal>;
 }
