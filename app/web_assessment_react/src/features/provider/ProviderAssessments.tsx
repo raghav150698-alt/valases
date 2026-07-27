@@ -5,10 +5,11 @@ import { BrandLogo } from "../../components/BrandLogo";
 import { api } from "../../lib/api";
 import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
-import { ExcelAssessmentSubmission, ExcelSimulator } from "../tools/ExcelSimulator";
-import { RemoteDesktopTool } from "../tools/RemoteDesktopTool";
+import type { ExcelAssessmentSubmission } from "../tools/ExcelSimulator";
 
 const CodingEnv = lazy(() => import("../tools/CodingEnv"));
+const ExcelSimulator = lazy(() => import("../tools/ExcelSimulator").then((module) => ({ default: module.ExcelSimulator })));
+const RemoteDesktopTool = lazy(() => import("../tools/RemoteDesktopTool").then((module) => ({ default: module.RemoteDesktopTool })));
 
 function apiErrorMessage(error: unknown, fallback: string): string {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -68,6 +69,20 @@ type IssuedRow = {
   issued_at?: string | null;
   time_taken_seconds?: number | null;
   submission_status?: string | null;
+  access_expires_at?: string | null;
+  invite_delivery?: { sent?: boolean; reason?: string | null } | null;
+};
+
+type ScreeningApplication = {
+  id: number;
+  job_title: string;
+  stage: string;
+  status: string;
+  candidate: {
+    id: number;
+    full_name: string;
+    email: string;
+  };
 };
 
 type WorkspaceTab = "dashboard" | "custom" | "assessments" | "results";
@@ -176,6 +191,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedExamId, setSelectedExamId] = useState<number | null>(null);
   const [issueExamId, setIssueExamId] = useState<number | null>(null);
+  const [candidateApplicationId, setCandidateApplicationId] = useState<number | null>(null);
   const [candidateName, setCandidateName] = useState("");
   const [candidateEmail, setCandidateEmail] = useState("");
   const [issueNotice, setIssueNotice] = useState("");
@@ -249,6 +265,11 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     queryFn: async () => (await api.get<IssuedRow[]>("/exams/issued/by-me")).data,
   });
 
+  const screeningApplications = useQuery({
+    queryKey: ["hiring", "applications", "screening"],
+    queryFn: async () => (await api.get<ScreeningApplication[]>("/hiring/applications", { params: { stage: "screening" } })).data,
+  });
+
   const defaultAssessments = useQuery({
     queryKey: ["default-assessment-library"],
     queryFn: async () => (await api.get<DefaultAssessment[]>("/exams/default-library")).data,
@@ -299,6 +320,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["issued-review", reviewIssueId] });
       await qc.invalidateQueries({ queryKey: ["issued-by-me"] });
+      await qc.invalidateQueries({ queryKey: ["hiring"] });
     },
   });
 
@@ -472,6 +494,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
       if (!issueExamId) throw new Error("Select exam to issue.");
       return (
         await api.post(`/exams/${issueExamId}/issue`, {
+          application_id: candidateApplicationId,
           candidate_name: candidateName,
           candidate_email: candidateEmail,
         })
@@ -480,11 +503,33 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     onSuccess: async (data) => {
       setCandidateName("");
       setCandidateEmail("");
+      setCandidateApplicationId(null);
       setIssueNotice(data?.email_delivery?.sent
         ? "Invitation sent. The candidate received the secure assessment link."
         : `Assessment issued, but email delivery failed: ${data?.email_delivery?.reason || "SMTP settings are incomplete."} Use the secure link and temporary password shown by the API response.`);
       await qc.invalidateQueries({ queryKey: ["issued-by-me"] });
       await qc.invalidateQueries({ queryKey: ["provider-assessments"] });
+      await qc.invalidateQueries({ queryKey: ["hiring"] });
+    },
+  });
+
+  const resendInvitation = useMutation({
+    mutationFn: async (issuedId: number) => (await api.post(`/exams/issued/${issuedId}/resend`)).data,
+    onSuccess: async (data) => {
+      setIssueNotice(data?.email_delivery?.sent
+        ? "A new secure link and password were sent to the candidate."
+        : `New credentials were created, but email delivery failed: ${data?.email_delivery?.reason || "Check the SMTP configuration."}`);
+      await qc.invalidateQueries({ queryKey: ["issued-by-me"] });
+    },
+  });
+
+  const revokeInvitation = useMutation({
+    mutationFn: async (issuedId: number) => (
+      await api.post(`/exams/issued/${issuedId}/revoke`, { reason: "Revoked by recruiter" })
+    ).data,
+    onSuccess: async () => {
+      setIssueNotice("The assessment invitation was revoked and its active session was closed.");
+      await qc.invalidateQueries({ queryKey: ["issued-by-me"] });
     },
   });
 
@@ -554,7 +599,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     && form.pass_score <= 100
     && (isMcqForm || (form.task_prompt.trim().length >= 10 && form.task_marks > 0 && checkpointsAreComplete && checkpointWeight === 100));
   const canAddQuestion = questionText.trim().length >= 5 && validQuestionOptions.length >= 2 && validQuestionOptions.some((option) => option.is_correct);
-  const canIssueAssessment = Boolean(issueExamId && candidateName.trim().length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail.trim()));
+  const canIssueAssessment = Boolean(issueExamId && candidateApplicationId && candidateName.trim().length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail.trim()));
 
   const openTool = (tool: string) => {
     setShowTools(true);
@@ -706,9 +751,35 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   <article key={`${row.internal_id}-${row.candidate_email}`} className="issued-list-row">
                     <div>
                       <strong>{row.assessment_title}</strong>
-                      <small>{row.candidate_email}</small>
+                      <small>{row.candidate_email}{row.invite_delivery?.sent === false ? " | Delivery failed" : ""}</small>
                     </div>
                     <StatusBadge value={row.status} />
+                    <div className="issued-list-actions">
+                      {["issued", "revoked"].includes(row.status) && (
+                        <button
+                          type="button"
+                          className="secondary-btn"
+                          disabled={resendInvitation.isPending}
+                          onClick={() => void resendInvitation.mutate(row.issued_id)}
+                        >
+                          Resend
+                        </button>
+                      )}
+                      {["issued", "started"].includes(row.status) && (
+                        <button
+                          type="button"
+                          className="issued-revoke-btn"
+                          disabled={revokeInvitation.isPending}
+                          onClick={() => {
+                            if (window.confirm("Revoke this invitation and close any active candidate session?")) {
+                              revokeInvitation.mutate(row.issued_id);
+                            }
+                          }}
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </div>
                   </article>
                 ))}
                 {!issued.isLoading && filteredIssued.length === 0 && <EmptyState title="No candidate activity" detail="Issued assessments and submissions will appear here." />}
@@ -771,17 +842,17 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
               )}
             </section>
 
-            {activeTool === "Excel" && <ExcelSimulator />}
+            {activeTool === "Excel" && <Suspense fallback={<div className="tool-loading-state" role="status">Loading spreadsheet...</div>}><ExcelSimulator /></Suspense>}
             {activeTool === "Coding Env" && (
               <Suspense fallback={<div className="tool-loading-state" role="status">Loading coding workspace...</div>}>
                 <CodingEnv />
               </Suspense>
             )}
             {activeTool === "Desktop Accounting (GnuCash)" && (
-              <RemoteDesktopTool
-                title="GnuCash Desktop Test"
-                description="Server-hosted accounting desktop proof-of-concept for candidate task delivery."
-              />
+              <Suspense fallback={<div className="tool-loading-state" role="status">Loading accounting workspace...</div>}><RemoteDesktopTool
+                  title="GnuCash Desktop Test"
+                  description="Server-hosted accounting desktop proof-of-concept for candidate task delivery."
+                /></Suspense>
             )}
             {activeTool === "Tax Software" && (
               <div className="workspace-surface">
@@ -864,12 +935,12 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                     <p>Prepare the workbook candidates will receive and keep answer cells editable.</p>
                   </div>
                 </div>
-                <ExcelSimulator
-                  title="Recruiter Excel Setup"
-                  description="Prepare the workbook candidates will receive."
-                  instructions="Use the grid or upload an xlsx file. Candidate answer cells should remain unlocked."
-                  onAutosave={(submission) => setExcelTemplate(submission)}
-                />
+                <Suspense fallback={<div className="tool-loading-state" role="status">Loading spreadsheet setup...</div>}><ExcelSimulator
+                    title="Recruiter Excel Setup"
+                    description="Prepare the workbook candidates will receive."
+                    instructions="Use the grid or upload an xlsx file. Candidate answer cells should remain unlocked."
+                    onAutosave={(submission) => setExcelTemplate(submission)}
+                  /></Suspense>
               </section>
             )}
           </div>
@@ -1040,12 +1111,23 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   </select>
                 </label>
                 <label className="field-stack">
-                  <span>Candidate name</span>
-                  <input value={candidateName} onChange={(e) => setCandidateName(e.target.value)} placeholder="Candidate name" />
-                </label>
-                <label className="field-stack">
-                  <span>Candidate email</span>
-                  <input value={candidateEmail} onChange={(e) => setCandidateEmail(e.target.value)} placeholder="Candidate email" />
+                  <span>Screening candidate</span>
+                  <select
+                    value={candidateApplicationId ?? ""}
+                    onChange={(event) => {
+                      const application = (screeningApplications.data || []).find((item) => item.id === Number(event.target.value));
+                      setCandidateApplicationId(application?.id || null);
+                      setCandidateName(application?.candidate.full_name || "");
+                      setCandidateEmail(application?.candidate.email || "");
+                    }}
+                  >
+                    <option value="">Select candidate</option>
+                    {(screeningApplications.data || []).map((application) => (
+                      <option key={application.id} value={application.id}>
+                        {application.candidate.full_name} | {application.job_title}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
               <div className="workspace-form-footer">
@@ -1057,7 +1139,10 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   {issueMutation.isPending ? "Sending..." : "Send invite"}
                 </button>
               </div>
-              {!canIssueAssessment && <div className="workspace-form-note">Choose a published assessment and enter a valid candidate name and email.</div>}
+              {!screeningApplications.isLoading && !(screeningApplications.data || []).length && (
+                <div className="workspace-form-note">No candidates are currently in Screening. Add a candidate to an open role or move an existing application to Screening.</div>
+              )}
+              {!canIssueAssessment && Boolean((screeningApplications.data || []).length) && <div className="workspace-form-note">Choose a published assessment and a screening candidate.</div>}
               {issueMutation.isError && <div className="workspace-error">The invite could not be issued. Check the candidate details and try again.</div>}
               {issueNotice && <div className="workspace-success">{issueNotice}</div>}
             </section>
@@ -1162,8 +1247,8 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
               <div className="review-decision">
                 <div><strong>Recruiter decision</strong><span>Confirm or adjust the provisional score. Candidates do not receive this result from the assessment session.</span></div>
                 <label className="field-stack"><span>Final score</span><div className="input-with-suffix"><input type="number" min="0" max="100" value={reviewScore} onChange={(event) => setReviewScore(Number(event.target.value))} /><span>%</span></div></label>
-                <label className="field-stack review-notes"><span>Private review notes</span><textarea rows={3} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} placeholder="Evidence, concerns, or reason for adjustment" /></label>
-                <button type="button" onClick={() => finalizeReview.mutate()} disabled={finalizeReview.isPending}>{finalizeReview.isPending ? "Finalizing..." : review.data.status === "reviewed" ? "Update final review" : "Finalize review"}</button>
+                <label className="field-stack review-notes"><span>Decision rationale</span><textarea rows={3} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} placeholder="Record the evidence and reason for this decision" /><small>Required for the audit history. Minimum 10 characters.</small></label>
+                <button type="button" onClick={() => finalizeReview.mutate()} disabled={finalizeReview.isPending || reviewNotes.trim().length < 10}>{finalizeReview.isPending ? "Finalizing..." : review.data.status === "reviewed" ? "Update final review" : "Finalize review"}</button>
                 {finalizeReview.isError && <div className="workspace-error">{apiErrorMessage(finalizeReview.error, "The review could not be finalized.")}</div>}
               </div>
             </section>

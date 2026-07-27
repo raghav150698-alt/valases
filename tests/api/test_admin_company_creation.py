@@ -1,15 +1,32 @@
 import unittest
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.api.routes.admin import AdminCompanyCreate, _create_company_account
+from app.api.routes.admin import (
+    AdminCompanyCreate,
+    DataSubjectRequestAction,
+    DataSubjectRequestCreate,
+    DataSubjectRequestExecute,
+    GovernanceSettingsUpdate,
+    _create_company_account,
+    admin_workspace_governance,
+    admin_workspace_create_data_request,
+    admin_workspace_execute_data_request,
+    admin_workspace_update_data_request,
+    admin_workspace_update_governance,
+)
 from app.models.entities import (
     AuditLog,
     Base,
+    HiringCandidate,
+    Organization,
+    OrganizationAuditEvent,
+    OrganizationMembership,
     ProviderBillingAccount,
     ProviderProfile,
     User,
@@ -25,16 +42,7 @@ class AdminCompanyCreationTest(unittest.TestCase):
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
-        Base.metadata.create_all(
-            self.engine,
-            tables=[
-                User.__table__,
-                ProviderProfile.__table__,
-                UserApproval.__table__,
-                ProviderBillingAccount.__table__,
-                AuditLog.__table__,
-            ],
-        )
+        Base.metadata.create_all(self.engine)
         self.db = Session(self.engine)
         self.admin = User(
             email="admin@valases.com",
@@ -80,6 +88,156 @@ class AdminCompanyCreationTest(unittest.TestCase):
         self.assertEqual(provider.display_name, "Example Company")
         self.assertEqual(result["business_name"], "Example Company")
         self.assertNotIn("password", result)
+        organization = self.db.get(Organization, result["organization_id"])
+        membership = self.db.scalar(
+            select(OrganizationMembership).where(
+                OrganizationMembership.organization_id == organization.id,
+                OrganizationMembership.user_id == owner.id,
+            ),
+        )
+        self.assertIsNotNone(organization)
+        self.assertEqual(membership.role, "owner")
+
+        with self.assertRaises(HTTPException) as invalid_hold:
+            admin_workspace_update_governance(
+                provider.id,
+                GovernanceSettingsUpdate(legal_hold_enabled=True, legal_hold_reason="short"),
+                db=self.db,
+                current_user=self.admin,
+            )
+        self.assertEqual(invalid_hold.exception.status_code, 422)
+        governance = admin_workspace_update_governance(
+            provider.id,
+            GovernanceSettingsUpdate(
+                candidate_retention_days=540,
+                assessment_retention_days=270,
+                proctor_retention_days=21,
+                audit_retention_days=730,
+                legal_hold_enabled=True,
+                legal_hold_reason="Active employment dispute preservation requirement",
+            ),
+            db=self.db,
+            current_user=self.admin,
+        )
+        self.assertTrue(governance["legal_hold_enabled"])
+        self.assertEqual(governance["candidate_retention_days"], 540)
+        preview = admin_workspace_governance(
+            provider.id,
+            db=self.db,
+            current_user=self.admin,
+        )
+        self.assertTrue(preview["retention_preview"]["execution_blocked"])
+        event = self.db.scalar(
+            select(OrganizationAuditEvent).where(
+                OrganizationAuditEvent.organization_id == organization.id,
+                OrganizationAuditEvent.action == "governance_settings_updated",
+            ),
+        )
+        self.assertIsNotNone(event)
+
+    @patch("app.api.routes.admin.ensure_supabase_user")
+    def test_data_subject_export_requires_verification_and_approval(self, ensure_user) -> None:
+        ensure_user.return_value = {"configured": True, "created": True, "user_id": "auth-user-2"}
+        company = _create_company_account(
+            business_name="Privacy Test",
+            email_address="privacy-owner@example.com",
+            password="A-secure-password-2026",
+            account_name=None,
+            db=self.db,
+            current_user=self.admin,
+        )
+        candidate = HiringCandidate(
+            organization_id=company["organization_id"],
+            first_name="Casey",
+            last_name="Jones",
+            email="casey@example.com",
+            consent_status="granted",
+        )
+        self.db.add(candidate)
+        self.db.commit()
+        item = admin_workspace_create_data_request(
+            DataSubjectRequestCreate(
+                provider_id=company["provider_id"],
+                request_type="export",
+                candidate_email="casey@example.com",
+                requestor_name="Casey Jones",
+            ),
+            db=self.db,
+            current_user=self.admin,
+        )
+        with self.assertRaises(HTTPException) as premature:
+            admin_workspace_update_data_request(
+                item["id"],
+                DataSubjectRequestAction(action="approve", reason="Approved before identity verification"),
+                db=self.db,
+                current_user=self.admin,
+            )
+        self.assertEqual(premature.exception.status_code, 409)
+        admin_workspace_update_data_request(
+            item["id"],
+            DataSubjectRequestAction(action="verify_identity", reason="Identity verified through documented process"),
+            db=self.db,
+            current_user=self.admin,
+        )
+        approved = admin_workspace_update_data_request(
+            item["id"],
+            DataSubjectRequestAction(action="approve", reason="Approved for a scoped personal data export"),
+            db=self.db,
+            current_user=self.admin,
+        )
+        result = admin_workspace_execute_data_request(
+            item["id"],
+            DataSubjectRequestExecute(confirmation=approved["request_reference"]),
+            db=self.db,
+            current_user=self.admin,
+        )
+        self.assertEqual(result["request"]["status"], "completed")
+        self.assertEqual(result["export"]["candidate_profile"][0]["email"], "casey@example.com")
+
+        deletion = admin_workspace_create_data_request(
+            DataSubjectRequestCreate(
+                provider_id=company["provider_id"],
+                request_type="delete",
+                candidate_email="casey@example.com",
+                requestor_name="Casey Jones",
+            ),
+            db=self.db,
+            current_user=self.admin,
+        )
+        admin_workspace_update_data_request(
+            deletion["id"],
+            DataSubjectRequestAction(action="verify_identity", reason="Identity verified through documented process"),
+            db=self.db,
+            current_user=self.admin,
+        )
+        approved_deletion = admin_workspace_update_data_request(
+            deletion["id"],
+            DataSubjectRequestAction(action="approve", reason="Deletion approved after scope and obligations review"),
+            db=self.db,
+            current_user=self.admin,
+        )
+        organization = self.db.get(Organization, company["organization_id"])
+        organization.settings_json = {"governance": {"legal_hold_enabled": True}}
+        self.db.commit()
+        with self.assertRaises(HTTPException) as held:
+            admin_workspace_execute_data_request(
+                deletion["id"],
+                DataSubjectRequestExecute(confirmation=approved_deletion["request_reference"]),
+                db=self.db,
+                current_user=self.admin,
+            )
+        self.assertEqual(held.exception.status_code, 409)
+        organization.settings_json = {"governance": {"legal_hold_enabled": False}}
+        self.db.commit()
+        deleted = admin_workspace_execute_data_request(
+            deletion["id"],
+            DataSubjectRequestExecute(confirmation=approved_deletion["request_reference"]),
+            db=self.db,
+            current_user=self.admin,
+        )
+        self.db.refresh(candidate)
+        self.assertEqual(deleted["request"]["status"], "completed")
+        self.assertTrue(candidate.email.endswith("@redacted.invalid"))
 
 
 if __name__ == "__main__":

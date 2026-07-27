@@ -1,20 +1,29 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.api.routes.exams import (
+    IssuedCandidateAutosaveRequest,
     IssuedCandidateLoginRequest,
+    IssuedCandidateProctorEventRequest,
     IssuedCandidateSubmitRequest,
+    AssessmentReviewFinalizeRequest,
+    finalize_issued_assessment_review,
+    issued_candidate_autosave,
     issued_candidate_get_assessment,
     issued_candidate_login_by_key,
+    issued_candidate_proctor_event,
     issued_candidate_submit,
 )
 from app.core.security import hash_password
 from app.models.entities import (
     AssessmentIssue,
+    AssessmentSubmission,
+    AuditLog,
     Base,
     Course,
     Exam,
@@ -109,14 +118,113 @@ class AssessmentWorkflowE2ETest(unittest.TestCase):
         paper = issued_candidate_get_assessment(authorization, self.db)
         self.assertNotIn("is_correct", paper["questions"][0]["options"][0])
 
+        submission_id = "candidate-submit-0123456789"
+        saved = issued_candidate_autosave(
+            IssuedCandidateAutosaveRequest(
+                submission_id=submission_id,
+                revision=1,
+                answers={str(question.id): [correct.id]},
+                current_question_index=0,
+                time_taken_seconds=30,
+                timer_state={"remaining_assessment_sec": 1770},
+            ),
+            authorization,
+            self.db,
+        )
+        self.assertEqual(saved["status"], "saved")
+        recovered = issued_candidate_get_assessment(authorization, self.db)
+        self.assertEqual(recovered["draft"]["submission_id"], submission_id)
+        self.assertEqual(recovered["draft"]["answers"][str(question.id)], [correct.id])
+
+        reconnected_login = issued_candidate_login_by_key(
+            issue.access_key,
+            IssuedCandidateLoginRequest(password=password),
+            self.db,
+        )
+        reconnected_authorization = f"Bearer {reconnected_login['token']}"
+        with self.assertRaises(HTTPException) as stale_session:
+            issued_candidate_get_assessment(authorization, self.db)
+        self.assertEqual(stale_session.exception.status_code, 409)
+        authorization = reconnected_authorization
+        recovered_after_reconnect = issued_candidate_get_assessment(authorization, self.db)
+        self.assertEqual(recovered_after_reconnect["draft"]["submission_id"], submission_id)
+
+        stale = issued_candidate_autosave(
+            IssuedCandidateAutosaveRequest(
+                submission_id=submission_id,
+                revision=1,
+                answers={},
+                current_question_index=0,
+            ),
+            authorization,
+            self.db,
+        )
+        self.assertEqual(stale["status"], "unchanged")
+
+        phone_event = issued_candidate_proctor_event(
+            IssuedCandidateProctorEventRequest(
+                event_type="mobile_phone_detected",
+                severity="critical",
+                details={"confidence": 0.82, "consecutive_frames": 2},
+            ),
+            authorization,
+            self.db,
+        )
+        self.assertEqual(phone_event["warning_count"], 1)
+
         submitted = issued_candidate_submit(
-            IssuedCandidateSubmitRequest(answers={str(question.id): [correct.id]}, time_taken_seconds=60),
+            IssuedCandidateSubmitRequest(
+                submission_id=submission_id,
+                answers={str(question.id): [correct.id]},
+                time_taken_seconds=60,
+            ),
             authorization,
             self.db,
         )
         self.assertEqual(submitted["status"], "submitted")
         self.assertNotIn("score", submitted)
         self.assertNotIn("passed", submitted)
+        self.assertEqual(issue.result_json["proctoring"]["mobile_phone_detection_count"], 1)
+        self.assertEqual(issue.result_json["proctoring"]["integrity_penalty_pct"], 10)
+        self.assertEqual(issue.result_json["provisional_score_pct"], 90)
+        self.assertEqual(
+            self.db.query(AssessmentSubmission).filter(AssessmentSubmission.issue_id == issue.id).count(),
+            1,
+        )
+
+        finalized = finalize_issued_assessment_review(
+            issue.id,
+            AssessmentReviewFinalizeRequest(
+                score_pct=85,
+                reviewer_notes="Independent evidence supports this final score.",
+            ),
+            self.db,
+            provider_user,
+        )
+        self.assertEqual(finalized["status"], "reviewed")
+        self.assertEqual(finalized["score_pct"], 85)
+        self.assertEqual(len(issue.result_json["review_history"]), 1)
+        audit = self.db.query(AuditLog).filter(
+            AuditLog.action == "assessment_review_finalized",
+            AuditLog.target_id == issue.id,
+        ).one()
+        self.assertEqual(audit.details_json["final_score_pct"], 85)
+
+        retried = issued_candidate_submit(
+            IssuedCandidateSubmitRequest(
+                submission_id=submission_id,
+                answers={str(question.id): [correct.id]},
+                time_taken_seconds=60,
+            ),
+            authorization,
+            self.db,
+        )
+        self.assertEqual(retried["status"], "submitted")
+        self.assertNotIn("score", retried)
+        self.assertEqual(
+            self.db.query(AssessmentSubmission).filter(AssessmentSubmission.issue_id == issue.id).count(),
+            1,
+        )
 
 
 if __name__ == "__main__":

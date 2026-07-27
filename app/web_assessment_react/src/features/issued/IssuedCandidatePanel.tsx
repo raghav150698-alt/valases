@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useCandidateGazeProctor } from "../assessment/useCandidateGazeProctor";
 import { useAssessmentSession } from "../assessment/useAssessmentSession";
 import { useAssessmentTimer } from "../assessment/useAssessmentTimer";
-import { ExcelAssessmentSubmission, ExcelSimulator } from "../tools/ExcelSimulator";
+import type { TimerState } from "../assessment/assessmentRuntime";
+import type { ExcelAssessmentSubmission } from "../tools/ExcelSimulator";
 import { BrandLogo } from "../../components/BrandLogo";
+
+const ExcelSimulator = lazy(() => import("../tools/ExcelSimulator").then((module) => ({ default: module.ExcelSimulator })));
 
 type IssuedOption = { id: number; text: string };
 type IssuedQuestion = { question_id: number; question_text: string; question_type: string; options: IssuedOption[] };
@@ -28,6 +31,16 @@ type IssuedExam = {
   status: string;
   score_pct?: number;
   passed?: boolean;
+  draft?: {
+    submission_id?: string;
+    revision: number;
+    saved_at?: string;
+    answers: Record<string, number[]>;
+    submitted_data: Record<string, unknown>;
+    current_question_index: number;
+    time_taken_seconds?: number;
+    timer_state: Partial<TimerState>;
+  } | null;
 };
 
 export function IssuedCandidatePanel() {
@@ -54,9 +67,16 @@ export function IssuedCandidatePanel() {
   const [welcomeCompleted, setWelcomeCompleted] = useState(false);
   const [briefingState, setBriefingState] = useState<"idle" | "playing" | "completed" | "error">("idle");
   const [briefingError, setBriefingError] = useState("");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "offline">("idle");
+  const [autosaveTick, setAutosaveTick] = useState(0);
+  const [restoredTimerState, setRestoredTimerState] = useState<TimerState | null>(null);
   const welcomeSpeechRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const welcomeSpeechWatchdogRef = useRef<number | null>(null);
   const welcomeSpeechRunRef = useRef(0);
   const submittingRef = useRef(false);
+  const submissionIdRef = useRef<string>(globalThis.crypto?.randomUUID?.() || `submission-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const autosaveRevisionRef = useRef(0);
+  const timerStateRef = useRef<TimerState | null>(null);
   const { status: gazeStatus, error: gazeError, stream: gazeStream, start: startGazeProctor, stop: stopGazeProctor } = useCandidateGazeProctor(Boolean(paper));
 
   useEffect(() => {
@@ -67,6 +87,7 @@ export function IssuedCandidatePanel() {
 
   useEffect(() => () => {
     welcomeSpeechRunRef.current += 1;
+    if (welcomeSpeechWatchdogRef.current) window.clearTimeout(welcomeSpeechWatchdogRef.current);
     window.speechSynthesis?.cancel();
     welcomeSpeechRef.current = null;
   }, []);
@@ -89,19 +110,34 @@ export function IssuedCandidatePanel() {
       headers: { Authorization: `Bearer ${newToken}` },
     });
     const me = response.data;
-    if (me.status === "completed") {
+    if (["submitted", "completed", "review_pending", "reviewed", "terminated"].includes(me.status)) {
       setPaper(null);
       setStatus("This assessment has already been submitted. Results are shared only by the recruiting organization.");
       return;
     }
     setPaper(me);
-    setIndex(0);
-    setAnswers({});
-    setExcelSubmission(null);
-    setTaskResponse(String(me.task?.metadata?.starter_code || ""));
-    setTaskFileLink("");
-    setTaxValues({});
-    setIdentifiedFlags("");
+    const draft = me.draft;
+    const draftData = draft?.submitted_data || {};
+    if (draft?.submission_id) submissionIdRef.current = draft.submission_id;
+    autosaveRevisionRef.current = Number(draft?.revision || 0);
+    setIndex(Math.min(Math.max(Number(draft?.current_question_index || 0), 0), Math.max(me.questions.length - 1, 0)));
+    setAnswers(Object.fromEntries(Object.entries(draft?.answers || {}).map(([key, value]) => [Number(key), value])));
+    setExcelSubmission((draftData.final_sheet_json ? draftData : null) as ExcelAssessmentSubmission | null);
+    setTaskResponse(String(draftData.code || draftData.response_text || draftData.notes || me.task?.metadata?.starter_code || ""));
+    setTaskFileLink(String(draftData.attachment_url || ""));
+    setTaxValues((draftData.entered_form_values || {}) as Record<string, string>);
+    setIdentifiedFlags(Array.isArray(draftData.identified_red_flags) ? draftData.identified_red_flags.join("\n") : "");
+    const timerState = draft?.timer_state;
+    setRestoredTimerState(
+      timerState && Number.isFinite(timerState.remainingAssessmentSec)
+        ? {
+          remainingAssessmentSec: Number(timerState.remainingAssessmentSec),
+          questionRemainingByIndex: timerState.questionRemainingByIndex || {},
+          questionTimedOutByIndex: timerState.questionTimedOutByIndex || {},
+        }
+        : null,
+    );
+    setSaveState(draft ? "saved" : "idle");
     setProctorEvents([]);
     setPolicyWarning(null);
     setConsentAccepted(false);
@@ -141,10 +177,14 @@ export function IssuedCandidatePanel() {
     utterance.volume = 1;
     utterance.onend = () => {
       if (runId !== welcomeSpeechRunRef.current) return;
+      if (welcomeSpeechWatchdogRef.current) window.clearTimeout(welcomeSpeechWatchdogRef.current);
+      welcomeSpeechWatchdogRef.current = null;
       welcomeSpeechRef.current = null;
       setBriefingState("completed");
     };
     utterance.onerror = (event) => {
+      if (welcomeSpeechWatchdogRef.current) window.clearTimeout(welcomeSpeechWatchdogRef.current);
+      welcomeSpeechWatchdogRef.current = null;
       welcomeSpeechRef.current = null;
       if (event.error === "canceled" || event.error === "interrupted" || runId !== welcomeSpeechRunRef.current) return;
       setBriefingState("error");
@@ -153,6 +193,15 @@ export function IssuedCandidatePanel() {
     welcomeSpeechRef.current = utterance;
     setBriefingState("playing");
     window.speechSynthesis.speak(utterance);
+    const estimatedDurationMs = Math.max(25_000, Math.ceil(welcomeBriefing.split(/\s+/).length / 2.1) * 1000);
+    welcomeSpeechWatchdogRef.current = window.setTimeout(() => {
+      if (runId !== welcomeSpeechRunRef.current || welcomeSpeechRef.current !== utterance) return;
+      window.speechSynthesis.cancel();
+      welcomeSpeechRef.current = null;
+      welcomeSpeechWatchdogRef.current = null;
+      setBriefingState("error");
+      setBriefingError("The audio service did not finish the briefing. Select Play audio briefing to try again.");
+    }, estimatedDurationMs + 12_000);
   };
 
   const login = async () => {
@@ -231,22 +280,37 @@ export function IssuedCandidatePanel() {
     if (document.fullscreenElement) void document.exitFullscreen();
   }, [stopGazeProctor]);
 
+  const buildSubmittedData = useCallback((): Record<string, unknown> => {
+    if (!paper) return {};
+    if (paper.assessment_type === "spreadsheet") {
+      return excelSubmission || { final_sheet_json: {}, formulas_json: {}, calculated_values_json: {}, activity_log: [] };
+    }
+    if (paper.assessment_type === "coding") return { code: taskResponse, attachment_url: taskFileLink };
+    if (paper.assessment_type === "tax_simulator" || paper.assessment_type === "accounting") {
+      return {
+        entered_form_values: taxValues,
+        identified_red_flags: identifiedFlags.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean),
+        notes: taskResponse,
+        attachment_url: taskFileLink,
+      };
+    }
+    return { response_text: taskResponse, attachment_url: taskFileLink };
+  }, [excelSubmission, identifiedFlags, paper, taskFileLink, taskResponse, taxValues]);
+
   const submit = async (endReason: "fullscreen" | "policy" | "manual" | null = null) => {
     if (!paper || submittingRef.current) return;
     submittingRef.current = true;
-    const submittedData = paper.assessment_type === "spreadsheet"
-      ? (excelSubmission || { final_sheet_json: {}, formulas_json: {}, calculated_values_json: {}, activity_log: [] })
-      : paper.assessment_type === "coding"
-        ? { code: taskResponse, attachment_url: taskFileLink }
-        : paper.assessment_type === "tax_simulator" || paper.assessment_type === "accounting"
-          ? { entered_form_values: taxValues, identified_red_flags: identifiedFlags.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean), notes: taskResponse, attachment_url: taskFileLink }
-          : { response_text: taskResponse, attachment_url: taskFileLink };
+    const submittedData = buildSubmittedData();
     try {
       const response = await issuedApi<{ status: string; message: string }>("POST", "/exams/issued/submit", {
+        submission_id: submissionIdRef.current,
         answers: Object.fromEntries(Object.entries(answers).map(([qid, selected]) => [qid, selected])),
         submitted_data: submittedData,
         proctoring_events: proctorEvents,
-        time_taken_seconds: 0,
+        time_taken_seconds: Math.max(
+          0,
+          Number(paper.duration_minutes || 0) * 60 - Number(timerStateRef.current?.remainingAssessmentSec ?? Number(paper.duration_minutes || 0) * 60),
+        ),
       });
       finishCandidateSession(
         endReason ? "Assessment ended" : "Assessment submitted",
@@ -317,12 +381,13 @@ export function IssuedCandidatePanel() {
     },
   });
 
-  const { timerDisplay } = useAssessmentTimer({
+  const { timerState, timerDisplay } = useAssessmentTimer({
     timingMode: paper?.timing_mode || "assessment",
     durationMinutes: Number(paper?.duration_minutes || 30),
     timePerQuestionSeconds: Number(paper?.time_per_question_seconds || 30),
     questionIndex: index,
     enabled: Boolean(paper && consentAccepted && !policyWarning && !escapeWarningVisible),
+    initialState: restoredTimerState,
     onAssessmentTimeUp: () => { void submit(); },
     onQuestionTimeUp: () => {
       if (!paper) return;
@@ -330,6 +395,37 @@ export function IssuedCandidatePanel() {
       else void submit();
     },
   });
+  timerStateRef.current = timerState;
+
+  useEffect(() => {
+    if (!paper || !consentAccepted || submittingRef.current) return;
+    const intervalId = window.setInterval(() => setAutosaveTick((value) => value + 1), 15_000);
+    return () => window.clearInterval(intervalId);
+  }, [consentAccepted, paper]);
+
+  useEffect(() => {
+    if (!paper || !consentAccepted || submittingRef.current) return;
+    setSaveState("saving");
+    const revision = autosaveRevisionRef.current + 1;
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const response = await api.post<{ revision: number }>("/exams/issued/autosave", {
+          submission_id: submissionIdRef.current,
+          revision,
+          answers: Object.fromEntries(Object.entries(answers).map(([qid, selected]) => [qid, selected])),
+          submitted_data: buildSubmittedData(),
+          current_question_index: index,
+          time_taken_seconds: Math.max(0, Number(paper.duration_minutes || 0) * 60 - Number(timerStateRef.current?.remainingAssessmentSec ?? Number(paper.duration_minutes || 0) * 60)),
+          timer_state: timerStateRef.current || {},
+        }, { headers: { Authorization: `Bearer ${token}` } });
+        autosaveRevisionRef.current = Math.max(autosaveRevisionRef.current, Number(response.data.revision || revision));
+        setSaveState("saved");
+      } catch {
+        setSaveState("offline");
+      }
+    }, 1500);
+    return () => window.clearTimeout(timeoutId);
+  }, [answers, autosaveTick, buildSubmittedData, consentAccepted, index, paper, token]);
 
   if (completion) {
     return (
@@ -444,7 +540,14 @@ export function IssuedCandidatePanel() {
                 <span>I have read and agree to this assessment data and integrity notice.</span>
               </label>
               {isAcceptingConsent && <div className="candidate-login-progress compact" role="status"><span className="candidate-loading-spinner" aria-hidden="true" /><span><strong>Preparing fullscreen assessment</strong><small>Starting integrity checks and calibrating the camera...</small></span></div>}
-              {gazeError && <small className="candidate-login-status" role="alert">{gazeError}</small>}
+              {gazeError && (
+                <div className="candidate-camera-retry" role="alert">
+                  <small className="candidate-login-status">{gazeError}</small>
+                  <button type="button" className="secondary-btn" disabled={isAcceptingConsent} onClick={() => { void requestFullscreen(); void acceptConsent(); }}>
+                    Retry camera check
+                  </button>
+                </div>
+              )}
               <small>Need an accommodation or have a privacy question? Contact the organization that issued this assessment.</small>
             </section>
             )
@@ -486,6 +589,9 @@ export function IssuedCandidatePanel() {
               <h3>{paper.assessment_title}</h3>
             </div>
             <div className="assessment-runtime-meta">
+              <span className={`candidate-save-state ${saveState}`} aria-live="polite">
+                {saveState === "saving" ? "Saving..." : saveState === "offline" ? "Save pending" : saveState === "saved" ? "Saved" : "Ready"}
+              </span>
               <span className={`candidate-proctor-state ${gazeStatus}`}><i aria-hidden="true" />Integrity monitoring {gazeStatus === "active" ? "active" : gazeStatus}</span>
               {gazeStream && <video className="candidate-proctor-preview" aria-label="Camera proctor preview" autoPlay muted playsInline ref={(node) => { if (node && node.srcObject !== gazeStream) node.srcObject = gazeStream; }} />}
               <span>{paper.assessment_type === "mcq" ? `Question ${index + 1}/${paper.questions.length}` : "Task workspace"}</span>
@@ -493,34 +599,37 @@ export function IssuedCandidatePanel() {
             </div>
           </div>
           {paper.assessment_type === "spreadsheet" && paper.task && (
-            <ExcelSimulator
-              title={paper.task.title || paper.assessment_title}
-              description={paper.task.description}
-              instructions={paper.task.instructions || paper.instructions || ""}
-              initialSheet={(paper.task.metadata?.initial_spreadsheet_data || {}) as Record<string, string | number | boolean | null>}
-              lockedCells={(paper.task.metadata?.locked_cells || []) as string[]}
-              candidateMode
-              showTopbarActions={false}
-              onAutosave={(submission) => setExcelSubmission(submission)}
-              onSubmit={async (submission) => {
-                if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
-                if (submittingRef.current) return;
-                submittingRef.current = true;
-                setExcelSubmission(submission);
-                try {
-                  await issuedApi<{ status: string }>("POST", "/exams/issued/submit", {
-                    answers: {},
-                    submitted_data: submission,
-                    proctoring_events: [...proctorEvents, ...submission.activity_log],
-                    time_taken_seconds: 0,
-                  });
-                  finishCandidateSession("Assessment submitted", "Thank you. Your assessment was submitted successfully for recruiter review.");
-                } catch {
-                  submittingRef.current = false;
-                  setStatus("Submission failed. Check your connection and try again.");
-                }
-              }}
-            />
+            <Suspense fallback={<div className="tool-loading-state" role="status">Loading spreadsheet...</div>}>
+              <ExcelSimulator
+                title={paper.task.title || paper.assessment_title}
+                description={paper.task.description}
+                instructions={paper.task.instructions || paper.instructions || ""}
+                initialSheet={(paper.task.metadata?.initial_spreadsheet_data || {}) as Record<string, string | number | boolean | null>}
+                lockedCells={(paper.task.metadata?.locked_cells || []) as string[]}
+                candidateMode
+                showTopbarActions={false}
+                onAutosave={(submission) => setExcelSubmission(submission)}
+                onSubmit={async (submission) => {
+                  if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
+                  if (submittingRef.current) return;
+                  submittingRef.current = true;
+                  setExcelSubmission(submission);
+                  try {
+                    await issuedApi<{ status: string }>("POST", "/exams/issued/submit", {
+                      submission_id: submissionIdRef.current,
+                      answers: {},
+                      submitted_data: submission,
+                      proctoring_events: [...proctorEvents, ...submission.activity_log],
+                      time_taken_seconds: 0,
+                    });
+                    finishCandidateSession("Assessment submitted", "Thank you. Your assessment was submitted successfully for recruiter review.");
+                  } catch {
+                    submittingRef.current = false;
+                    setStatus("Submission failed. Check your connection and try again.");
+                  }
+                }}
+              />
+            </Suspense>
           )}
           {isMcqAssessment && current && (
             <main className="mcq-runtime">

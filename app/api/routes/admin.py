@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
 import csv
 import io
+import re
 import secrets
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, EmailStr, Field
@@ -20,10 +22,16 @@ from app.models.entities import (
     ComplaintItem,
     Course,
     CourseComment,
+    DataSubjectRequest,
     Enrollment,
     Exam,
     ExamStatus,
+    HiringCandidate,
+    HiringApplication,
     ModerationStatus,
+    Organization,
+    OrganizationAuditEvent,
+    OrganizationMembership,
     ProviderDocument,
     ProviderBillingAccount,
     ProviderProfile,
@@ -77,6 +85,42 @@ class BillingAccountUpdate(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
+class GovernanceSettingsUpdate(BaseModel):
+    candidate_retention_days: int = Field(default=730, ge=30, le=3650)
+    assessment_retention_days: int = Field(default=365, ge=30, le=3650)
+    proctor_retention_days: int = Field(default=30, ge=1, le=365)
+    audit_retention_days: int = Field(default=730, ge=365, le=3650)
+    legal_hold_enabled: bool = False
+    legal_hold_reason: str = Field(default="", max_length=2000)
+
+
+class DataSubjectRequestCreate(BaseModel):
+    provider_id: int = Field(gt=0)
+    request_type: Literal["access", "export", "delete"]
+    candidate_email: EmailStr
+    requestor_name: str = Field(default="", max_length=200)
+    notes: str = Field(default="", max_length=5000)
+
+
+class DataSubjectRequestAction(BaseModel):
+    action: Literal["verify_identity", "start_review", "approve", "reject", "hold", "resume"]
+    reason: str = Field(min_length=10, max_length=5000)
+
+
+class DataSubjectRequestExecute(BaseModel):
+    confirmation: str = Field(min_length=6, max_length=80)
+
+
+_DEFAULT_GOVERNANCE_SETTINGS = {
+    "candidate_retention_days": 730,
+    "assessment_retention_days": 365,
+    "proctor_retention_days": 30,
+    "audit_retention_days": 730,
+    "legal_hold_enabled": False,
+    "legal_hold_reason": "",
+}
+
+
 def _audit(db: Session, actor_user_id: int | None, action: str, target_type: str, target_id: int | None, details: dict):
     db.add(
         AuditLog(
@@ -87,6 +131,87 @@ def _audit(db: Session, actor_user_id: int | None, action: str, target_type: str
             details_json=details,
         ),
     )
+
+
+def _organization_slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")[:100] or "organization"
+
+
+def _organization_for_owner(db: Session, owner: User) -> Organization | None:
+    return db.scalar(
+        select(Organization)
+        .join(OrganizationMembership, OrganizationMembership.organization_id == Organization.id)
+        .where(
+            OrganizationMembership.user_id == owner.id,
+            OrganizationMembership.status == "active",
+            Organization.status == "active",
+        )
+        .order_by(Organization.id.asc()),
+    )
+
+
+def _ensure_company_organization(
+    db: Session,
+    *,
+    provider: ProviderProfile,
+    owner: User,
+    actor_user_id: int | None,
+) -> Organization:
+    existing = _organization_for_owner(db, owner)
+    if existing:
+        return existing
+    base_slug = _organization_slug(provider.display_name or owner.full_name or owner.email.split("@", 1)[0])
+    slug = base_slug
+    suffix = 2
+    while db.scalar(select(Organization.id).where(Organization.slug == slug)):
+        slug = f"{base_slug}-{suffix}"
+        suffix += 1
+    organization = Organization(
+        name=(provider.display_name or owner.full_name).strip(),
+        slug=slug,
+        created_by_user_id=actor_user_id or owner.id,
+        settings_json={"governance": dict(_DEFAULT_GOVERNANCE_SETTINGS)},
+    )
+    db.add(organization)
+    db.flush()
+    db.add(OrganizationMembership(organization_id=organization.id, user_id=owner.id, role="owner"))
+    db.add(
+        OrganizationAuditEvent(
+            organization_id=organization.id,
+            actor_user_id=actor_user_id,
+            action="organization_provisioned",
+            target_type="organization",
+            target_id=organization.id,
+            details_json={"provider_id": provider.id, "owner_user_id": owner.id},
+        ),
+    )
+    return organization
+
+
+def _governance_payload(organization: Organization) -> dict:
+    settings = dict(organization.settings_json or {})
+    governance = {**_DEFAULT_GOVERNANCE_SETTINGS, **dict(settings.get("governance") or {})}
+    return {"organization_id": organization.id, "organization_name": organization.name, **governance}
+
+
+def _data_subject_request_payload(item: DataSubjectRequest, organization_name: str) -> dict:
+    return {
+        "id": item.id,
+        "organization_id": item.organization_id,
+        "organization_name": organization_name,
+        "provider_id": item.provider_id,
+        "request_reference": item.request_reference,
+        "request_type": item.request_type,
+        "candidate_email": item.candidate_email,
+        "requestor_name": item.requestor_name,
+        "status": item.status,
+        "identity_verified_at": item.identity_verified_at,
+        "received_at": item.received_at,
+        "due_at": item.due_at,
+        "completed_at": item.completed_at,
+        "notes": item.notes,
+        "resolution": item.resolution_json or {},
+    }
 
 
 def _safe_send_email(to_email: str, subject: str, body: str) -> dict:
@@ -184,6 +309,12 @@ def _create_company_account(
         current_period_start=datetime.now(timezone.utc),
         current_period_end=datetime.now(timezone.utc) + timedelta(days=14),
     ))
+    organization = _ensure_company_organization(
+        db,
+        provider=provider,
+        owner=user,
+        actor_user_id=current_user.id,
+    )
     _audit(
         db,
         current_user.id,
@@ -196,6 +327,7 @@ def _create_company_account(
     return {
         "user_id": user.id,
         "provider_id": provider.id,
+        "organization_id": organization.id,
         "business_name": company_name,
         "email": email,
         "supabase": auth_result,
@@ -269,8 +401,10 @@ def admin_workspace_companies(
             or 0
         )
         billing = db.scalar(select(ProviderBillingAccount).where(ProviderBillingAccount.provider_id == provider.id))
+        organization = _organization_for_owner(db, owner)
         items.append({
             "provider_id": provider.id,
+            "organization_id": organization.id if organization else None,
             "company_name": provider.display_name,
             "owner_user_id": owner.id,
             "owner_name": owner.full_name,
@@ -284,6 +418,371 @@ def admin_workspace_companies(
             "billing": _billing_payload(billing, provider),
         })
     return {"items": items, "total": len(items)}
+
+
+@router.get("/workspace/companies/{provider_id}/governance")
+def admin_workspace_governance(
+    provider_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    del current_user
+    provider = db.get(ProviderProfile, provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Company not found")
+    owner = db.get(User, provider.user_id)
+    if not owner:
+        raise HTTPException(status_code=404, detail="Company owner not found")
+    organization = _organization_for_owner(db, owner)
+    if not organization:
+        raise HTTPException(status_code=409, detail="Company organization is not provisioned. Run the organization backfill command.")
+    payload = _governance_payload(organization)
+    now = datetime.now(timezone.utc)
+    candidate_cutoff = now - timedelta(days=payload["candidate_retention_days"])
+    assessment_cutoff = now - timedelta(days=payload["assessment_retention_days"])
+    payload["retention_preview"] = {
+        "hiring_candidates_eligible": int(
+            db.scalar(
+                select(func.count(HiringCandidate.id)).where(
+                    HiringCandidate.organization_id == organization.id,
+                    HiringCandidate.created_at < candidate_cutoff,
+                ),
+            )
+            or 0
+        ),
+        "assessment_issues_eligible": int(
+            db.scalar(
+                select(func.count(AssessmentIssue.id)).where(
+                    AssessmentIssue.issuer_user_id == owner.id,
+                    AssessmentIssue.issued_at < assessment_cutoff,
+                ),
+            )
+            or 0
+        ),
+        "candidate_cutoff": candidate_cutoff,
+        "assessment_cutoff": assessment_cutoff,
+        "execution_blocked": bool(payload["legal_hold_enabled"]),
+    }
+    return payload
+
+
+@router.put("/workspace/companies/{provider_id}/governance")
+def admin_workspace_update_governance(
+    provider_id: int,
+    payload: GovernanceSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    provider = db.get(ProviderProfile, provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Company not found")
+    owner = db.get(User, provider.user_id)
+    if not owner:
+        raise HTTPException(status_code=404, detail="Company owner not found")
+    organization = _organization_for_owner(db, owner)
+    if not organization:
+        raise HTTPException(status_code=409, detail="Company organization is not provisioned. Run the organization backfill command.")
+    governance = payload.model_dump()
+    governance["legal_hold_reason"] = governance["legal_hold_reason"].strip()
+    if governance["legal_hold_enabled"] and len(governance["legal_hold_reason"]) < 10:
+        raise HTTPException(status_code=422, detail="A legal hold requires a reason of at least 10 characters")
+    settings = dict(organization.settings_json or {})
+    settings["governance"] = governance
+    organization.settings_json = settings
+    db.add(
+        OrganizationAuditEvent(
+            organization_id=organization.id,
+            actor_user_id=current_user.id,
+            action="governance_settings_updated",
+            target_type="organization",
+            target_id=organization.id,
+            details_json={
+                "retention_days": {key: value for key, value in governance.items() if key.endswith("_days")},
+                "legal_hold_enabled": governance["legal_hold_enabled"],
+                "legal_hold_reason": governance["legal_hold_reason"],
+            },
+        ),
+    )
+    _audit(
+        db,
+        current_user.id,
+        "governance_settings_updated",
+        "organization",
+        organization.id,
+        {"provider_id": provider.id, "legal_hold_enabled": governance["legal_hold_enabled"]},
+    )
+    db.commit()
+    db.refresh(organization)
+    return _governance_payload(organization)
+
+
+@router.get("/workspace/audit-events")
+def admin_workspace_audit_events(
+    provider_id: int | None = Query(default=None, gt=0),
+    action: str = Query(default="", max_length=120),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    del current_user
+    query = select(OrganizationAuditEvent, Organization).join(Organization, Organization.id == OrganizationAuditEvent.organization_id)
+    if provider_id:
+        provider = db.get(ProviderProfile, provider_id)
+        owner = db.get(User, provider.user_id) if provider else None
+        organization = _organization_for_owner(db, owner) if owner else None
+        if not organization:
+            raise HTTPException(status_code=404, detail="Company organization not found")
+        query = query.where(OrganizationAuditEvent.organization_id == organization.id)
+    if action.strip():
+        query = query.where(func.lower(OrganizationAuditEvent.action).like(f"%{action.strip().lower()}%"))
+    rows = db.execute(query.order_by(OrganizationAuditEvent.created_at.desc()).limit(limit)).all()
+    return {
+        "items": [
+            {
+                "id": event.id,
+                "organization_id": organization.id,
+                "organization_name": organization.name,
+                "actor_user_id": event.actor_user_id,
+                "action": event.action,
+                "target_type": event.target_type,
+                "target_id": event.target_id,
+                "details": event.details_json or {},
+                "created_at": event.created_at,
+            }
+            for event, organization in rows
+        ],
+    }
+
+
+@router.get("/workspace/data-requests")
+def admin_workspace_data_requests(
+    provider_id: int | None = Query(default=None, gt=0),
+    request_status: str = Query(default="", max_length=40),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    del current_user
+    query = select(DataSubjectRequest, Organization).join(Organization, Organization.id == DataSubjectRequest.organization_id)
+    if provider_id:
+        query = query.where(DataSubjectRequest.provider_id == provider_id)
+    if request_status.strip():
+        query = query.where(DataSubjectRequest.status == request_status.strip())
+    rows = db.execute(query.order_by(DataSubjectRequest.due_at.asc(), DataSubjectRequest.id.desc())).all()
+    return {"items": [_data_subject_request_payload(item, organization.name) for item, organization in rows]}
+
+
+@router.post("/workspace/data-requests", status_code=201)
+def admin_workspace_create_data_request(
+    payload: DataSubjectRequestCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    provider = db.get(ProviderProfile, payload.provider_id)
+    owner = db.get(User, provider.user_id) if provider else None
+    organization = _organization_for_owner(db, owner) if owner else None
+    if not provider or not owner or not organization:
+        raise HTTPException(status_code=404, detail="Company organization not found")
+    now = datetime.now(timezone.utc)
+    item = DataSubjectRequest(
+        organization_id=organization.id,
+        provider_id=provider.id,
+        request_reference=f"DSR-{now:%Y%m%d}-{secrets.token_hex(4).upper()}",
+        request_type=payload.request_type,
+        candidate_email=str(payload.candidate_email).strip().lower(),
+        requestor_name=payload.requestor_name.strip(),
+        received_at=now,
+        due_at=now + timedelta(days=30),
+        notes=payload.notes.strip(),
+        created_by_user_id=current_user.id,
+    )
+    db.add(item)
+    db.flush()
+    db.add(
+        OrganizationAuditEvent(
+            organization_id=organization.id,
+            actor_user_id=current_user.id,
+            action="data_subject_request_received",
+            target_type="data_subject_request",
+            target_id=item.id,
+            details_json={"request_reference": item.request_reference, "request_type": item.request_type},
+        ),
+    )
+    db.commit()
+    db.refresh(item)
+    return _data_subject_request_payload(item, organization.name)
+
+
+@router.patch("/workspace/data-requests/{request_id}")
+def admin_workspace_update_data_request(
+    request_id: int,
+    payload: DataSubjectRequestAction,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    item = db.get(DataSubjectRequest, request_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Data request not found")
+    organization = db.get(Organization, item.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    if item.status in {"completed", "rejected"}:
+        raise HTTPException(status_code=409, detail="Completed or rejected requests cannot be changed")
+    now = datetime.now(timezone.utc)
+    if payload.action == "verify_identity":
+        item.identity_verified_at = now
+        item.status = "identity_verified"
+    elif payload.action == "start_review":
+        if not item.identity_verified_at:
+            raise HTTPException(status_code=409, detail="Identity must be verified before review")
+        item.status = "in_review"
+    elif payload.action == "approve":
+        if not item.identity_verified_at:
+            raise HTTPException(status_code=409, detail="Identity must be verified before approval")
+        item.status = "approved"
+    elif payload.action == "reject":
+        item.status = "rejected"
+        item.completed_at = now
+    elif payload.action == "hold":
+        item.status = "on_hold"
+    elif payload.action == "resume":
+        if item.status != "on_hold":
+            raise HTTPException(status_code=409, detail="Only an on-hold request can be resumed")
+        item.status = "in_review" if item.identity_verified_at else "received"
+    item.notes = "\n".join(part for part in [item.notes.strip(), f"{now.isoformat()} | {payload.action}: {payload.reason.strip()}"] if part)
+    item.assigned_to_user_id = current_user.id
+    db.add(
+        OrganizationAuditEvent(
+            organization_id=item.organization_id,
+            actor_user_id=current_user.id,
+            action=f"data_subject_request_{payload.action}",
+            target_type="data_subject_request",
+            target_id=item.id,
+            details_json={"request_reference": item.request_reference, "status": item.status, "reason": payload.reason.strip()},
+        ),
+    )
+    db.commit()
+    db.refresh(item)
+    return _data_subject_request_payload(item, organization.name)
+
+
+@router.post("/workspace/data-requests/{request_id}/execute")
+def admin_workspace_execute_data_request(
+    request_id: int,
+    payload: DataSubjectRequestExecute,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    item = db.get(DataSubjectRequest, request_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Data request not found")
+    if item.status != "approved":
+        raise HTTPException(status_code=409, detail="The request must be identity-verified and approved before execution")
+    if payload.confirmation.strip() != item.request_reference:
+        raise HTTPException(status_code=422, detail="Confirmation must exactly match the request reference")
+    organization = db.get(Organization, item.organization_id)
+    provider = db.get(ProviderProfile, item.provider_id) if item.provider_id else None
+    owner = db.get(User, provider.user_id) if provider else None
+    if not organization or not owner:
+        raise HTTPException(status_code=404, detail="Request organization is unavailable")
+    governance = _governance_payload(organization)
+    if governance["legal_hold_enabled"]:
+        raise HTTPException(status_code=409, detail="Execution is blocked by the organization-wide legal hold")
+    email = item.candidate_email.strip().lower()
+    candidates = list(
+        db.scalars(
+            select(HiringCandidate).where(
+                HiringCandidate.organization_id == organization.id,
+                func.lower(HiringCandidate.email) == email,
+            ),
+        ).all(),
+    )
+    candidate_ids = [candidate.id for candidate in candidates]
+    applications = list(
+        db.scalars(select(HiringApplication).where(HiringApplication.candidate_id.in_(candidate_ids))).all(),
+    ) if candidate_ids else []
+    issues = list(
+        db.scalars(
+            select(AssessmentIssue).where(
+                AssessmentIssue.issuer_user_id == owner.id,
+                func.lower(AssessmentIssue.candidate_email) == email,
+            ),
+        ).all(),
+    )
+    if item.request_type in {"access", "export"}:
+        package = {
+            "request_reference": item.request_reference,
+            "candidate_profile": [
+                {
+                    "id": candidate.id,
+                    "name": f"{candidate.first_name} {candidate.last_name}".strip(),
+                    "email": candidate.email,
+                    "phone_number": candidate.phone_number,
+                    "headline": candidate.headline,
+                    "location": candidate.location,
+                    "skills": candidate.skills_json or [],
+                    "experience_years": candidate.experience_years,
+                    "consent_status": candidate.consent_status,
+                    "created_at": candidate.created_at,
+                }
+                for candidate in candidates
+            ],
+            "applications": [{"id": app.id, "job_id": app.job_id, "stage": app.stage, "status": app.status, "applied_at": app.applied_at} for app in applications],
+            "assessments": [{"id": issue.id, "exam_id": issue.exam_id, "status": issue.status, "issued_at": issue.issued_at, "completed_at": issue.completed_at} for issue in issues],
+        }
+        resolution = {"operation": "export", "candidate_records": len(candidates), "applications": len(applications), "assessments": len(issues)}
+    else:
+        if any(app.status == "active" for app in applications):
+            raise HTTPException(status_code=409, detail="Close or withdraw active applications before deletion")
+        if any(issue.status in {"issued", "started"} for issue in issues):
+            raise HTTPException(status_code=409, detail="Revoke active assessment invitations before deletion")
+        cleared_submissions = 0
+        for candidate in candidates:
+            candidate.first_name = "Deleted"
+            candidate.last_name = "Candidate"
+            candidate.email = f"deleted+candidate-{candidate.id}@redacted.invalid"
+            candidate.phone_number = None
+            candidate.headline = ""
+            candidate.location = ""
+            candidate.resume_text = ""
+            candidate.resume_url = None
+            candidate.skills_json = []
+            candidate.experience_years = None
+            candidate.consent_status = "deleted"
+            candidate.consented_at = None
+        for issue in issues:
+            issue.candidate_name = "Deleted candidate"
+            issue.candidate_email = f"deleted+assessment-{issue.id}@redacted.invalid"
+            issue.candidate_password_hash = "data-request-deleted"
+            issue.active_session_token = None
+            issue.active_session_started_at = None
+            issue.access_expires_at = datetime.now(timezone.utc)
+            issue.result_json = {"data_subject_request": item.request_reference}
+            submissions = list(db.scalars(select(AssessmentSubmission).where(AssessmentSubmission.issue_id == issue.id)).all())
+            for submission in submissions:
+                submission.submitted_data_json = {}
+                submission.proctoring_events_json = []
+                submission.status = "data_subject_deleted"
+                cleared_submissions += 1
+        resolution = {"operation": "delete", "candidate_records": len(candidates), "assessments": len(issues), "submissions_cleared": cleared_submissions}
+        package = None
+        item.candidate_email = f"deleted+request-{item.id}@redacted.invalid"
+        item.requestor_name = ""
+        item.notes = ""
+    item.status = "completed"
+    item.completed_at = datetime.now(timezone.utc)
+    item.resolution_json = resolution
+    db.add(
+        OrganizationAuditEvent(
+            organization_id=organization.id,
+            actor_user_id=current_user.id,
+            action="data_subject_request_completed",
+            target_type="data_subject_request",
+            target_id=item.id,
+            details_json={"request_reference": item.request_reference, **resolution},
+        ),
+    )
+    db.commit()
+    return {"request": _data_subject_request_payload(item, organization.name), "export": package}
 
 
 @router.post("/workspace/companies", status_code=201)
@@ -1312,3 +1811,4 @@ def audit_logs(
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = list(db.scalars(query.offset((page - 1) * page_size).limit(page_size)).all())
     return {"items": rows, "page": page, "page_size": page_size, "total": total}
+    DataSubjectRequest,

@@ -1,19 +1,20 @@
-.hiring-shell { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); background: #f5f7fa; color: #152033; }
-.hiring-sidebar { min-height: 100vh; background: #102a43; color: #dce7f3; padding: 24px 14px; display: flex; flex-direction: column; gap: 26px; position: sticky; top: 0; height: 100vh; box-sizing: border-box; }
-.hiring-brand { display: flex; align-items: center; gap: 10px; padding: 0 10px; font-weight: 750; font-size: 19px; color: #fff; }
+.hiring-shell { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); background: #f6f8f7; color: #17211d; }
+.hiring-sidebar { min-height: 100vh; background: #fff; color: #28483d; padding: 24px 14px; display: flex; flex-direction: column; gap: 26px; position: sticky; top: 0; height: 100vh; box-sizing: border-box; border-right: 1px solid #dbe7e1; }
+.hiring-brand { display: flex; align-items: center; gap: 10px; padding: 0 10px; font-weight: 750; font-size: 19px; color: #173b31; }
 .hiring-brand-logo { width: 32px; height: 32px; object-fit: contain; }
-.hiring-org-switch { margin: 0 6px; padding: 14px; border: 1px solid #35536e; background: #163853; display: grid; gap: 4px; border-radius: 6px; }
-.hiring-org-switch small, .hiring-org-switch span { color: #aac0d2; font-size: 12px; text-transform: capitalize; }
-.hiring-org-switch strong { color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hiring-org-switch { margin: 0 6px; padding: 14px; border: 1px solid #cfe1d9; background: #f4faf7; display: grid; gap: 4px; border-radius: 6px; }
+.hiring-org-switch small, .hiring-org-switch span { color: #61766d; font-size: 12px; text-transform: capitalize; }
+.hiring-org-switch strong { color: #173b31; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hiring-sidebar nav { display: grid; gap: 3px; }
-.hiring-sidebar nav button { border: 0; border-radius: 5px; background: transparent; color: #c2d3e2; text-align: left; padding: 11px 12px; font-size: 14px; cursor: pointer; }
-.hiring-sidebar nav button:hover, .hiring-sidebar nav button.active { background: #1e5572; color: #fff; }
-.hiring-sidebar-foot { margin-top: auto; border-top: 1px solid #35536e; padding: 16px 10px 0; font-size: 12px; color: #dce7f3; line-height: 1.5; }
-.hiring-sidebar-foot span { color: #9fbbce; }
+.hiring-sidebar nav button { border: 0; border-radius: 5px; background: transparent; color: #48665b; text-align: left; padding: 11px 12px; font-size: 14px; cursor: pointer; }
+.hiring-sidebar nav button:hover, .hiring-sidebar nav button.active { background: #e8f4ee; color: #12624e; }
+.hiring-sidebar nav button.active { box-shadow: inset 3px 0 #168062; }
+.hiring-sidebar-foot { margin-top: auto; border-top: 1px solid #dbe7e1; padding: 16px 10px 0; font-size: 12px; color: #31584a; line-height: 1.5; }
+.hiring-sidebar-foot span { color: #72857d; }
 .hiring-main { padding: 34px clamp(20px, 4vw, 58px) 48px; min-width: 0; }
 .hiring-topbar { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; padding-bottom: 30px; }
 .hiring-topbar p { margin: 0 0 7px; color: #567083; font-size: 14px; }
-.hiring-topbar h1 { margin: 0; font-size: 29px; letter-spacing: 0; color: #102a43; }
+.hiring-topbar h1 { margin: 0; font-size: 29px; letter-spacing: 0; color: #173b31; }
 .hiring-topbar-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .hiring-button, .hiring-panel button, .hiring-table button { min-height: 34px; border-radius: 5px; padding: 7px 12px; font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
 .hiring-button.primary { border: 1px solid #176b57; background: #176b57; color: #fff; }
@@ -56,6 +57,8 @@
 .hiring-table-head.jobs, .hiring-table-row.jobs { grid-template-columns: 1.25fr 1fr 1.15fr .7fr .65fr .65fr; }
 .hiring-table-head.candidates, .hiring-table-row.candidates { grid-template-columns: 1.25fr 1.2fr .55fr .65fr .55fr .65fr; }
 .hiring-table-head.interviews, .hiring-table-row.interviews { grid-template-columns: 1fr 1fr 1fr 1fr .6fr; }
+.hiring-row-actions { display: flex !important; flex-wrap: wrap; align-items: center; gap: 8px !important; }
+.hiring-row-actions button.danger { color: #a33a32; }
 .hiring-status { display: inline-flex; width: max-content; align-items: center; min-height: 22px; padding: 0 8px; border-radius: 12px; font-size: 11px; font-weight: 700; color: #446274; background: #eef3f6; white-space: nowrap; }
 .hiring-status.open, .hiring-status.active, .hiring-status.granted, .hiring-status.passed, .hiring-status.connected, .hiring-status.scheduled { color: #14634f; background: #e7f5ef; }
 .hiring-status.draft, .hiring-status.pending, .hiring-status.ready_to_connect, .hiring-status.needs_review { color: #77530b; background: #fff6dd; }
@@ -64,18 +67,44 @@
 .hiring-skills span { padding: 3px 6px; border: 1px solid #d4e0e7; background: #f6fafb; border-radius: 4px; font-size: 11px; color: #36556a; }
 .hiring-section-empty { min-height: 220px; display: grid; place-content: center; justify-items: center; gap: 13px; color: #6e8190; text-align: center; }
 .hiring-section-empty p { max-width: 440px; margin: 0; line-height: 1.5; }
-.hiring-pipeline-board { display: grid; grid-template-columns: repeat(6, minmax(205px, 1fr)); gap: 12px; overflow-x: auto; align-items: start; padding-bottom: 10px; }
-.hiring-pipeline-column { background: #eaf0f4; border: 1px solid #d8e2e9; border-radius: 6px; min-height: 510px; }
-.hiring-pipeline-column > header { display: flex; justify-content: space-between; padding: 13px; color: #456477; font-weight: 700; font-size: 12px; text-transform: capitalize; }
-.hiring-pipeline-column > header strong { background: #fff; color: #416074; border-radius: 12px; padding: 1px 7px; }
-.hiring-pipeline-column > div { display: grid; gap: 8px; padding: 0 8px 8px; }
-.hiring-application-card { border: 1px solid #d6e0e7; border-radius: 6px; background: #fff; padding: 12px; display: grid; gap: 5px; cursor: pointer; box-shadow: 0 1px 1px rgba(16, 42, 67, .04); }
-.hiring-application-card:hover { border-color: #91aeae; }
-.hiring-application-card > strong { color: #18324c; font-size: 13px; }
-.hiring-application-card > span { color: #728494; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.hiring-application-card > div { display: flex; align-items: center; justify-content: space-between; gap: 7px; border-top: 1px solid #edf1f4; padding-top: 8px; }
-.hiring-application-card em { color: #176b57; font-size: 11px; font-style: normal; font-weight: 700; }
-.hiring-application-card button { border: 0; background: transparent; color: #156a57; padding: 0; cursor: pointer; font-size: 11px; font-weight: 700; }
+.hiring-pipeline { display: grid; gap: 16px; }
+.hiring-stage-nav { display: grid; grid-template-columns: repeat(6, minmax(118px, 1fr)); background: #fff; border: 1px solid #d8e2eb; overflow-x: auto; }
+.hiring-stage-nav button { min-height: 68px; padding: 12px 15px; border: 0; border-right: 1px solid #e4ece8; border-bottom: 3px solid transparent; background: #fff; color: #5d746b; display: flex; align-items: center; justify-content: space-between; gap: 10px; font: inherit; cursor: pointer; }
+.hiring-stage-nav button:last-child { border-right: 0; }
+.hiring-stage-nav button:hover { background: #f4f9f6; color: #1c5b49; }
+.hiring-stage-nav button.active { border-bottom-color: #168062; background: #edf7f2; color: #124d3e; }
+.hiring-stage-nav span { font-size: 12px; font-weight: 700; }
+.hiring-stage-nav strong { font-size: 19px; }
+.hiring-pipeline-list { min-height: 480px; background: #fff; border: 1px solid #d8e2eb; overflow-x: auto; }
+.hiring-pipeline-list-head, .hiring-pipeline-row { min-width: 930px; display: grid; grid-template-columns: 1.35fr 1.2fr .6fr .7fr .7fr .55fr 1.2fr; gap: 16px; align-items: center; padding: 0 18px; }
+.hiring-pipeline-list-head { height: 42px; color: #6c8192; background: #f7faf8; border-bottom: 1px solid #dfe8e3; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.hiring-pipeline-row { min-height: 76px; border-bottom: 1px solid #e7eeea; color: #456055; cursor: pointer; }
+.hiring-pipeline-row:hover { background: #f7fbf9; }
+.hiring-pipeline-row > div:first-child { min-width: 0; display: grid; gap: 4px; }
+.hiring-pipeline-row strong { color: #173b31; }
+.hiring-pipeline-row small { color: #70837b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hiring-rank-score { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid #a9d0c2; background: #edf8f3; color: #12624e !important; border-radius: 50%; }
+.hiring-pipeline-action { display: flex; justify-content: flex-end; }
+.hiring-pipeline-action button { min-height: 32px; border: 1px solid #abc9be; border-radius: 4px; padding: 0 10px; background: #fff; color: #12624e; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.hiring-pipeline-action button:hover { background: #eaf6f0; }
+.hiring-pipeline-action button:disabled { opacity: .6; cursor: wait; }
+.hiring-shortlist { margin: 18px 0 24px; border: 1px solid #d9e5df; overflow-x: auto; }
+.hiring-shortlist-head { padding: 15px 17px; background: #f4f9f6; border-bottom: 1px solid #d9e5df; }
+.hiring-shortlist-head h3 { margin: 0 0 4px; font-size: 15px; color: #173b31; }
+.hiring-shortlist-head p { margin: 0; color: #687e75; font-size: 12px; }
+.hiring-shortlist-row { min-width: 760px; display: grid; grid-template-columns: 28px minmax(180px, 1.3fr) repeat(3, minmax(100px, .7fr)) 46px; gap: 14px; align-items: center; min-height: 66px; padding: 0 16px; border-bottom: 1px solid #e5ece8; }
+.hiring-shortlist-row:last-child { border-bottom: 0; }
+.hiring-shortlist-row > strong { width: 24px; height: 24px; display: grid; place-items: center; background: #e7f4ee; color: #12624e; border-radius: 50%; font-size: 12px; }
+.hiring-shortlist-row div { display: grid; gap: 3px; }
+.hiring-shortlist-row small, .hiring-shortlist-row span { color: #6c8078; font-size: 12px; }
+.hiring-shortlist-row span b { color: #294b3f; }
+.hiring-shortlist-row em { color: #12624e; font-size: 20px; font-style: normal; font-weight: 800; text-align: right; }
+.hiring-settings { max-width: 900px; }
+.hiring-settings-row { min-height: 78px; padding: 0 2px; border-bottom: 1px solid #e3ebe7; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.hiring-settings-row > div { display: grid; gap: 5px; }
+.hiring-settings-row strong { color: #173b31; }
+.hiring-settings-row span, .hiring-settings-row small { color: #687e75; text-transform: capitalize; }
+.hiring-settings-row.danger { margin-top: 32px; border-top: 1px solid #e3ebe7; }
 .hiring-integration-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-top: 18px; }
 .hiring-integration-row { border: 1px solid #dbe4eb; border-radius: 6px; min-height: 74px; padding: 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; }
 .hiring-integration-row div { display: grid; gap: 4px; min-width: 0; }
@@ -94,6 +123,22 @@
 .hiring-drawer select, .hiring-form select, .hiring-form input, .hiring-form textarea { width: 100%; border: 1px solid #c7d6df; border-radius: 5px; background: #fff; color: #182f44; padding: 9px 10px; font: inherit; font-size: 14px; box-sizing: border-box; }
 .hiring-drawer select:focus, .hiring-form select:focus, .hiring-form input:focus, .hiring-form textarea:focus { outline: 2px solid #a7d5c8; outline-offset: 1px; border-color: #4d9b87; }
 .hiring-score { color: #156a57; font-size: 36px; line-height: 1; }
+.hiring-drawer-loading { padding: 14px 26px; color: #60756c; border-bottom: 1px solid #e4ebe7; font-size: 13px; }
+.hiring-readiness > div:first-child, .hiring-scorecard-summary > div, .hiring-check-list > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.hiring-readiness.ready_for_human_decision { border-left: 3px solid #188163; background: #f4faf7; }
+.hiring-evidence-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid #dbe7e1; }
+.hiring-evidence-metrics span { display: grid; gap: 4px; padding: 9px; color: #687c73; font-size: 11px; }
+.hiring-evidence-metrics span + span { border-left: 1px solid #dbe7e1; }
+.hiring-evidence-metrics strong { color: #1d4035; font-size: 12px; }
+.hiring-scorecard-summary { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid #e5ece8; }
+.hiring-scorecard-summary:first-of-type { border-top: 0; }
+.hiring-check-list { display: grid; gap: 9px; }
+.hiring-drawer textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid #c7d6cf; border-radius: 5px; padding: 9px 10px; font: inherit; line-height: 1.4; }
+.hiring-activity-list { display: grid; }
+.hiring-activity-list > div { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 9px; padding: 8px 0; }
+.hiring-activity-list i { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: #188163; }
+.hiring-activity-list span { display: grid; gap: 3px; }
+.hiring-activity-list small { color: #71847b; line-height: 1.4; }
 .hiring-skill-detail { display: grid; gap: 4px; border-left: 3px solid #9ac9bd; padding-left: 9px; color: #4c687a; font-size: 13px; }
 .hiring-skill-detail span { color: #6a8191; font-size: 11px; font-weight: 700; text-transform: uppercase; }
 .hiring-modal-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(11, 30, 46, .48); display: grid; place-items: center; padding: 18px; }
@@ -111,6 +156,7 @@
 .hiring-form footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 4px; }
 .hiring-form-error { margin: 0; color: #9c3737; background: #fff0f0; border: 1px solid #f0c5c5; padding: 9px 10px; border-radius: 5px; font-size: 13px; }
 .hiring-form-hint { margin: 0; color: #687f8f; font-size: 12px; line-height: 1.45; }
+.hiring-form-context { display: grid; gap: 4px; padding: 12px 14px; border-left: 3px solid #188163; background: #f4faf7; color: #36584c; }
 .hiring-loading { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 12px; background: #f5f7fa; color: #526f82; }
 .hiring-loading img { width: 48px; }
 .tool-loading-state { min-height: 300px; display: grid; place-content: center; color: #49667a; }

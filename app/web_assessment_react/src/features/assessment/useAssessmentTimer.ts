@@ -9,19 +9,21 @@ type Params = {
   timePerQuestionSeconds: number;
   questionIndex: number;
   enabled: boolean;
+  initialState?: TimerState | null;
   onAssessmentTimeUp: () => void;
   onQuestionTimeUp: () => void;
 };
 
 export function useAssessmentTimer(params: Params) {
-  const { timingMode, durationMinutes, timePerQuestionSeconds, questionIndex, enabled, onAssessmentTimeUp, onQuestionTimeUp } = params;
-  const [state, setState] = useState<TimerState>(() => createInitialTimerState(durationMinutes));
+  const { timingMode, durationMinutes, timePerQuestionSeconds, questionIndex, enabled, initialState, onAssessmentTimeUp, onQuestionTimeUp } = params;
+  const restoredState = () => initialState || createInitialTimerState(durationMinutes);
+  const [state, setState] = useState<TimerState>(restoredState);
   const questionFiredRef = useRef<Record<number, boolean>>({});
 
   useEffect(() => {
-    setState(createInitialTimerState(durationMinutes));
+    setState(restoredState());
     questionFiredRef.current = {};
-  }, [durationMinutes, timingMode]);
+  }, [durationMinutes, initialState, timingMode]);
 
   useEffect(() => {
     if (!enabled) return;

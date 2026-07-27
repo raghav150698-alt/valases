@@ -37,6 +37,18 @@ def _production_settings(**overrides) -> Settings:
 
 
 class SecurityConfigurationTest(unittest.TestCase):
+    def test_database_startup_errors_are_reported_without_secrets(self) -> None:
+        from app.main import _database_error_code
+
+        self.assertEqual(
+            _database_error_code(RuntimeError("password authentication failed for user postgres")),
+            "authentication_failed",
+        )
+        self.assertEqual(
+            _database_error_code(RuntimeError("failed to resolve host db.example.com")),
+            "host_resolution_failed",
+        )
+
     def test_secure_production_baseline_passes(self) -> None:
         self.assertEqual(_production_settings().production_security_errors(), [])
 

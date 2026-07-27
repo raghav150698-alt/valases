@@ -2,16 +2,20 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import type { ReactNode } from "react";
 import { BrandLogo } from "../components/BrandLogo";
 import { AuthPanel } from "../features/auth/AuthPanel";
-import { AdminConsole } from "../features/admin/AdminConsole";
 import { useAssessmentSession } from "../features/assessment/useAssessmentSession";
-import { HiringWorkspace } from "../features/hiring/HiringWorkspace";
-import { ExcelSimulator } from "../features/tools/ExcelSimulator";
-import { AccountingTool } from "../features/tools/AccountingTool";
-import { TaxTool } from "../features/tools/TaxTool";
 import { api } from "../lib/api";
 import { useSessionStore } from "../lib/sessionStore";
 
 const CodingEnv = lazy(() => import("../features/tools/CodingEnv"));
+const AdminConsole = lazy(() => import("../features/admin/AdminConsole").then((module) => ({ default: module.AdminConsole })));
+const HiringWorkspace = lazy(() => import("../features/hiring/HiringWorkspace").then((module) => ({ default: module.HiringWorkspace })));
+const ExcelSimulator = lazy(() => import("../features/tools/ExcelSimulator").then((module) => ({ default: module.ExcelSimulator })));
+const AccountingTool = lazy(() => import("../features/tools/AccountingTool").then((module) => ({ default: module.AccountingTool })));
+const TaxTool = lazy(() => import("../features/tools/TaxTool").then((module) => ({ default: module.TaxTool })));
+
+function WorkspaceLoader({ label = "Opening workspace..." }: { label?: string }) {
+  return <main className="hiring-loading" role="status"><BrandLogo /><p>{label}</p></main>;
+}
 
 type View = "provider";
 
@@ -144,7 +148,7 @@ export function App() {
   }, []);
   const recruiterWorkspaceBody = useMemo(() => {
     if (recruiterAuthenticated) {
-      return <HiringWorkspace />;
+      return <Suspense fallback={<WorkspaceLoader />}><HiringWorkspace /></Suspense>;
     }
     return null;
   }, [recruiterAuthenticated]);
@@ -187,16 +191,18 @@ export function App() {
   if (embedded && tool === "excel") {
     return (
       <EmbeddedToolShell onSubmitAssessment={handleToolSubmit}>
-        <ExcelSimulator
-          embedded
-          title="Excel Assessment"
-          description="Assessment workbook"
-          instructions=""
-          showTopbarActions={false}
-          onSubmit={async () => {
-            handleToolSubmit();
-          }}
-        />
+        <Suspense fallback={<WorkspaceLoader label="Loading spreadsheet..." />}>
+          <ExcelSimulator
+            embedded
+            title="Excel Assessment"
+            description="Assessment workbook"
+            instructions=""
+            showTopbarActions={false}
+            onSubmit={async () => {
+              handleToolSubmit();
+            }}
+          />
+        </Suspense>
       </EmbeddedToolShell>
     );
   }
@@ -214,7 +220,7 @@ export function App() {
   if (embedded && ["gnucash", "accounting-desktop", "desktop-accounting"].includes(tool)) {
     return (
       <EmbeddedToolShell>
-        <AccountingTool />
+        <Suspense fallback={<WorkspaceLoader label="Loading accounting workspace..." />}><AccountingTool /></Suspense>
       </EmbeddedToolShell>
     );
   }
@@ -222,7 +228,7 @@ export function App() {
   if (embedded && ["tax", "tax-software", "tax-simulator", "drake"].includes(tool)) {
     return (
       <EmbeddedToolShell>
-        <TaxTool />
+        <Suspense fallback={<WorkspaceLoader label="Loading tax workspace..." />}><TaxTool /></Suspense>
       </EmbeddedToolShell>
     );
   }
@@ -242,7 +248,7 @@ export function App() {
   }
 
   if (role === "admin") {
-    return <AdminConsole />;
+    return <Suspense fallback={<WorkspaceLoader />}><AdminConsole /></Suspense>;
   }
 
   if (!recruiterAuthenticated) {

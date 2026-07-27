@@ -493,6 +493,11 @@ class AssessmentIssue(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     exam_id: Mapped[int] = mapped_column(ForeignKey("exams.id"), index=True)
     issuer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    hiring_application_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hiring_applications.id"),
+        nullable=True,
+        index=True,
+    )
     candidate_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     candidate_name: Mapped[str] = mapped_column(String(200))
     candidate_email: Mapped[str] = mapped_column(String(320), index=True)
@@ -1198,3 +1203,27 @@ class OrganizationAuditEvent(Base):
     target_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     details_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class DataSubjectRequest(Base):
+    __tablename__ = "data_subject_requests"
+    __table_args__ = (UniqueConstraint("organization_id", "request_reference", name="uq_organization_data_subject_request"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    provider_id: Mapped[int | None] = mapped_column(ForeignKey("providers.id"), nullable=True, index=True)
+    request_reference: Mapped[str] = mapped_column(String(40), index=True)
+    request_type: Mapped[str] = mapped_column(String(30), index=True)
+    candidate_email: Mapped[str] = mapped_column(String(320), index=True)
+    requestor_name: Mapped[str] = mapped_column(String(200), default="")
+    status: Mapped[str] = mapped_column(String(40), default="received", index=True)
+    identity_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    assigned_to_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    resolution_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

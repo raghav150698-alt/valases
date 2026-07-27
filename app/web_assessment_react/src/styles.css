@@ -1257,7 +1257,24 @@ body { margin: 0; background: #f6f8fb; }
   font-weight: 700;
 }
 .issued-list-row {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+.issued-list-actions {
+  display: flex !important;
+  grid-auto-flow: column;
+  gap: 6px !important;
+}
+.issued-list-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.issued-revoke-btn {
+  border: 1px solid #d9a8a3;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #9f3028;
+  font-weight: 700;
 }
 .workspace-overview {
   display: grid;
@@ -1846,6 +1863,15 @@ body { margin: 0; background: #f6f8fb; }
   animation: candidate-spin .8s linear infinite;
 }
 .candidate-login-status { color: #9f1239; }
+.candidate-camera-retry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+}
+.candidate-camera-retry .candidate-login-status { margin: 0; }
+.candidate-camera-retry .secondary-btn { flex: 0 0 auto; }
 @keyframes candidate-spin { to { transform: rotate(360deg); } }
 .issued-assessment-runtime {
   position: fixed;
@@ -1912,6 +1938,26 @@ body { margin: 0; background: #f6f8fb; }
   color: #334155;
   font-size: 12px;
   font-weight: 700;
+}
+
+.assessment-runtime-meta .candidate-save-state {
+  min-width: 72px;
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  text-align: center;
+}
+
+.assessment-runtime-meta .candidate-save-state.saved {
+  border-color: #a7d9bd;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.assessment-runtime-meta .candidate-save-state.offline {
+  border-color: #f4c7a1;
+  background: #fff7ed;
+  color: #9a3412;
 }
 .assessment-runtime-meta .candidate-proctor-state {
   gap: 7px;

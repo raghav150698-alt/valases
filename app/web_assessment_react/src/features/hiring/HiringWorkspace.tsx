@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { BrandLogo } from "../../components/BrandLogo";
+import { useSessionStore } from "../../lib/sessionStore";
+import { supabase } from "../../lib/supabase";
 import "./HiringWorkspace.css";
 
 const ProviderAssessments = lazy(() => import("../provider/ProviderAssessments").then((module) => ({ default: module.ProviderAssessments })));
@@ -56,6 +58,14 @@ type Application = {
   ai_confidence: number | null;
   ai_recommendation: string | null;
   ai_rationale: { matched_skills?: string[]; missing_skills?: string[]; limitations?: string };
+  ranking: {
+    average_score: number;
+    skills_score: number;
+    experience_score: number;
+    assessment_score: number | null;
+    matched_skills: number;
+    required_skills: number;
+  };
 };
 
 type Interview = {
@@ -70,7 +80,54 @@ type Interview = {
   meeting_url: string | null;
 };
 
-type Tab = "overview" | "jobs" | "candidates" | "pipeline" | "interviews" | "assessments" | "integrations";
+type ApplicationDetail = {
+  id: number;
+  stage: string;
+  status: string;
+  human_decision: string | null;
+  candidate: Candidate;
+  job: Job;
+  screening: {
+    match_score: number | null;
+    confidence: number | null;
+    recommendation: string | null;
+    rationale: { matched_skills?: string[]; missing_skills?: string[]; limitations?: string };
+  };
+  evidence_summary: {
+    status: "ready_for_human_decision" | "more_evidence_required";
+    human_review_required: boolean;
+    screening_complete: boolean;
+    scorecard_count: number;
+    interview_average: number | null;
+    compliance_complete: boolean;
+    blocking_checks: string[];
+    message: string;
+  };
+  interviews: Array<Pick<Interview, "id" | "status" | "interview_type" | "scheduled_at" | "duration_minutes" | "meeting_url">>;
+  scorecards: Array<{
+    id: number;
+    interview_id: number;
+    recommendation: string;
+    overall_score: number | null;
+    competencies: Record<string, number>;
+    evidence: string;
+    submitted_at: string | null;
+  }>;
+  compliance_checks: Array<{ check_type: string; status: string; details: Record<string, unknown> }>;
+  stage_history: Array<{ id: number; from_stage: string | null; to_stage: string; reason: string; created_at: string }>;
+};
+
+type Integration = {
+  provider: string;
+  category: string;
+  connection_mode: string;
+  capabilities: string[];
+  status: string;
+  config: { external_account_name?: string; sync_scope?: string[] };
+  last_synced_at?: string | null;
+};
+
+type Tab = "overview" | "jobs" | "candidates" | "pipeline" | "interviews" | "assessments" | "integrations" | "settings";
 
 const stageLabel = (stage: string) => stage.replace(/_/g, " ").replace(/\b\w/g, (value) => value.toUpperCase());
 const splitList = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
@@ -93,10 +150,12 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
 
 export function HiringWorkspace() {
   const [tab, setTab] = useState<Tab>("overview");
-  const [dialog, setDialog] = useState<"job" | "candidate" | "application" | "interview" | "integration" | null>(null);
-  const [selectedIntegration, setSelectedIntegration] = useState<{ provider: string; status: string; config: { external_account_name?: string; sync_scope?: string[] } } | null>(null);
+  const [dialog, setDialog] = useState<"job" | "candidate" | "application" | "interview" | "scorecard" | "integration" | null>(null);
+  const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
+  const [selectedInterview, setSelectedInterview] = useState<Interview | null>(null);
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
   const [notice, setNotice] = useState("");
+  const clearSession = useSessionStore((state) => state.clear);
   const queryClient = useQueryClient();
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["hiring"] });
 
@@ -105,7 +164,12 @@ export function HiringWorkspace() {
   const candidatesQuery = useQuery({ queryKey: ["hiring", "candidates"], queryFn: async () => (await api.get<Candidate[]>("/hiring/candidates")).data });
   const applicationsQuery = useQuery({ queryKey: ["hiring", "applications"], queryFn: async () => (await api.get<Application[]>("/hiring/applications")).data });
   const interviewsQuery = useQuery({ queryKey: ["hiring", "interviews"], queryFn: async () => (await api.get<Interview[]>("/hiring/interviews")).data });
-  const integrationsQuery = useQuery({ queryKey: ["hiring", "integrations"], queryFn: async () => (await api.get<Array<{ provider: string; status: string; config: { external_account_name?: string; sync_scope?: string[] } }>>("/hiring/integrations")).data });
+  const integrationsQuery = useQuery({ queryKey: ["hiring", "integrations"], queryFn: async () => (await api.get<Integration[]>("/hiring/integrations")).data });
+  const applicationDetailQuery = useQuery({
+    queryKey: ["hiring", "application-detail", selectedApplication?.id],
+    queryFn: async () => (await api.get<ApplicationDetail>(`/hiring/applications/${selectedApplication?.id}`)).data,
+    enabled: Boolean(selectedApplication?.id),
+  });
 
   const jobs = jobsQuery.data || [];
   const candidates = candidatesQuery.data || [];
@@ -122,9 +186,26 @@ export function HiringWorkspace() {
     onError: (error) => setNotice(apiError(error, "Could not screen this application.")),
   });
   const stageMutation = useMutation({
-    mutationFn: async ({ id, stage }: { id: number; stage: string }) => api.patch(`/hiring/applications/${id}/stage`, { stage, reason: "Updated from the hiring workspace" }),
-    onSuccess: () => { setNotice("Candidate stage updated."); refresh(); },
-    onError: (error) => setNotice(apiError(error, "Could not update the stage.")),
+    mutationFn: async ({ id, stage, reason = "Progressed by the recruiter from the hiring workspace" }: { id: number; stage: string; reason?: string }) => api.patch(`/hiring/applications/${id}/stage`, { stage, reason }),
+    onMutate: async ({ id, stage }) => {
+      await queryClient.cancelQueries({ queryKey: ["hiring", "applications"] });
+      const previous = queryClient.getQueryData<Application[]>(["hiring", "applications"]);
+      queryClient.setQueryData<Application[]>(["hiring", "applications"], (rows = []) =>
+        rows.map((application) => application.id === id ? { ...application, stage } : application),
+      );
+      return { previous };
+    },
+    onSuccess: () => { setNotice("Candidate stage updated."); refresh(); void applicationDetailQuery.refetch(); },
+    onError: (error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(["hiring", "applications"], context.previous);
+      setNotice(apiError(error, "Could not update the stage."));
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["hiring", "applications"] }),
+  });
+  const jobStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: string }) => api.patch(`/hiring/jobs/${id}`, { status }),
+    onSuccess: (_, variables) => { setNotice(`Job ${variables.status === "open" ? "published" : variables.status}.`); refresh(); },
+    onError: (error) => setNotice(apiError(error, "Could not update the job status.")),
   });
   const complianceMutation = useMutation({
     mutationFn: async (applicationId: number) => (await api.post(`/hiring/applications/${applicationId}/compliance/run`)).data,
@@ -145,12 +226,12 @@ export function HiringWorkspace() {
         <div className="hiring-org-switch"><small>Organization</small><strong>{workspace?.organization.name || "Your organization"}</strong><span>{workspace?.membership_role.replace(/_/g, " ") || "Recruiter"}</span></div>
         <nav aria-label="Hiring navigation">
           {([
-            ["overview", "Overview"], ["jobs", "Jobs"], ["candidates", "Candidates"], ["pipeline", "Pipeline"], ["interviews", "Interviews"], ["assessments", "Assessments"], ["integrations", "Integrations"],
+            ["overview", "Overview"], ["jobs", "Jobs"], ["candidates", "Candidates"], ["pipeline", "Pipeline"], ["interviews", "Interviews"], ["assessments", "Assessments"], ["integrations", "Integrations"], ["settings", "Settings"],
           ] as Array<[Tab, string]>).map(([id, label]) => (
             <button type="button" className={tab === id ? "active" : ""} key={id} onClick={() => setTab(id)}>{label}</button>
           ))}
         </nav>
-        <div className="hiring-sidebar-foot">Hiring operations<br /><span>Human review stays in control</span></div>
+        <div className="hiring-sidebar-foot">{workspace?.organization.name || "Valases"}<br /><span>{workspace?.organization.plan_code || "Workspace"}</span></div>
       </aside>
 
       <main className="hiring-main">
@@ -165,19 +246,21 @@ export function HiringWorkspace() {
         {notice && <div className="hiring-notice" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice("")}>Dismiss</button></div>}
 
         {tab === "overview" && <Overview workspace={workspace} jobs={jobs} applications={applications} interviews={interviews} onTab={setTab} onNewJob={() => setDialog("job")} onNewApplication={() => setDialog("application")} />}
-        {tab === "jobs" && <JobsView jobs={jobs} applications={applications} onNewJob={() => setDialog("job")} onCreateApplication={() => setDialog("application")} />}
+        {tab === "jobs" && <JobsView jobs={jobs} applications={applications} onNewJob={() => setDialog("job")} onCreateApplication={() => setDialog("application")} onStatusChange={(id, status) => jobStatusMutation.mutate({ id, status })} />}
         {tab === "candidates" && <CandidatesView candidates={candidates} applications={applications} onNewCandidate={() => setDialog("candidate")} onCreateApplication={() => setDialog("application")} />}
-        {tab === "pipeline" && <PipelineView stages={pipelineStages} applications={applications} onSelect={setSelectedApplication} onMove={(id, stage) => stageMutation.mutate({ id, stage })} />}
-        {tab === "interviews" && <InterviewsView interviews={interviews} applications={applications} onSchedule={() => setDialog("interview")} />}
+        {tab === "pipeline" && <PipelineView stages={pipelineStages} applications={applications} movingId={stageMutation.isPending ? stageMutation.variables?.id : undefined} onSelect={setSelectedApplication} onMove={(id, stage) => stageMutation.mutate({ id, stage })} onOpenAssessments={() => setTab("assessments")} />}
+        {tab === "interviews" && <InterviewsView interviews={interviews} applications={applications} onSchedule={() => setDialog("interview")} onScorecard={(interview) => { setSelectedInterview(interview); setDialog("scorecard"); }} />}
         {tab === "assessments" && <Suspense fallback={<div className="hiring-section-empty">Loading assessment workspace...</div>}><ProviderAssessments embedded /></Suspense>}
         {tab === "integrations" && <IntegrationsView integrations={integrationsQuery.data || []} onConfigure={(integration) => { setSelectedIntegration(integration); setDialog("integration"); }} />}
+        {tab === "settings" && <SettingsView organization={workspace?.organization} role={workspace?.membership_role || "recruiter"} onSignOut={async () => { try { if (supabase) await supabase.auth.signOut(); } finally { clearSession(); } }} />}
       </main>
 
-      {selectedDetails && <ApplicationDrawer application={selectedDetails} stages={pipelineStages} onClose={() => setSelectedApplication(null)} onScreen={() => screenMutation.mutate(selectedDetails.id)} onCompliance={() => complianceMutation.mutate(selectedDetails.id)} onMove={(stage) => stageMutation.mutate({ id: selectedDetails.id, stage })} />}
-      {dialog === "job" && <JobForm onClose={() => setDialog(null)} onSaved={() => { setDialog(null); setNotice("Job requisition created as a draft."); refresh(); setTab("jobs"); }} />}
-      {dialog === "candidate" && <CandidateForm onClose={() => setDialog(null)} onSaved={() => { setDialog(null); setNotice("Candidate added to your organization."); refresh(); setTab("candidates"); }} />}
+      {selectedDetails && <ApplicationDrawer key={selectedDetails.id} application={selectedDetails} detail={applicationDetailQuery.data} loading={applicationDetailQuery.isLoading} stages={pipelineStages} onClose={() => setSelectedApplication(null)} onScreen={() => screenMutation.mutate(selectedDetails.id)} onCompliance={() => complianceMutation.mutate(selectedDetails.id)} onMove={(stage, reason) => stageMutation.mutate({ id: selectedDetails.id, stage, reason })} />}
+      {dialog === "job" && <JobForm onClose={() => setDialog(null)} onSaved={() => { setDialog(null); setNotice("Job published and ready for candidate intake."); refresh(); setTab("jobs"); }} />}
+      {dialog === "candidate" && <CandidateForm jobs={activeJobs} onClose={() => setDialog(null)} onSaved={(addedToPipeline) => { setDialog(null); setNotice(addedToPipeline ? "Candidate added to Screening and is available for assessment." : "Candidate added. Assign an open role to make them assessment-eligible."); refresh(); setTab(addedToPipeline ? "pipeline" : "candidates"); }} />}
       {dialog === "application" && <ApplicationForm jobs={activeJobs.length ? activeJobs : jobs} candidates={candidates} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); setNotice("Application added to the pipeline."); refresh(); setTab("pipeline"); }} />}
       {dialog === "interview" && <InterviewForm applications={applications} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); setNotice("Interview scheduled and the candidate moved to interview stage."); refresh(); setTab("interviews"); }} />}
+      {dialog === "scorecard" && selectedInterview && <ScorecardForm interview={selectedInterview} onClose={() => { setDialog(null); setSelectedInterview(null); }} onSaved={() => { setDialog(null); setSelectedInterview(null); setNotice("Structured interview scorecard saved."); refresh(); }} />}
       {dialog === "integration" && selectedIntegration && <IntegrationForm integration={selectedIntegration} onClose={() => { setDialog(null); setSelectedIntegration(null); }} onSaved={() => { setDialog(null); setSelectedIntegration(null); setNotice("Integration record updated. Connect credentials only through the approved OAuth or secret-management flow."); refresh(); }} />}
     </div>
   );
@@ -204,27 +287,178 @@ function Metric({ label, value, note, action, onClick }: { label: string; value:
 function StatusPill({ status }: { status: string }) { return <span className={`hiring-status ${status}`}>{stageLabel(status)}</span>; }
 function Empty({ text, action, onClick }: { text: string; action?: string; onClick?: () => void }) { return <div className="hiring-section-empty"><p>{text}</p>{action && <button type="button" className="hiring-button primary" onClick={onClick}>{action}</button>}</div>; }
 
-function JobsView({ jobs, applications, onNewJob, onCreateApplication }: { jobs: Job[]; applications: Application[]; onNewJob: () => void; onCreateApplication: () => void }) { return <section className="hiring-panel hiring-full-panel"><div className="hiring-panel-header"><div><h2>Requisitions</h2><p>Every hiring workflow starts with an owned, structured job definition.</p></div><button type="button" className="hiring-button primary" onClick={onNewJob}>New job</button></div>{jobs.length ? <div className="hiring-table"><div className="hiring-table-head jobs"><span>Role</span><span>Work setup</span><span>Skills</span><span>Pipeline</span><span>Status</span><span></span></div>{jobs.map((job) => <div className="hiring-table-row jobs" key={job.id}><div><strong>{job.title}</strong><small>{job.job_code} · {job.department}</small></div><div><strong>{job.location}</strong><small>{stageLabel(job.work_arrangement)}</small></div><div className="hiring-skills">{job.skills.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>)}{job.skills.length > 3 && <span>+{job.skills.length - 3}</span>}</div><span>{applications.filter((item) => item.job_id === job.id).length} candidates</span><StatusPill status={job.status} /><button type="button" onClick={onCreateApplication}>Add candidate</button></div>)}</div> : <Empty text="No jobs created yet." action="Create job" onClick={onNewJob} />}</section>; }
+function JobsView({ jobs, applications, onNewJob, onCreateApplication, onStatusChange }: { jobs: Job[]; applications: Application[]; onNewJob: () => void; onCreateApplication: () => void; onStatusChange: (id: number, status: string) => void }) {
+  return <section className="hiring-panel hiring-full-panel">
+    <div className="hiring-panel-header"><div><h2>Requisitions</h2><p>Define the role, publish it, and manage candidate intake from one place.</p></div><button type="button" className="hiring-button primary" onClick={onNewJob}>New job</button></div>
+    {jobs.length ? <div className="hiring-table">
+      <div className="hiring-table-head jobs"><span>Role</span><span>Work setup</span><span>Skills</span><span>Pipeline</span><span>Status</span><span>Actions</span></div>
+      {jobs.map((job) => <div className="hiring-table-row jobs" key={job.id}>
+        <div><strong>{job.title}</strong><small>{job.job_code} | {job.department}</small></div>
+        <div><strong>{job.location}</strong><small>{stageLabel(job.work_arrangement)}</small></div>
+        <div className="hiring-skills">{job.skills.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>)}{job.skills.length > 3 && <span>+{job.skills.length - 3}</span>}</div>
+        <span>{applications.filter((item) => item.job_id === job.id).length} candidates</span>
+        <StatusPill status={job.status} />
+        <div className="hiring-row-actions">
+          {job.status !== "open" && job.status !== "closed" && <button type="button" onClick={() => onStatusChange(job.id, "open")}>Publish</button>}
+          {job.status === "open" && <button type="button" onClick={() => onStatusChange(job.id, "paused")}>Pause</button>}
+          {job.status !== "closed" && <button type="button" onClick={onCreateApplication}>Add</button>}
+          {job.status !== "closed" && <button type="button" className="danger" onClick={() => onStatusChange(job.id, "closed")}>Close</button>}
+        </div>
+      </div>)}
+    </div> : <Empty text="No jobs created yet." action="Create job" onClick={onNewJob} />}
+  </section>;
+}
 
 function CandidatesView({ candidates, applications, onNewCandidate, onCreateApplication }: { candidates: Candidate[]; applications: Application[]; onNewCandidate: () => void; onCreateApplication: () => void }) { return <section className="hiring-panel hiring-full-panel"><div className="hiring-panel-header"><div><h2>Candidate directory</h2><p>Keep candidate information, consent and skills visible to the hiring team.</p></div><button type="button" className="hiring-button primary" onClick={onNewCandidate}>Add candidate</button></div>{candidates.length ? <div className="hiring-table"><div className="hiring-table-head candidates"><span>Candidate</span><span>Skills</span><span>Experience</span><span>Consent</span><span>Applications</span><span></span></div>{candidates.map((candidate) => <div className="hiring-table-row candidates" key={candidate.id}><div><strong>{candidate.full_name}</strong><small>{candidate.headline || candidate.email}</small></div><div className="hiring-skills">{candidate.skills.length ? candidate.skills.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>) : <small>No skills added</small>}</div><span>{candidate.experience_years ?? "-"}{candidate.experience_years !== null ? " yrs" : ""}</span><StatusPill status={candidate.consent_status} /><span>{applications.filter((application) => application.candidate.id === candidate.id).length}</span><button type="button" onClick={onCreateApplication}>Add to role</button></div>)}</div> : <Empty text="Add candidates manually or through an ATS connection." action="Add candidate" onClick={onNewCandidate} />}</section>; }
 
-function PipelineView({ stages, applications, onSelect, onMove }: { stages: string[]; applications: Application[]; onSelect: (application: Application) => void; onMove: (id: number, stage: string) => void }) { return <section className="hiring-pipeline-board">{stages.slice(0, 6).map((stage) => <div className="hiring-pipeline-column" key={stage}><header><span>{stageLabel(stage)}</span><strong>{applications.filter((item) => item.stage === stage).length}</strong></header><div>{applications.filter((item) => item.stage === stage).map((application) => <article className="hiring-application-card" key={application.id} onClick={() => onSelect(application)}><strong>{application.candidate.full_name}</strong><span>{application.job_title}</span><div><em>{application.ai_match_score !== null ? `${application.ai_match_score}% match` : "Not screened"}</em>{stage !== "interview" && stage !== "offer" && <button type="button" onClick={(event) => { event.stopPropagation(); onMove(application.id, stage === "applied" ? "screening" : "interview"); }}>Move</button>}</div></article>)}</div></div>)}</section>; }
+function PipelineView({ stages, applications, movingId, onSelect, onMove, onOpenAssessments }: { stages: string[]; applications: Application[]; movingId?: number; onSelect: (application: Application) => void; onMove: (id: number, stage: string) => void; onOpenAssessments: () => void }) {
+  const visibleStages = stages.slice(0, 6);
+  const firstPopulatedStage = visibleStages.find((stage) => applications.some((item) => item.stage === stage)) || "screening";
+  const [selectedStage, setSelectedStage] = useState(firstPopulatedStage);
+  const stageRows = applications
+    .filter((application) => application.stage === selectedStage)
+    .sort((left, right) => right.ranking.average_score - left.ranking.average_score);
+  const nextStage = visibleStages[visibleStages.indexOf(selectedStage) + 1];
+  return <section className="hiring-pipeline">
+    <div className="hiring-stage-nav" role="tablist" aria-label="Pipeline stages">
+      {visibleStages.map((stage) => <button type="button" role="tab" aria-selected={selectedStage === stage} className={selectedStage === stage ? "active" : ""} key={stage} onClick={() => setSelectedStage(stage)}><span>{stageLabel(stage)}</span><strong>{applications.filter((item) => item.stage === stage).length}</strong></button>)}
+    </div>
+    <div className="hiring-pipeline-list">
+      <div className="hiring-pipeline-list-head"><span>Candidate</span><span>Role</span><span>Skills</span><span>Experience</span><span>Assessment</span><span>Average</span><span /></div>
+      {stageRows.map((application) => <article className="hiring-pipeline-row" key={application.id} onClick={() => onSelect(application)}>
+        <div><strong>{application.candidate.full_name}</strong><small>{application.candidate.email}</small></div>
+        <span>{application.job_title}</span>
+        <span>{application.ranking.skills_score.toFixed(0)}%</span>
+        <span>{application.candidate.experience_years ?? 0} yrs</span>
+        <span>{application.ranking.assessment_score !== null ? `${application.ranking.assessment_score.toFixed(0)}%` : "--"}</span>
+        <strong className="hiring-rank-score">{application.ranking.average_score.toFixed(0)}</strong>
+        <div className="hiring-pipeline-action">
+          {selectedStage === "screening" ? <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAssessments(); }}>Send assessment</button> : selectedStage === "assessment" ? <small>Awaiting result</small> : nextStage && selectedStage !== "offer" ? <button type="button" disabled={movingId === application.id} onClick={(event) => { event.stopPropagation(); onMove(application.id, nextStage); }}>{movingId === application.id ? "Moving..." : `Move to ${stageLabel(nextStage)}`}</button> : <button type="button" onClick={(event) => { event.stopPropagation(); onSelect(application); }}>Review</button>}
+        </div>
+      </article>)}
+      {!stageRows.length && <Empty text={`No candidates in ${stageLabel(selectedStage)}.`} />}
+    </div>
+  </section>;
+}
 
-function InterviewsView({ interviews, applications, onSchedule }: { interviews: Interview[]; applications: Application[]; onSchedule: () => void }) { return <section className="hiring-panel hiring-full-panel"><div className="hiring-panel-header"><div><h2>Interview plan</h2><p>Schedule structured conversations and collect comparable evidence.</p></div><button type="button" className="hiring-button primary" disabled={!applications.length} onClick={onSchedule}>Schedule interview</button></div>{interviews.length ? <div className="hiring-table"><div className="hiring-table-head interviews"><span>When</span><span>Candidate</span><span>Role</span><span>Format</span><span>Status</span></div>{interviews.map((interview) => <div className="hiring-table-row interviews" key={interview.id}><span>{interview.scheduled_at ? new Date(interview.scheduled_at).toLocaleString() : "Needs scheduling"}</span><strong>{interview.candidate_name}</strong><span>{interview.job_title}</span><span>{stageLabel(interview.interview_type)} · {interview.duration_minutes} min</span><StatusPill status={interview.status} /></div>)}</div> : <Empty text="No interviews scheduled. Move a candidate into the pipeline, then schedule a structured interview." action={applications.length ? "Schedule interview" : undefined} onClick={onSchedule} />}</section>; }
+function InterviewsView({ interviews, applications, onSchedule, onScorecard }: { interviews: Interview[]; applications: Application[]; onSchedule: () => void; onScorecard: (interview: Interview) => void }) {
+  const ranked = applications
+    .filter((application) => application.stage === "interview" && application.status === "active")
+    .sort((left, right) => right.ranking.average_score - left.ranking.average_score);
+  return <section className="hiring-panel hiring-full-panel">
+    <div className="hiring-panel-header"><div><h2>Interview plan</h2><p>Schedule structured conversations and capture comparable evidence before a decision.</p></div><button type="button" className="hiring-button primary" disabled={!applications.length} onClick={onSchedule}>Schedule interview</button></div>
+    {ranked.length > 0 && <div className="hiring-shortlist">
+      <div className="hiring-shortlist-head"><div><h3>Recommended interview order</h3><p>Ranked by the average of relevant skills, experience, and finalized assessment score.</p></div></div>
+      {ranked.slice(0, 5).map((application, index) => <div className="hiring-shortlist-row" key={application.id}><strong>{index + 1}</strong><div><b>{application.candidate.full_name}</b><small>{application.job_title}</small></div><span>Skills <b>{application.ranking.skills_score.toFixed(0)}%</b></span><span>Experience <b>{application.ranking.experience_score.toFixed(0)}%</b></span><span>Assessment <b>{application.ranking.assessment_score !== null ? `${application.ranking.assessment_score.toFixed(0)}%` : "--"}</b></span><em>{application.ranking.average_score.toFixed(0)}</em></div>)}
+    </div>}
+    {interviews.length ? <div className="hiring-table">
+      <div className="hiring-table-head interviews"><span>When</span><span>Candidate</span><span>Role</span><span>Format</span><span>Review</span></div>
+      {interviews.map((interview) => <div className="hiring-table-row interviews" key={interview.id}>
+        <span>{interview.scheduled_at ? new Date(interview.scheduled_at).toLocaleString() : "Needs scheduling"}</span>
+        <strong>{interview.candidate_name}</strong>
+        <span>{interview.job_title}</span>
+        <span>{stageLabel(interview.interview_type)} | {interview.duration_minutes} min</span>
+        <button type="button" onClick={() => onScorecard(interview)}>Scorecard</button>
+      </div>)}
+    </div> : <Empty text="No interviews scheduled. Move a candidate into the pipeline, then schedule a structured interview." action={applications.length ? "Schedule interview" : undefined} onClick={onSchedule} />}
+  </section>;
+}
 
-function IntegrationsView({ integrations, onConfigure }: { integrations: Array<{ provider: string; status: string; config: { external_account_name?: string; sync_scope?: string[] } }>; onConfigure: (integration: { provider: string; status: string; config: { external_account_name?: string; sync_scope?: string[] } }) => void }) { return <section className="hiring-panel hiring-full-panel"><div className="hiring-panel-header"><div><h2>Integration center</h2><p>Record approved connection scope here. Credentials remain in the provider OAuth flow or your deployment secret manager.</p></div></div><div className="hiring-integration-grid">{integrations.map((integration) => <div className="hiring-integration-row" key={integration.provider}><div><strong>{stageLabel(integration.provider)}</strong><small>{integration.config.external_account_name || "Not configured"}</small></div><StatusPill status={integration.status} /><button type="button" onClick={() => onConfigure(integration)}>Configure</button></div>)}</div></section>; }
+function IntegrationsView({ integrations, onConfigure }: { integrations: Integration[]; onConfigure: (integration: Integration) => void }) { return <section className="hiring-panel hiring-full-panel"><div className="hiring-panel-header"><div><h2>Integration center</h2><p>Approve connection scope now. OAuth credentials stay in the provider flow or deployment secret manager.</p></div></div><div className="hiring-integration-grid">{integrations.map((integration) => <div className="hiring-integration-row" key={integration.provider}><div><strong>{stageLabel(integration.provider)}</strong><small>{stageLabel(integration.category)} | {integration.config.external_account_name || stageLabel(integration.connection_mode)}</small><span>{integration.capabilities.slice(0, 3).map(stageLabel).join(", ")}</span></div><StatusPill status={integration.status} /><button type="button" onClick={() => onConfigure(integration)}>Configure</button></div>)}</div></section>; }
 
-function ApplicationDrawer({ application, stages, onClose, onScreen, onCompliance, onMove }: { application: Application; stages: string[]; onClose: () => void; onScreen: () => void; onCompliance: () => void; onMove: (stage: string) => void }) { return <aside className="hiring-drawer"><header><div><small>{application.job_title}</small><h2>{application.candidate.full_name}</h2><span>{application.candidate.headline || application.candidate.email}</span></div><button type="button" className="hiring-icon-button" aria-label="Close candidate details" onClick={onClose}>x</button></header><section><h3>Screening signal</h3>{application.ai_match_score !== null ? <><strong className="hiring-score">{application.ai_match_score}%</strong><p>{application.ai_recommendation?.replace(/_/g, " ")}</p><div className="hiring-skill-detail"><span>Matched</span>{(application.ai_rationale.matched_skills || []).join(", ") || "No matched skills recorded"}</div><div className="hiring-skill-detail"><span>Still to verify</span>{(application.ai_rationale.missing_skills || []).join(", ") || "No gaps recorded"}</div></> : <p>No screening signal yet. Use it as a review aid, never a decision-maker.</p>}<button type="button" className="hiring-button secondary" onClick={onScreen}>Run evidence screen</button></section><section><h3>Pipeline stage</h3><select value={application.stage} onChange={(event) => onMove(event.target.value)}>{stages.map((stage) => <option key={stage} value={stage}>{stageLabel(stage)}</option>)}</select></section><section><h3>Compliance</h3><p>Consent, structured evidence and automated-decision guardrails are checked together.</p><button type="button" className="hiring-button secondary" onClick={onCompliance}>Run checks</button></section></aside>; }
+function SettingsView({ organization, role, onSignOut }: { organization?: Workspace["organization"]; role: string; onSignOut: () => Promise<void> }) {
+  return <section className="hiring-panel hiring-full-panel hiring-settings">
+    <div className="hiring-panel-header"><div><h2>Workspace settings</h2><p>Account and organization controls for this Valases workspace.</p></div></div>
+    <div className="hiring-settings-row"><div><strong>Organization</strong><span>{organization?.name || "Your organization"}</span></div><small>{organization?.plan_code || "trial"} plan</small></div>
+    <div className="hiring-settings-row"><div><strong>Access role</strong><span>{stageLabel(role)}</span></div></div>
+    <div className="hiring-settings-row danger"><div><strong>Sign out</strong><span>End this browser session on this device.</span></div><button type="button" className="hiring-button secondary" onClick={() => void onSignOut()}>Sign out</button></div>
+  </section>;
+}
 
-function JobForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) { const [form, setForm] = useState({ job_code: "", title: "", department: "", location: "Remote", skills: "", description: "" }); const [loading, setLoading] = useState(false); const [error, setError] = useState(""); const draft = async () => { if (!form.title) return; setLoading(true); try { const { data } = await api.post("/hiring/jobs/draft-description", { title: form.title, department: form.department || "General", location: form.location, skills: splitList(form.skills) }); setForm((current) => ({ ...current, description: data.description })); } catch (reason) { setError(apiError(reason, "Could not create the job draft.")); } finally { setLoading(false); } }; const submit = async (event: React.FormEvent) => { event.preventDefault(); setLoading(true); setError(""); try { await api.post("/hiring/jobs", { ...form, department: form.department || "General", skills: splitList(form.skills) }); onSaved(); } catch (reason) { setError(apiError(reason, "Could not create the job.")); } finally { setLoading(false); } }; return <Modal title="New job requisition" onClose={onClose}><form className="hiring-form" onSubmit={submit}><div className="hiring-form-grid"><label>Job code<input required value={form.job_code} onChange={(event) => setForm({ ...form, job_code: event.target.value })} placeholder="FIN-104" /></label><label>Role title<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Senior Accountant" /></label><label>Department<input value={form.department} onChange={(event) => setForm({ ...form, department: event.target.value })} placeholder="Finance" /></label><label>Location<input value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label></div><label>Required skills<input value={form.skills} onChange={(event) => setForm({ ...form, skills: event.target.value })} placeholder="GAAP, Excel, reconciliations" /></label><div className="hiring-description-label"><label>Job description<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Write the role purpose, responsibilities and requirements." /></label><button type="button" className="hiring-button secondary" disabled={!form.title || loading} onClick={() => void draft()}>Draft description</button></div>{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading}>{loading ? "Saving..." : "Create draft"}</button></footer></form></Modal>; }
+function ApplicationDrawer({ application, detail, loading, stages, onClose, onScreen, onCompliance, onMove }: { application: Application; detail?: ApplicationDetail; loading: boolean; stages: string[]; onClose: () => void; onScreen: () => void; onCompliance: () => void; onMove: (stage: string, reason: string) => void }) {
+  const [nextStage, setNextStage] = useState(application.stage);
+  const [reason, setReason] = useState("");
+  const terminal = ["offer", "hired", "rejected", "withdrawn"].includes(nextStage);
+  const screening = detail?.screening || { match_score: application.ai_match_score, recommendation: application.ai_recommendation, rationale: application.ai_rationale };
+  return <aside className="hiring-drawer" aria-label="Candidate application details">
+    <header><div><small>{application.job_title}</small><h2>{application.candidate.full_name}</h2><span>{application.candidate.headline || application.candidate.email}</span></div><button type="button" className="hiring-icon-button" aria-label="Close candidate details" onClick={onClose}>x</button></header>
+    {loading && <div className="hiring-drawer-loading">Loading decision evidence...</div>}
+    {detail && <section className={`hiring-readiness ${detail.evidence_summary.status}`}>
+      <div><h3>Decision readiness</h3><StatusPill status={detail.evidence_summary.status} /></div>
+      <p>{detail.evidence_summary.message}</p>
+      <div className="hiring-evidence-metrics"><span>Screening<strong>{detail.evidence_summary.screening_complete ? "Complete" : "Missing"}</strong></span><span>Scorecards<strong>{detail.evidence_summary.scorecard_count}</strong></span><span>Compliance<strong>{detail.evidence_summary.blocking_checks.length ? `${detail.evidence_summary.blocking_checks.length} open` : detail.evidence_summary.compliance_complete ? "Passed" : "Not run"}</strong></span></div>
+    </section>}
+    <section><h3>Screening signal</h3>{screening.match_score !== null ? <><strong className="hiring-score">{screening.match_score}%</strong><p>{screening.recommendation?.replace(/_/g, " ")}</p><div className="hiring-skill-detail"><span>Matched</span>{(screening.rationale.matched_skills || []).join(", ") || "No matched skills recorded"}</div><div className="hiring-skill-detail"><span>Still to verify</span>{(screening.rationale.missing_skills || []).join(", ") || "No gaps recorded"}</div></> : <p>No screening signal yet. Use it as a review aid, never a decision-maker.</p>}<button type="button" className="hiring-button secondary" onClick={onScreen}>Run evidence screen</button></section>
+    <section><h3>Interview evidence</h3>{detail?.scorecards.length ? detail.scorecards.map((scorecard) => <article className="hiring-scorecard-summary" key={scorecard.id}><div><strong>{scorecard.overall_score?.toFixed(1) || "-"} / 5</strong><StatusPill status={scorecard.recommendation} /></div><p>{scorecard.evidence}</p></article>) : <p>No structured scorecard has been submitted.</p>}</section>
+    <section><h3>Compliance</h3>{detail?.compliance_checks.length ? <div className="hiring-check-list">{detail.compliance_checks.map((check) => <div key={check.check_type}><span>{stageLabel(check.check_type)}</span><StatusPill status={check.status} /></div>)}</div> : <p>Consent, structured evidence and automated-decision guardrails have not been checked yet.</p>}<button type="button" className="hiring-button secondary" onClick={onCompliance}>Run checks</button></section>
+    <section><h3>Record stage decision</h3><select value={nextStage} disabled={application.status === "closed"} onChange={(event) => setNextStage(event.target.value)}>{stages.map((stage) => <option key={stage} value={stage}>{stageLabel(stage)}</option>)}</select><textarea rows={3} value={reason} disabled={application.status === "closed"} onChange={(event) => setReason(event.target.value)} placeholder="Reason and supporting evidence" /><button type="button" className="hiring-button primary" disabled={application.status === "closed" || nextStage === application.stage || (terminal && reason.trim().length < 10)} onClick={() => onMove(nextStage, reason.trim() || "Progressed by the recruiter from the hiring workspace")}>Save stage</button>{terminal && reason.trim().length < 10 && <small>Offer and final decisions require a rationale of at least 10 characters.</small>}</section>
+    {detail && <section><h3>Activity</h3><div className="hiring-activity-list">{detail.stage_history.map((event) => <div key={event.id}><i aria-hidden="true" /><span><strong>{stageLabel(event.to_stage)}</strong><small>{event.reason || "No reason recorded"} | {new Date(event.created_at).toLocaleString()}</small></span></div>)}</div></section>}
+  </aside>;
+}
 
-function CandidateForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) { const [form, setForm] = useState({ first_name: "", last_name: "", email: "", headline: "", skills: "", experience_years: "", resume_text: "", consent_obtained: false }); const [loading, setLoading] = useState(false); const [error, setError] = useState(""); const submit = async (event: React.FormEvent) => { event.preventDefault(); setLoading(true); setError(""); try { await api.post("/hiring/candidates", { ...form, skills: splitList(form.skills), experience_years: form.experience_years ? Number(form.experience_years) : null }); onSaved(); } catch (reason) { setError(apiError(reason, "Could not add the candidate.")); } finally { setLoading(false); } }; return <Modal title="Add candidate" onClose={onClose}><form className="hiring-form" onSubmit={submit}><div className="hiring-form-grid"><label>First name<input required value={form.first_name} onChange={(event) => setForm({ ...form, first_name: event.target.value })} /></label><label>Last name<input value={form.last_name} onChange={(event) => setForm({ ...form, last_name: event.target.value })} /></label><label>Email<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label><label>Experience<input type="number" min="0" max="80" value={form.experience_years} onChange={(event) => setForm({ ...form, experience_years: event.target.value })} placeholder="Years" /></label></div><label>Headline<input value={form.headline} onChange={(event) => setForm({ ...form, headline: event.target.value })} placeholder="Accounting professional" /></label><label>Skills<input value={form.skills} onChange={(event) => setForm({ ...form, skills: event.target.value })} placeholder="GAAP, Excel, forecasting" /></label><label>Resume text<textarea value={form.resume_text} onChange={(event) => setForm({ ...form, resume_text: event.target.value })} placeholder="Paste a resume or relevant work history for evidence-based screening." /></label><label className="hiring-checkbox"><input type="checkbox" checked={form.consent_obtained} onChange={(event) => setForm({ ...form, consent_obtained: event.target.checked })} />Candidate consent to process hiring data has been recorded</label>{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading}>{loading ? "Saving..." : "Add candidate"}</button></footer></form></Modal>; }
+function JobForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) { const [form, setForm] = useState({ job_code: "", title: "", department: "", location: "Remote", skills: "", description: "" }); const [loading, setLoading] = useState(false); const [error, setError] = useState(""); const draft = async () => { if (!form.title) return; setLoading(true); try { const { data } = await api.post("/hiring/jobs/draft-description", { title: form.title, department: form.department || "General", location: form.location, skills: splitList(form.skills) }); setForm((current) => ({ ...current, description: data.description })); } catch (reason) { setError(apiError(reason, "Could not create the job description.")); } finally { setLoading(false); } }; const submit = async (event: React.FormEvent) => { event.preventDefault(); setLoading(true); setError(""); try { await api.post("/hiring/jobs", { ...form, department: form.department || "General", skills: splitList(form.skills) }); onSaved(); } catch (reason) { setError(apiError(reason, "Could not create the job.")); } finally { setLoading(false); } }; return <Modal title="New job requisition" onClose={onClose}><form className="hiring-form" onSubmit={submit}><div className="hiring-form-grid"><label>Job code<input required value={form.job_code} onChange={(event) => setForm({ ...form, job_code: event.target.value })} placeholder="FIN-104" /></label><label>Role title<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Senior Accountant" /></label><label>Department<input value={form.department} onChange={(event) => setForm({ ...form, department: event.target.value })} placeholder="Finance" /></label><label>Location<input value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label></div><label>Required skills<input value={form.skills} onChange={(event) => setForm({ ...form, skills: event.target.value })} placeholder="GAAP, Excel, reconciliations" /></label><div className="hiring-description-label"><label>Job description<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Write the role purpose, responsibilities and requirements." /></label><button type="button" className="hiring-button secondary" disabled={!form.title || loading} onClick={() => void draft()}>Generate description</button></div>{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading}>{loading ? "Publishing..." : "Publish job"}</button></footer></form></Modal>; }
+
+function CandidateForm({ jobs, onClose, onSaved }: { jobs: Job[]; onClose: () => void; onSaved: (addedToPipeline: boolean) => void }) { const [form, setForm] = useState({ first_name: "", last_name: "", email: "", headline: "", skills: "", experience_years: "", resume_text: "", consent_obtained: false }); const [jobId, setJobId] = useState(jobs.length === 1 ? String(jobs[0].id) : ""); const [loading, setLoading] = useState(false); const [error, setError] = useState(""); const submit = async (event: React.FormEvent) => { event.preventDefault(); setLoading(true); setError(""); try { const candidate = (await api.post<Candidate>("/hiring/candidates", { ...form, skills: splitList(form.skills), experience_years: form.experience_years ? Number(form.experience_years) : null })).data; if (jobId) await api.post("/hiring/applications", { job_id: Number(jobId), candidate_id: candidate.id }); onSaved(Boolean(jobId)); } catch (reason) { setError(apiError(reason, "Could not add the candidate.")); } finally { setLoading(false); } }; return <Modal title="Add candidate" onClose={onClose}><form className="hiring-form" onSubmit={submit}><div className="hiring-form-grid"><label>First name<input required value={form.first_name} onChange={(event) => setForm({ ...form, first_name: event.target.value })} /></label><label>Last name<input value={form.last_name} onChange={(event) => setForm({ ...form, last_name: event.target.value })} /></label><label>Email<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label><label>Experience<input type="number" min="0" max="80" value={form.experience_years} onChange={(event) => setForm({ ...form, experience_years: event.target.value })} placeholder="Years" /></label></div>{jobs.length > 0 && <label>Open role<select required value={jobId} onChange={(event) => setJobId(event.target.value)}><option value="">Select role</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>}<label>Headline<input value={form.headline} onChange={(event) => setForm({ ...form, headline: event.target.value })} placeholder="Accounting professional" /></label><label>Skills<input value={form.skills} onChange={(event) => setForm({ ...form, skills: event.target.value })} placeholder="GAAP, Excel, forecasting" /></label><label>Resume text<textarea value={form.resume_text} onChange={(event) => setForm({ ...form, resume_text: event.target.value })} placeholder="Paste a resume or relevant work history for evidence-based screening." /></label><label className="hiring-checkbox"><input type="checkbox" checked={form.consent_obtained} onChange={(event) => setForm({ ...form, consent_obtained: event.target.checked })} />Candidate consent to process hiring data has been recorded</label>{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading || (jobs.length > 0 && !jobId)}>{loading ? "Saving..." : "Add to screening"}</button></footer></form></Modal>; }
 
 function ApplicationForm({ jobs, candidates, onClose, onSaved }: { jobs: Job[]; candidates: Candidate[]; onClose: () => void; onSaved: () => void }) { const [jobId, setJobId] = useState(""); const [candidateId, setCandidateId] = useState(""); const [error, setError] = useState(""); const submit = async (event: React.FormEvent) => { event.preventDefault(); try { await api.post("/hiring/applications", { job_id: Number(jobId), candidate_id: Number(candidateId) }); onSaved(); } catch (reason) { setError(apiError(reason, "Could not create the application.")); } }; return <Modal title="Add candidate to role" onClose={onClose}><form className="hiring-form" onSubmit={submit}>{jobs.length && candidates.length ? <><label>Job<select required value={jobId} onChange={(event) => setJobId(event.target.value)}><option value="">Select job</option>{jobs.map((job) => <option value={job.id} key={job.id}>{job.title}</option>)}</select></label><label>Candidate<select required value={candidateId} onChange={(event) => setCandidateId(event.target.value)}><option value="">Select candidate</option>{candidates.map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.full_name}</option>)}</select></label></> : <p className="hiring-form-error">Create at least one job and one candidate first.</p>}{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={!jobs.length || !candidates.length}>Add to pipeline</button></footer></form></Modal>; }
 
-function InterviewForm({ applications, onClose, onSaved }: { applications: Application[]; onClose: () => void; onSaved: () => void }) { const [applicationId, setApplicationId] = useState(""); const [scheduledAt, setScheduledAt] = useState(""); const [error, setError] = useState(""); const submit = async (event: React.FormEvent) => { event.preventDefault(); try { await api.post("/hiring/interviews", { application_id: Number(applicationId), interview_type: "structured", scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null }); onSaved(); } catch (reason) { setError(apiError(reason, "Could not schedule the interview.")); } }; return <Modal title="Schedule structured interview" onClose={onClose}><form className="hiring-form" onSubmit={submit}><label>Candidate<select required value={applicationId} onChange={(event) => setApplicationId(event.target.value)}><option value="">Select candidate</option>{applications.filter((application) => application.status === "active").map((application) => <option key={application.id} value={application.id}>{application.candidate.full_name} · {application.job_title}</option>)}</select></label><label>When<input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></label><p className="hiring-form-hint">Calendar and voice scheduling connectors can be enabled per organization after OAuth configuration.</p>{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary">Schedule interview</button></footer></form></Modal>; }
+function InterviewForm({ applications, onClose, onSaved }: { applications: Application[]; onClose: () => void; onSaved: () => void }) { const [applicationId, setApplicationId] = useState(""); const [scheduledAt, setScheduledAt] = useState(""); const [error, setError] = useState(""); const eligible = applications.filter((application) => application.status === "active" && application.stage === "interview").sort((left, right) => right.ranking.average_score - left.ranking.average_score); const submit = async (event: React.FormEvent) => { event.preventDefault(); try { await api.post("/hiring/interviews", { application_id: Number(applicationId), interview_type: "structured", scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null }); onSaved(); } catch (reason) { setError(apiError(reason, "Could not schedule the interview.")); } }; return <Modal title="Schedule structured interview" onClose={onClose}><form className="hiring-form" onSubmit={submit}><label>Candidate<select required value={applicationId} onChange={(event) => setApplicationId(event.target.value)}><option value="">Select candidate</option>{eligible.map((application) => <option key={application.id} value={application.id}>{application.candidate.full_name} | {application.job_title} | {application.ranking.average_score.toFixed(0)} average</option>)}</select></label><label>When<input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></label><p className="hiring-form-hint">Calendar and voice scheduling connectors can be enabled per organization after OAuth configuration.</p>{!eligible.length && <p className="hiring-form-error">No candidates have cleared assessment and reached Interview.</p>}{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={!eligible.length || !applicationId}>Schedule interview</button></footer></form></Modal>; }
 
-function IntegrationForm({ integration, onClose, onSaved }: { integration: { provider: string; status: string; config: { external_account_name?: string; sync_scope?: string[] } }; onClose: () => void; onSaved: () => void }) {
+function ScorecardForm({ interview, onClose, onSaved }: { interview: Interview; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({
+    recommendation: "mixed",
+    overall_score: "3",
+    role_expertise: "3",
+    problem_solving: "3",
+    communication: "3",
+    judgment: "3",
+    evidence: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      await api.post(`/hiring/interviews/${interview.id}/scorecard`, {
+        recommendation: form.recommendation,
+        overall_score: Number(form.overall_score),
+        competencies: {
+          "Role expertise": Number(form.role_expertise),
+          "Problem solving": Number(form.problem_solving),
+          Communication: Number(form.communication),
+          Judgment: Number(form.judgment),
+        },
+        evidence: form.evidence.trim(),
+      });
+      onSaved();
+    } catch (reason) {
+      setError(apiError(reason, "Could not save the interview scorecard."));
+    } finally {
+      setLoading(false);
+    }
+  };
+  const scoreField = (key: "role_expertise" | "problem_solving" | "communication" | "judgment", label: string) => (
+    <label>{label}<select value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value })}>{[1, 2, 3, 4, 5].map((score) => <option value={score} key={score}>{score} / 5</option>)}</select></label>
+  );
+  return <Modal title="Structured interview scorecard" onClose={onClose}>
+    <form className="hiring-form" onSubmit={submit}>
+      <div className="hiring-form-context"><strong>{interview.candidate_name}</strong><span>{interview.job_title}</span></div>
+      <div className="hiring-form-grid">{scoreField("role_expertise", "Role expertise")}{scoreField("problem_solving", "Problem solving")}{scoreField("communication", "Communication")}{scoreField("judgment", "Judgment")}</div>
+      <div className="hiring-form-grid">
+        <label>Overall score<select value={form.overall_score} onChange={(event) => setForm({ ...form, overall_score: event.target.value })}>{[1, 2, 3, 4, 5].map((score) => <option value={score} key={score}>{score} / 5</option>)}</select></label>
+        <label>Recommendation<select value={form.recommendation} onChange={(event) => setForm({ ...form, recommendation: event.target.value })}><option value="strong_yes">Strong yes</option><option value="yes">Yes</option><option value="mixed">Mixed</option><option value="no">No</option><option value="strong_no">Strong no</option></select></label>
+      </div>
+      <label>Evidence<textarea required minLength={10} value={form.evidence} onChange={(event) => setForm({ ...form, evidence: event.target.value })} placeholder="Record job-relevant examples from the interview. Avoid personal or protected information." /></label>
+      <p className="hiring-form-hint">This scorecard is decision evidence. It does not send a result to the candidate.</p>
+      {error && <p className="hiring-form-error">{error}</p>}
+      <footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading || form.evidence.trim().length < 10}>{loading ? "Saving..." : "Save scorecard"}</button></footer>
+    </form>
+  </Modal>;
+}
+
+function IntegrationForm({ integration, onClose, onSaved }: { integration: Integration; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({ status: integration.status, external_account_name: integration.config.external_account_name || "", sync_scope: (integration.config.sync_scope || []).join(", ") });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -241,7 +475,7 @@ function IntegrationForm({ integration, onClose, onSaved }: { integration: { pro
       setLoading(false);
     }
   };
-  return <Modal title={`${stageLabel(integration.provider)} connection`} onClose={onClose}><form className="hiring-form" onSubmit={submit}><p className="hiring-form-hint">Record the approved account and data scope. Do not paste API keys, passwords, or OAuth tokens here.</p><label>Connection status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="not_connected">Not connected</option><option value="ready_to_connect">Ready to connect</option><option value="connected">Connected</option><option value="paused">Paused</option></select></label><label>Approved account<input value={form.external_account_name} onChange={(event) => setForm({ ...form, external_account_name: event.target.value })} placeholder="Recruiting workspace" /></label><label>Sync scope<input value={form.sync_scope} onChange={(event) => setForm({ ...form, sync_scope: event.target.value })} placeholder="candidates, jobs, interview feedback" /></label>{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading}>{loading ? "Saving..." : "Save connection"}</button></footer></form></Modal>;
+  return <Modal title={`${stageLabel(integration.provider)} connection`} onClose={onClose}><form className="hiring-form" onSubmit={submit}><p className="hiring-form-hint">Record the approved account and data scope. Do not paste API keys, passwords, or OAuth tokens here. Connected status is set only after a verified provider callback.</p><div className="hiring-form-context"><strong>{stageLabel(integration.connection_mode)}</strong><span>{integration.capabilities.map(stageLabel).join(", ")}</span></div><label>Connection status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="not_connected">Not connected</option><option value="ready_to_connect">Ready to connect</option>{integration.status === "connected" && <option value="connected">Connected</option>}<option value="paused">Paused</option></select></label><label>Approved account<input value={form.external_account_name} onChange={(event) => setForm({ ...form, external_account_name: event.target.value })} placeholder="Recruiting workspace" /></label><label>Sync scope<input value={form.sync_scope} onChange={(event) => setForm({ ...form, sync_scope: event.target.value })} placeholder={integration.capabilities.join(", ")} /></label>{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading}>{loading ? "Saving..." : "Save connection"}</button></footer></form></Modal>;
 }
 
 export default HiringWorkspace;

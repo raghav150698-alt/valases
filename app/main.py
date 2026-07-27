@@ -27,6 +27,7 @@ app = FastAPI(
 )
 request_logger = logging.getLogger("valases.request")
 database_startup_failed = False
+database_startup_error_code: str | None = None
 startup_configuration_errors: list[str] = []
 WEB_DIR = Path(__file__).resolve().parent / "web"
 ASSETS_DIR = WEB_DIR / "assets"
@@ -34,6 +35,26 @@ ASSESSMENT_WEB_DIST_DIR = Path(__file__).resolve().parent / "web_assessment_reac
 MEDIA_DIR = Path(settings.resolved_media_dir)
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 rate_limiter = InMemoryRateLimiter()
+
+
+def _database_error_code(exc: Exception) -> str:
+    message = str(exc).lower()
+    if "password authentication failed" in message or "authentication failed" in message:
+        return "authentication_failed"
+    if "failed to resolve host" in message or "name or service not known" in message:
+        return "host_resolution_failed"
+    if "invalid connection option" in message:
+        return "invalid_connection_option"
+    if "missing required tables" in message or "schema is not initialized" in message:
+        return "schema_not_initialized"
+    if "timeout" in message or "timed out" in message:
+        return "connection_timeout"
+    if "connection refused" in message:
+        return "connection_refused"
+    if "ssl" in message or "certificate" in message:
+        return "tls_failed"
+    return f"{type(exc).__name__.lower()}_during_startup"
+
 
 if settings.trusted_hosts_list:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts_list)
@@ -197,8 +218,9 @@ async def enforce_basic_rate_limits(request: Request, call_next):
 
 @app.on_event("startup")
 def on_startup() -> None:
-    global database_startup_failed, startup_configuration_errors
+    global database_startup_failed, database_startup_error_code, startup_configuration_errors
     database_startup_failed = False
+    database_startup_error_code = None
     startup_configuration_errors = []
     security_errors = settings.production_security_errors()
     if security_errors:
@@ -225,6 +247,7 @@ def on_startup() -> None:
             except Exception as retry_exc:
                 exc = retry_exc
         database_startup_failed = True
+        database_startup_error_code = _database_error_code(exc)
         print(f"Database startup check failed: {type(exc).__name__}: {exc}", flush=True)
         request_logger.exception("database_initialization_failed")
         # Vercel should still be able to serve the assessment shell while a
@@ -249,6 +272,8 @@ def health():
     }
     if configuration_blocked:
         payload["configuration_errors"] = startup_configuration_errors
+    elif database_startup_failed:
+        payload["database_error_code"] = database_startup_error_code or "unknown_startup_failure"
     return JSONResponse(
         content=payload,
         status_code=503 if configuration_blocked or database_startup_failed else 200,

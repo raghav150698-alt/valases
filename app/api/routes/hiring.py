@@ -11,8 +11,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
-from app.db.session import get_db
+from app.db.session import get_db, set_database_organization_context
 from app.models.entities import (
+    AssessmentIssue,
     HiringApplication,
     HiringCandidate,
     HiringComplianceCheck,
@@ -33,7 +34,21 @@ router = APIRouter(prefix="/hiring", tags=["hiring-workspace"])
 
 _MEMBER_ROLES = {"owner", "org_admin", "recruiter", "hiring_manager", "interviewer", "viewer"}
 _PIPELINE_STAGES = ["applied", "screening", "assessment", "interview", "offer", "hired", "rejected", "withdrawn"]
-_INTEGRATION_PROVIDERS = {"greenhouse", "lever", "workday", "ashby", "bamboohr", "successfactors", "custom_api"}
+_INTEGRATION_CATALOG = {
+    "greenhouse": {"category": "ats", "connection_mode": "oauth_or_api_key", "capabilities": ["jobs", "candidates", "applications", "stage_updates"]},
+    "lever": {"category": "ats", "connection_mode": "oauth", "capabilities": ["jobs", "candidates", "applications", "stage_updates"]},
+    "workday": {"category": "ats", "connection_mode": "enterprise_api", "capabilities": ["jobs", "candidates", "applications"]},
+    "ashby": {"category": "ats", "connection_mode": "api_key", "capabilities": ["jobs", "candidates", "applications", "stage_updates"]},
+    "bamboohr": {"category": "ats", "connection_mode": "oauth", "capabilities": ["jobs", "candidates", "employees"]},
+    "successfactors": {"category": "ats", "connection_mode": "enterprise_api", "capabilities": ["jobs", "candidates", "applications"]},
+    "google_calendar": {"category": "calendar", "connection_mode": "oauth", "capabilities": ["availability", "calendar_events", "video_meet_links"]},
+    "outlook_calendar": {"category": "calendar", "connection_mode": "oauth", "capabilities": ["availability", "calendar_events"]},
+    "microsoft_teams": {"category": "meeting", "connection_mode": "oauth", "capabilities": ["meeting_links", "calendar_events"]},
+    "zoom": {"category": "meeting", "connection_mode": "oauth", "capabilities": ["meeting_links"]},
+    "twilio_voice": {"category": "voice", "connection_mode": "service_credentials", "capabilities": ["candidate_calls", "scheduling_prompts"]},
+    "custom_api": {"category": "custom", "connection_mode": "signed_webhook", "capabilities": ["jobs", "candidates", "applications"]},
+}
+_INTEGRATION_PROVIDERS = set(_INTEGRATION_CATALOG)
 
 
 class OrganizationCreate(BaseModel):
@@ -126,7 +141,7 @@ class ScorecardCreate(BaseModel):
     recommendation: Literal["strong_yes", "yes", "mixed", "no", "strong_no"]
     overall_score: float = Field(ge=0, le=5)
     competencies: dict[str, float] = Field(default_factory=dict, max_length=30)
-    evidence: str = Field(default="", max_length=10000)
+    evidence: str = Field(min_length=10, max_length=10000)
 
 
 class IntegrationUpdate(BaseModel):
@@ -199,6 +214,7 @@ def _organization_context(db: Session, current_user: User, organization_id: int 
         if not organization or organization.status != "active":
             raise HTTPException(status_code=404, detail="Organization not found")
         if current_user.role == UserRole.ADMIN:
+            set_database_organization_context(db, organization.id)
             return organization, None
         membership = db.scalar(
             select(OrganizationMembership).where(
@@ -209,13 +225,17 @@ def _organization_context(db: Session, current_user: User, organization_id: int 
         )
         if not membership:
             raise HTTPException(status_code=403, detail="You do not have access to this organization")
+        set_database_organization_context(db, organization.id)
         return organization, membership
     if current_user.role == UserRole.ADMIN:
         organization = db.scalar(select(Organization).where(Organization.status == "active").order_by(Organization.id.asc()))
         if not organization:
             raise HTTPException(status_code=404, detail="No organization has been created yet")
+        set_database_organization_context(db, organization.id)
         return organization, None
-    return _ensure_bootstrap_organization(db, current_user)
+    organization, membership = _ensure_bootstrap_organization(db, current_user)
+    set_database_organization_context(db, organization.id)
+    return organization, membership
 
 
 def _job_or_404(db: Session, organization_id: int, job_id: int) -> JobRequisition:
@@ -299,6 +319,69 @@ def _screen_application(job: JobRequisition, candidate: HiringCandidate) -> tupl
         "limitations": "This is an evidence-based screening aid. It does not make a hiring or rejection decision.",
     }
     return score, confidence, recommendation, rationale
+
+
+def _candidate_ranking(
+    application: HiringApplication,
+    candidate: HiringCandidate,
+    job: JobRequisition,
+    assessment_score: float | None,
+) -> dict:
+    required_skills = {str(skill).strip().lower() for skill in (job.skills_json or []) if str(skill).strip()}
+    candidate_skills = {str(skill).strip().lower() for skill in (candidate.skills_json or []) if str(skill).strip()}
+    resume = str(candidate.resume_text or "").lower()
+    matched_skills = required_skills & (candidate_skills | {skill for skill in required_skills if skill in resume})
+    skills_score = round(100.0 if not required_skills else len(matched_skills) / len(required_skills) * 100.0, 1)
+    experience_score = round(min(100.0, max(0.0, float(candidate.experience_years or 0) * 10.0)), 1)
+    available_scores = [skills_score, experience_score]
+    if assessment_score is not None:
+        available_scores.append(float(assessment_score))
+    average_score = round(sum(available_scores) / len(available_scores), 1)
+    return {
+        "average_score": average_score,
+        "skills_score": skills_score,
+        "experience_score": experience_score,
+        "assessment_score": assessment_score,
+        "matched_skills": len(matched_skills),
+        "required_skills": len(required_skills),
+    }
+
+
+def _application_evidence_summary(db: Session, application: HiringApplication) -> dict:
+    scorecards = list(
+        db.scalars(
+            select(HiringScorecard)
+            .where(HiringScorecard.application_id == application.id)
+            .order_by(HiringScorecard.submitted_at.desc(), HiringScorecard.id.desc()),
+        ).all(),
+    )
+    compliance = list(
+        db.scalars(
+            select(HiringComplianceCheck)
+            .where(HiringComplianceCheck.application_id == application.id)
+            .order_by(HiringComplianceCheck.check_type.asc()),
+        ).all(),
+    )
+    submitted_scores = [float(item.overall_score) for item in scorecards if item.overall_score is not None]
+    interview_average = round(sum(submitted_scores) / len(submitted_scores), 2) if submitted_scores else None
+    screening_complete = application.ai_match_score is not None
+    compliance_complete = bool(compliance)
+    blocking_checks = [item.check_type for item in compliance if item.status != "passed"]
+    evidence_complete = screening_complete and bool(scorecards) and compliance_complete and not blocking_checks
+    return {
+        "status": "ready_for_human_decision" if evidence_complete else "more_evidence_required",
+        "human_review_required": True,
+        "screening_complete": screening_complete,
+        "scorecard_count": len(scorecards),
+        "interview_average": interview_average,
+        "compliance_complete": compliance_complete,
+        "blocking_checks": blocking_checks,
+        "message": (
+            "Required evidence is present. A recruiter must make and document the final decision."
+            if evidence_complete
+            else "Collect the missing screening, interview, or compliance evidence before making a final decision."
+        ),
+    }
 
 
 @router.get("/workspace")
@@ -426,6 +509,7 @@ def create_job(
         compensation_min=payload.compensation_min,
         compensation_max=payload.compensation_max,
         compensation_currency=payload.compensation_currency.strip().upper(),
+        status="open",
     )
     if job.compensation_min is not None and job.compensation_max is not None and job.compensation_min > job.compensation_max:
         raise HTTPException(status_code=422, detail="Compensation minimum cannot exceed maximum")
@@ -562,6 +646,7 @@ def create_application(
         candidate_id=payload.candidate_id,
         owner_user_id=current_user.id,
         source=payload.source.strip() or "manual",
+        stage="screening",
     )
     db.add(application)
     try:
@@ -569,7 +654,7 @@ def create_application(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="This candidate already has an application for this job") from exc
-    db.add(HiringStageEvent(organization_id=organization.id, application_id=application.id, actor_user_id=current_user.id, to_stage="applied", reason="Application created"))
+    db.add(HiringStageEvent(organization_id=organization.id, application_id=application.id, actor_user_id=current_user.id, to_stage="screening", reason="Candidate added to recruiter screening"))
     _write_audit(db, organization.id, current_user.id, "application_created", "application", application.id)
     db.commit()
     return {"id": application.id, "stage": application.stage, "status": application.status}
@@ -595,6 +680,21 @@ def list_applications(
     if stage:
         query = query.where(HiringApplication.stage == stage)
     rows = db.execute(query.order_by(HiringApplication.updated_at.desc())).all()
+    application_ids = [application.id for application, _, _ in rows]
+    assessment_scores: dict[int, float] = {}
+    if application_ids:
+        reviewed_issues = list(
+            db.scalars(
+                select(AssessmentIssue)
+                .where(
+                    AssessmentIssue.hiring_application_id.in_(application_ids),
+                    AssessmentIssue.score_pct.is_not(None),
+                )
+                .order_by(AssessmentIssue.completed_at.desc(), AssessmentIssue.id.desc()),
+            ).all(),
+        )
+        for issue in reviewed_issues:
+            assessment_scores.setdefault(int(issue.hiring_application_id), float(issue.score_pct))
     return [
         {
             "id": application.id,
@@ -609,10 +709,116 @@ def list_applications(
             "ai_recommendation": application.ai_recommendation,
             "ai_rationale": application.ai_rationale_json or {},
             "human_decision": application.human_decision,
+            "ranking": _candidate_ranking(
+                application,
+                candidate,
+                job,
+                assessment_scores.get(application.id),
+            ),
             "applied_at": application.applied_at,
         }
         for application, candidate, job in rows
     ]
+
+
+@router.get("/applications/{application_id}")
+def get_application_detail(
+    application_id: int,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, _ = _organization_context(db, current_user, organization_id)
+    application = _application_or_404(db, organization.id, application_id)
+    candidate = _candidate_or_404(db, organization.id, application.candidate_id)
+    job = _job_or_404(db, organization.id, application.job_id)
+    interviews = list(
+        db.scalars(
+            select(HiringInterview)
+            .where(HiringInterview.application_id == application.id)
+            .order_by(HiringInterview.scheduled_at.desc(), HiringInterview.id.desc()),
+        ).all(),
+    )
+    scorecards = list(
+        db.scalars(
+            select(HiringScorecard)
+            .where(HiringScorecard.application_id == application.id)
+            .order_by(HiringScorecard.submitted_at.desc(), HiringScorecard.id.desc()),
+        ).all(),
+    )
+    compliance = list(
+        db.scalars(
+            select(HiringComplianceCheck)
+            .where(HiringComplianceCheck.application_id == application.id)
+            .order_by(HiringComplianceCheck.check_type.asc()),
+        ).all(),
+    )
+    stage_events = list(
+        db.scalars(
+            select(HiringStageEvent)
+            .where(HiringStageEvent.application_id == application.id)
+            .order_by(HiringStageEvent.created_at.desc(), HiringStageEvent.id.desc()),
+        ).all(),
+    )
+    return {
+        "id": application.id,
+        "stage": application.stage,
+        "status": application.status,
+        "human_decision": application.human_decision,
+        "candidate": _serialize_candidate(candidate),
+        "job": _serialize_job(job),
+        "screening": {
+            "match_score": application.ai_match_score,
+            "confidence": application.ai_confidence,
+            "recommendation": application.ai_recommendation,
+            "rationale": application.ai_rationale_json or {},
+        },
+        "evidence_summary": _application_evidence_summary(db, application),
+        "interviews": [
+            {
+                "id": item.id,
+                "status": item.status,
+                "interview_type": item.interview_type,
+                "scheduled_at": item.scheduled_at,
+                "duration_minutes": item.duration_minutes,
+                "meeting_url": item.meeting_url,
+            }
+            for item in interviews
+        ],
+        "scorecards": [
+            {
+                "id": item.id,
+                "interview_id": item.interview_id,
+                "reviewer_user_id": item.reviewer_user_id,
+                "recommendation": item.recommendation,
+                "overall_score": item.overall_score,
+                "competencies": item.competencies_json or {},
+                "evidence": item.evidence,
+                "submitted_at": item.submitted_at,
+            }
+            for item in scorecards
+        ],
+        "compliance_checks": [
+            {
+                "check_type": item.check_type,
+                "status": item.status,
+                "details": item.details_json or {},
+                "reviewed_at": item.reviewed_at,
+            }
+            for item in compliance
+        ],
+        "stage_history": [
+            {
+                "id": item.id,
+                "from_stage": item.from_stage,
+                "to_stage": item.to_stage,
+                "reason": item.reason,
+                "actor_user_id": item.actor_user_id,
+                "created_at": item.created_at,
+            }
+            for item in stage_events
+        ],
+    }
 
 
 @router.patch("/applications/{application_id}/stage")
@@ -627,13 +833,34 @@ def update_application_stage(
     if membership and membership.role in {"viewer", "interviewer"}:
         raise HTTPException(status_code=403, detail="Your organization role cannot move candidates")
     application = _application_or_404(db, organization.id, application_id)
+    reason = payload.reason.strip()
+    if application.status == "closed" and payload.stage != application.stage:
+        raise HTTPException(status_code=409, detail="Closed applications cannot be moved to another stage")
+    if payload.stage in {"offer", "hired", "rejected", "withdrawn"} and len(reason) < 10:
+        raise HTTPException(status_code=422, detail="Record a decision rationale of at least 10 characters")
+    if payload.stage in {"offer", "hired"}:
+        scorecard_count = db.scalar(select(func.count(HiringScorecard.id)).where(HiringScorecard.application_id == application.id)) or 0
+        if scorecard_count < 1:
+            raise HTTPException(status_code=409, detail="At least one structured interview scorecard is required before offer or hire")
+    if payload.stage == "hired":
+        candidate = _candidate_or_404(db, organization.id, application.candidate_id)
+        if candidate.consent_status != "granted":
+            raise HTTPException(status_code=409, detail="Candidate data-processing consent must be recorded before hire")
     previous_stage = application.stage
     application.stage = payload.stage
     if payload.stage in {"rejected", "withdrawn", "hired"}:
         application.status = "closed"
         application.human_decision = payload.stage
-    db.add(HiringStageEvent(organization_id=organization.id, application_id=application.id, actor_user_id=current_user.id, from_stage=previous_stage, to_stage=payload.stage, reason=payload.reason.strip()))
-    _write_audit(db, organization.id, current_user.id, "application_stage_changed", "application", application.id, {"from": previous_stage, "to": payload.stage})
+    db.add(HiringStageEvent(organization_id=organization.id, application_id=application.id, actor_user_id=current_user.id, from_stage=previous_stage, to_stage=payload.stage, reason=reason))
+    _write_audit(
+        db,
+        organization.id,
+        current_user.id,
+        "application_stage_changed",
+        "application",
+        application.id,
+        {"from": previous_stage, "to": payload.stage, "reason": reason},
+    )
     db.commit()
     return {"id": application.id, "stage": application.stage, "status": application.status}
 
@@ -704,6 +931,8 @@ def create_interview(
     if membership and membership.role in {"viewer", "interviewer"}:
         raise HTTPException(status_code=403, detail="Your organization role cannot schedule interviews")
     application = _application_or_404(db, organization.id, payload.application_id)
+    if application.status != "active" or application.stage != "interview":
+        raise HTTPException(status_code=409, detail="Interviews can only be scheduled for active candidates in the interview stage")
     interview = HiringInterview(
         organization_id=organization.id,
         application_id=application.id,
@@ -739,6 +968,8 @@ def submit_scorecard(
     interview = db.scalar(select(HiringInterview).where(HiringInterview.id == interview_id, HiringInterview.organization_id == organization.id))
     if not interview:
         raise HTTPException(status_code=404, detail="Interview not found")
+    if not payload.competencies:
+        raise HTTPException(status_code=422, detail="At least one scored competency is required")
     existing = db.scalar(select(HiringScorecard).where(HiringScorecard.interview_id == interview.id, HiringScorecard.reviewer_user_id == current_user.id))
     scorecard = existing or HiringScorecard(organization_id=organization.id, interview_id=interview.id, application_id=interview.application_id, reviewer_user_id=current_user.id)
     scorecard.recommendation = payload.recommendation
@@ -797,6 +1028,7 @@ def list_integrations(
     return [
         {
             "provider": provider,
+            **_INTEGRATION_CATALOG[provider],
             "status": configured[provider].status if provider in configured else "not_connected",
             "config": configured[provider].config_json if provider in configured else {},
             "last_synced_at": configured[provider].last_synced_at if provider in configured else None,
@@ -819,6 +1051,8 @@ def configure_integration(
     if provider not in _INTEGRATION_PROVIDERS:
         raise HTTPException(status_code=422, detail="Unsupported integration provider")
     record = db.scalar(select(HiringIntegration).where(HiringIntegration.organization_id == organization.id, HiringIntegration.provider == provider))
+    if payload.status == "connected" and (not record or record.status != "connected"):
+        raise HTTPException(status_code=409, detail="A connector can only become connected through its verified OAuth or credential callback")
     if not record:
         record = HiringIntegration(organization_id=organization.id, provider=provider)
         db.add(record)

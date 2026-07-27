@@ -146,16 +146,25 @@ def get_current_user(
             account_state="active",
         )
         db.add(user)
-        db.flush()
-        approval = db.scalar(select(UserApproval).where(UserApproval.user_id == user.id))
-        if not approval:
-            approval = UserApproval(user_id=user.id)
-            db.add(approval)
-        approval.status = ApprovalStatus.APPROVED if configured_admin else ApprovalStatus.PENDING
-        approval.rejection_reason = None
-        db.commit()
-        db.refresh(user)
-        return user
+        try:
+            db.flush()
+            approval = db.scalar(select(UserApproval).where(UserApproval.user_id == user.id))
+            if not approval:
+                approval = UserApproval(user_id=user.id)
+                db.add(approval)
+            approval.status = ApprovalStatus.APPROVED if configured_admin else ApprovalStatus.PENDING
+            approval.rejection_reason = None
+            db.commit()
+            db.refresh(user)
+            return user
+        except IntegrityError:
+            # Serverless requests can reach multiple workers during the first
+            # authenticated page load. Reuse the identity committed by the
+            # winning request instead of surfacing a transient 500.
+            db.rollback()
+            user = db.scalar(select(User).where(func.lower(func.trim(User.email)) == email_norm)) if email_norm else None
+            if not user:
+                raise
 
     changed = False
     configured_admin = is_configured_admin_email(email_norm, settings.admin_email_set)
@@ -194,8 +203,14 @@ def get_current_user(
                 rejection_reason=None,
             ),
         )
-        db.commit()
-        approval = db.scalar(select(UserApproval).where(UserApproval.user_id == user.id))
+        try:
+            db.commit()
+            approval = db.scalar(select(UserApproval).where(UserApproval.user_id == user.id))
+        except IntegrityError:
+            db.rollback()
+            approval = db.scalar(select(UserApproval).where(UserApproval.user_id == user.id))
+            if not approval:
+                raise
     elif configured_admin and approval.status != ApprovalStatus.APPROVED:
         approval.status = ApprovalStatus.APPROVED
         approval.rejection_reason = None

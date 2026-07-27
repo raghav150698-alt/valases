@@ -20,8 +20,8 @@ type ObjectDetector = {
 type ProctorStatus = "idle" | "starting" | "calibrating" | "active" | "error";
 
 const VISION_WASM_URL = "/vendor/mediapipe/wasm";
-const FACE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
-const OBJECT_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite";
+const FACE_MODEL_URL = "/vendor/mediapipe/models/face_landmarker.task";
+const OBJECT_MODEL_URL = "/vendor/mediapipe/models/efficientdet_lite0.tflite";
 const GAZE_MODEL_URL = "/assets/generated/screen_gaze_model.json";
 const AWAY_WARNING_MS = 2000;
 
@@ -170,7 +170,7 @@ export function useCandidateGazeProctor(active: boolean) {
       });
       landmarkerRef.current = landmarker;
       const objectDetector = await vision.ObjectDetector.createFromOptions(resolver, {
-        baseOptions: { modelAssetPath: OBJECT_MODEL_URL }, runningMode: "VIDEO", maxResults: 6, scoreThreshold: 0.45,
+        baseOptions: { modelAssetPath: OBJECT_MODEL_URL }, runningMode: "VIDEO", maxResults: 8, scoreThreshold: 0.25,
       });
       objectDetectorRef.current = objectDetector;
       const gazeModelResponse = await fetch(GAZE_MODEL_URL, { cache: "no-store" });
@@ -217,16 +217,19 @@ export function useCandidateGazeProctor(active: boolean) {
             const phone = categories
               .filter((category) => {
                 const label = String(category.categoryName || category.displayName || "").trim().toLowerCase();
-                return label === "cell phone" || label === "mobile phone" || label === "phone";
+                return ["cell phone", "cellphone", "mobile phone", "phone", "smartphone"].includes(label);
               })
               .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))[0];
             phoneDetectionStreakRef.current = phone ? phoneDetectionStreakRef.current + 1 : 0;
-            if (phone && phoneDetectionStreakRef.current >= 2 && now - lastPhoneWarningRef.current >= 8000) {
+            const phoneConfidence = Number(phone?.score || 0);
+            const requiredPhoneFrames = phoneConfidence >= 0.55 ? 2 : 3;
+            if (phone && phoneConfidence >= 0.35 && phoneDetectionStreakRef.current >= requiredPhoneFrames && now - lastPhoneWarningRef.current >= 8000) {
               lastPhoneWarningRef.current = now;
               phoneDetectionStreakRef.current = 0;
               emitProctorSignal("mobile_phone_detected", {
-                confidence: Number(Number(phone.score || 0).toFixed(4)),
+                confidence: Number(phoneConfidence.toFixed(4)),
                 object_label: String(phone.categoryName || phone.displayName || "cell phone"),
+                consecutive_frames: requiredPhoneFrames,
               });
             }
           } catch {

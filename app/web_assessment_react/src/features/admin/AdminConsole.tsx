@@ -8,7 +8,7 @@ import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
 import "./AdminConsole.css";
 
-type AdminTab = "overview" | "companies" | "users" | "usage" | "billing" | "settings";
+type AdminTab = "overview" | "companies" | "users" | "usage" | "billing" | "governance" | "requests" | "audit" | "settings";
 
 type AccountContext = {
   email: string;
@@ -46,6 +46,7 @@ type Billing = {
 
 type Company = {
   provider_id: number;
+  organization_id: number | null;
   company_name: string;
   owner_user_id: number;
   owner_name: string;
@@ -81,6 +82,62 @@ type Usage = {
   submissions: number;
   unique_candidates: number;
   completion_rate: number;
+};
+
+type Governance = {
+  organization_id: number;
+  organization_name: string;
+  candidate_retention_days: number;
+  assessment_retention_days: number;
+  proctor_retention_days: number;
+  audit_retention_days: number;
+  legal_hold_enabled: boolean;
+  legal_hold_reason: string;
+  retention_preview: {
+    hiring_candidates_eligible: number;
+    assessment_issues_eligible: number;
+    candidate_cutoff: string;
+    assessment_cutoff: string;
+    execution_blocked: boolean;
+  };
+};
+
+type AuditEvent = {
+  id: number;
+  organization_id: number;
+  organization_name: string;
+  actor_user_id: number | null;
+  action: string;
+  target_type: string;
+  target_id: number | null;
+  details: Record<string, unknown>;
+  created_at: string;
+};
+
+type DataRequest = {
+  id: number;
+  organization_name: string;
+  provider_id: number;
+  request_reference: string;
+  request_type: "access" | "export" | "delete";
+  candidate_email: string;
+  requestor_name: string;
+  status: string;
+  identity_verified_at: string | null;
+  received_at: string;
+  due_at: string;
+  completed_at: string | null;
+  notes: string;
+  resolution: Record<string, unknown>;
+};
+
+const emptyGovernance = {
+  candidate_retention_days: 730,
+  assessment_retention_days: 365,
+  proctor_retention_days: 30,
+  audit_retention_days: 730,
+  legal_hold_enabled: false,
+  legal_hold_reason: "",
 };
 
 const emptyBilling: Billing = {
@@ -129,6 +186,12 @@ export function AdminConsole() {
   const [newCompany, setNewCompany] = useState({ business_name: "", email: "", password: "" });
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null);
   const [billingForm, setBillingForm] = useState<Billing>(emptyBilling);
+  const [governanceForm, setGovernanceForm] = useState(emptyGovernance);
+  const [auditAction, setAuditAction] = useState("");
+  const [auditProviderId, setAuditProviderId] = useState<number | null>(null);
+  const [showNewRequest, setShowNewRequest] = useState(false);
+  const [requestNotice, setRequestNotice] = useState("");
+  const [newRequest, setNewRequest] = useState({ provider_id: "", request_type: "export", candidate_email: "", requestor_name: "", notes: "" });
 
   const overview = useQuery({
     queryKey: ["admin-overview"],
@@ -150,6 +213,26 @@ export function AdminConsole() {
     queryKey: ["admin-usage", usageDays],
     queryFn: async () => (await api.get<{ items: Usage[] }>(`/admin/workspace/usage?days=${usageDays}`)).data.items,
   });
+  const governance = useQuery({
+    queryKey: ["admin-governance", selectedProviderId],
+    queryFn: async () => (await api.get<Governance>(`/admin/workspace/companies/${selectedProviderId}/governance`)).data,
+    enabled: Boolean(selectedProviderId) && tab === "governance",
+  });
+  const auditEvents = useQuery({
+    queryKey: ["admin-audit-events", auditProviderId, auditAction],
+    queryFn: async () => {
+      const params = new URLSearchParams({ limit: "200" });
+      if (auditProviderId) params.set("provider_id", String(auditProviderId));
+      if (auditAction.trim()) params.set("action", auditAction.trim());
+      return (await api.get<{ items: AuditEvent[] }>(`/admin/workspace/audit-events?${params.toString()}`)).data.items;
+    },
+    enabled: tab === "audit",
+  });
+  const dataRequests = useQuery({
+    queryKey: ["admin-data-requests"],
+    queryFn: async () => (await api.get<{ items: DataRequest[] }>("/admin/workspace/data-requests")).data.items,
+    enabled: tab === "requests",
+  });
 
   const companyRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -165,6 +248,18 @@ export function AdminConsole() {
   useEffect(() => {
     if (!selectedProviderId && companies.data?.length) setSelectedProviderId(companies.data[0].provider_id);
   }, [companies.data, selectedProviderId]);
+  useEffect(() => {
+    if (governance.data) {
+      setGovernanceForm({
+        candidate_retention_days: governance.data.candidate_retention_days,
+        assessment_retention_days: governance.data.assessment_retention_days,
+        proctor_retention_days: governance.data.proctor_retention_days,
+        audit_retention_days: governance.data.audit_retention_days,
+        legal_hold_enabled: governance.data.legal_hold_enabled,
+        legal_hold_reason: governance.data.legal_hold_reason,
+      });
+    }
+  }, [governance.data]);
   useEffect(() => {
     const company = companies.data?.find((item) => item.provider_id === selectedProviderId);
     if (company) setBillingForm({ ...company.billing, billing_email: company.billing.billing_email || company.owner_email, notes: company.billing.notes || "" });
@@ -216,6 +311,52 @@ export function AdminConsole() {
       ]);
     },
   });
+  const saveGovernance = useMutation({
+    mutationFn: async () => {
+      if (!selectedProviderId) throw new Error("Select a company.");
+      return (await api.put(`/admin/workspace/companies/${selectedProviderId}/governance`, governanceForm)).data;
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["admin-governance", selectedProviderId] }),
+        qc.invalidateQueries({ queryKey: ["admin-audit-events"] }),
+      ]);
+    },
+  });
+  const createDataRequest = useMutation({
+    mutationFn: async () => (await api.post("/admin/workspace/data-requests", { ...newRequest, provider_id: Number(newRequest.provider_id) })).data,
+    onSuccess: async () => {
+      setShowNewRequest(false);
+      setNewRequest({ provider_id: "", request_type: "export", candidate_email: "", requestor_name: "", notes: "" });
+      setRequestNotice("Data request recorded with a 30-day due date.");
+      await qc.invalidateQueries({ queryKey: ["admin-data-requests"] });
+    },
+  });
+  const updateDataRequest = useMutation({
+    mutationFn: async ({ id, action, reason }: { id: number; action: string; reason: string }) => (await api.patch(`/admin/workspace/data-requests/${id}`, { action, reason })).data,
+    onSuccess: async () => {
+      setRequestNotice("Request workflow updated and audited.");
+      await qc.invalidateQueries({ queryKey: ["admin-data-requests"] });
+    },
+  });
+  const executeDataRequest = useMutation({
+    mutationFn: async ({ item, confirmation }: { item: DataRequest; confirmation: string }) => (
+      await api.post<{ request: DataRequest; export: Record<string, unknown> | null }>(`/admin/workspace/data-requests/${item.id}/execute`, { confirmation })
+    ).data,
+    onSuccess: async (data) => {
+      if (data.export) {
+        const blob = new Blob([JSON.stringify(data.export, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${data.request.request_reference}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+      setRequestNotice(data.export ? "Verified export generated and the request completed." : "Approved deletion completed and audited.");
+      await qc.invalidateQueries({ queryKey: ["admin-data-requests"] });
+    },
+  });
 
   const handleCreateCompany = (event: FormEvent) => {
     event.preventDefault();
@@ -237,6 +378,9 @@ export function AdminConsole() {
     users: ["Users", "Provision recruiter accounts and control access."],
     usage: ["Usage", "Track assessment delivery and completion by company."],
     billing: ["Billing", "Maintain plans, allowances, pricing, and billing periods."],
+    governance: ["Data governance", "Configure retention schedules and organization-wide legal holds."],
+    requests: ["Data requests", "Verify and complete candidate access, export, and deletion requests."],
+    audit: ["Audit trail", "Search tenant actions without impersonating customer users."],
     settings: ["Settings", "Manage your administrator session and account access."],
   };
   const [title, description] = pageTitles[tab];
@@ -247,7 +391,7 @@ export function AdminConsole() {
       <aside className="admin-rail">
         <div className="admin-brand"><BrandLogo className="workspace-brand-logo" /><div><strong>Valases</strong><small>Administration</small></div></div>
         <nav aria-label="Administration">
-          {(["overview", "companies", "users", "usage", "billing", "settings"] as AdminTab[]).map((item) => (
+          {(["overview", "companies", "users", "usage", "billing", "governance", "requests", "audit", "settings"] as AdminTab[]).map((item) => (
             <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>
           ))}
         </nav>
@@ -261,6 +405,7 @@ export function AdminConsole() {
         <header className="admin-page-head">
           <div><h1>{title}</h1><p>{description}</p></div>
           {tab === "companies" && <button type="button" className="admin-primary" onClick={() => { setCreatedCompany(null); setShowNewCompany(true); }}>Add company</button>}
+          {tab === "requests" && <button type="button" className="admin-primary" onClick={() => setShowNewRequest(true)}>New request</button>}
         </header>
 
         {overview.isError && <div className="admin-error">{apiMessage(overview.error, "Administration data could not be loaded.")}</div>}
@@ -338,6 +483,77 @@ export function AdminConsole() {
           </section>
         )}
 
+        {tab === "governance" && (
+          <section className="admin-governance-layout">
+            <aside className="admin-company-list">
+              <label>Company<select value={selectedProviderId || ""} onChange={(event) => setSelectedProviderId(Number(event.target.value))}>{(companies.data || []).map((company) => <option key={company.provider_id} value={company.provider_id}>{company.company_name}</option>)}</select></label>
+              {(companies.data || []).map((company) => <button type="button" key={company.provider_id} className={selectedProviderId === company.provider_id ? "active" : ""} onClick={() => setSelectedProviderId(company.provider_id)}><strong>{company.company_name}</strong><small>{company.organization_id ? `Organization ${company.organization_id}` : "Backfill required"}</small></button>)}
+            </aside>
+            <form className="admin-section admin-governance-form" onSubmit={(event) => { event.preventDefault(); saveGovernance.mutate(); }}>
+              <div className="admin-section-head"><div><h2>Retention and legal hold</h2><p>Periods are applied to the selected organization. Eligibility is previewed here; deletion runs only through the controlled operator job.</p></div></div>
+              {governance.isError && <div className="admin-error admin-form-alert">{apiMessage(governance.error, "Governance settings could not be loaded.")}</div>}
+              <div className="admin-form-grid">
+                <label>Candidate records (days)<input type="number" min="30" max="3650" value={governanceForm.candidate_retention_days} onChange={(event) => setGovernanceForm((value) => ({ ...value, candidate_retention_days: Number(event.target.value) }))} /></label>
+                <label>Assessment records (days)<input type="number" min="30" max="3650" value={governanceForm.assessment_retention_days} onChange={(event) => setGovernanceForm((value) => ({ ...value, assessment_retention_days: Number(event.target.value) }))} /></label>
+                <label>Proctor records (days)<input type="number" min="1" max="365" value={governanceForm.proctor_retention_days} onChange={(event) => setGovernanceForm((value) => ({ ...value, proctor_retention_days: Number(event.target.value) }))} /></label>
+                <label>Audit records (days)<input type="number" min="365" max="3650" value={governanceForm.audit_retention_days} onChange={(event) => setGovernanceForm((value) => ({ ...value, audit_retention_days: Number(event.target.value) }))} /></label>
+                <label className="admin-span-2 admin-hold-toggle"><input type="checkbox" checked={governanceForm.legal_hold_enabled} onChange={(event) => setGovernanceForm((value) => ({ ...value, legal_hold_enabled: event.target.checked }))} /><span><strong>Organization-wide legal hold</strong><small>Blocks retention execution until the hold is removed.</small></span></label>
+                <label className="admin-span-2">Legal hold reason<textarea rows={3} disabled={!governanceForm.legal_hold_enabled} value={governanceForm.legal_hold_reason} onChange={(event) => setGovernanceForm((value) => ({ ...value, legal_hold_reason: event.target.value }))} placeholder="Matter, authority, and preservation reason" /></label>
+              </div>
+              {governance.data?.retention_preview && <div className="admin-retention-preview"><div><span>Candidate records eligible</span><strong>{governance.data.retention_preview.hiring_candidates_eligible}</strong><small>Before {formatDate(governance.data.retention_preview.candidate_cutoff)}</small></div><div><span>Assessment invitations eligible</span><strong>{governance.data.retention_preview.assessment_issues_eligible}</strong><small>Before {formatDate(governance.data.retention_preview.assessment_cutoff)}</small></div><div><span>Execution</span><strong>{governance.data.retention_preview.execution_blocked ? "Blocked" : "Available to operator"}</strong><small>{governance.data.retention_preview.execution_blocked ? "Legal hold is active" : "Requires controlled job confirmation"}</small></div></div>}
+              <div className="admin-form-actions"><button className="admin-primary" type="submit" disabled={saveGovernance.isPending || !selectedProviderId || (governanceForm.legal_hold_enabled && governanceForm.legal_hold_reason.trim().length < 10)}>{saveGovernance.isPending ? "Saving..." : "Save governance settings"}</button>{saveGovernance.isSuccess && <span>Governance settings and audit event saved.</span>}{saveGovernance.isError && <span className="admin-error-inline">{apiMessage(saveGovernance.error, "Governance settings could not be saved.")}</span>}</div>
+            </form>
+          </section>
+        )}
+
+        {tab === "requests" && (
+          <section className="admin-section">
+            {requestNotice && <div className="admin-success-notice"><span>{requestNotice}</span><button type="button" onClick={() => setRequestNotice("")}>Dismiss</button></div>}
+            {(updateDataRequest.isError || executeDataRequest.isError) && <div className="admin-error admin-form-alert">{apiMessage(updateDataRequest.error || executeDataRequest.error, "The data request action could not be completed.")}</div>}
+            <div className="admin-toolbar"><span>{dataRequests.data?.length || 0} requests ordered by due date</span></div>
+            <div className="admin-table data-request-table">
+              <div className="admin-table-head"><span>Request</span><span>Candidate</span><span>Company</span><span>Due</span><span>Status</span><span>Actions</span></div>
+              {(dataRequests.data || []).map((item) => {
+                const act = (action: string, prompt: string) => {
+                  const reason = window.prompt(prompt);
+                  if (reason?.trim() && reason.trim().length >= 10) updateDataRequest.mutate({ id: item.id, action, reason: reason.trim() });
+                };
+                return <div className="admin-table-row" key={item.id}>
+                  <div><strong>{item.request_reference}</strong><small>{item.request_type.toUpperCase()} | Received {formatDate(item.received_at)}</small></div>
+                  <div><strong>{item.requestor_name || "Candidate"}</strong><small>{item.candidate_email}</small></div>
+                  <span>{item.organization_name}</span>
+                  <span>{formatDate(item.due_at)}</span>
+                  <span className={`admin-state state-${item.status}`}>{item.status.replace(/_/g, " ")}</span>
+                  <div className="admin-request-actions">
+                    {item.status === "received" && <button type="button" onClick={() => act("verify_identity", "Record how identity was verified (minimum 10 characters):")}>Verify</button>}
+                    {item.status === "identity_verified" && <button type="button" onClick={() => act("start_review", "Record the review scope (minimum 10 characters):")}>Review</button>}
+                    {["identity_verified", "in_review"].includes(item.status) && <button type="button" onClick={() => act("approve", "Record the approval basis (minimum 10 characters):")}>Approve</button>}
+                    {!["completed", "rejected", "approved"].includes(item.status) && <button type="button" onClick={() => act("hold", "Record the hold reason (minimum 10 characters):")}>Hold</button>}
+                    {item.status === "on_hold" && <button type="button" onClick={() => act("resume", "Record why processing can resume (minimum 10 characters):")}>Resume</button>}
+                    {item.status === "approved" && <button type="button" className={item.request_type === "delete" ? "danger" : ""} onClick={() => { const confirmation = window.prompt(`Type ${item.request_reference} to execute this ${item.request_type} request:`); if (confirmation) executeDataRequest.mutate({ item, confirmation }); }}>Execute</button>}
+                  </div>
+                </div>;
+              })}
+              {!dataRequests.isLoading && !dataRequests.data?.length && <div className="admin-empty-row">No data-subject requests have been recorded.</div>}
+            </div>
+          </section>
+        )}
+
+        {tab === "audit" && (
+          <section className="admin-section">
+            <div className="admin-toolbar admin-audit-toolbar">
+              <label>Company<select value={auditProviderId || ""} onChange={(event) => setAuditProviderId(event.target.value ? Number(event.target.value) : null)}><option value="">All companies</option>{(companies.data || []).map((company) => <option key={company.provider_id} value={company.provider_id}>{company.company_name}</option>)}</select></label>
+              <input aria-label="Filter audit actions" value={auditAction} onChange={(event) => setAuditAction(event.target.value)} placeholder="Filter action, for example stage or governance" />
+              <span>{auditEvents.data?.length || 0} events</span>
+            </div>
+            <div className="admin-table audit-table">
+              <div className="admin-table-head"><span>Time</span><span>Company</span><span>Action</span><span>Target</span><span>Actor</span></div>
+              {(auditEvents.data || []).map((event) => <div className="admin-table-row" key={event.id}><span>{new Date(event.created_at).toLocaleString()}</span><strong>{event.organization_name}</strong><div><strong>{event.action.replace(/_/g, " ")}</strong><small>{Object.keys(event.details).length ? JSON.stringify(event.details) : "No additional metadata"}</small></div><span>{event.target_type}{event.target_id ? ` #${event.target_id}` : ""}</span><span>{event.actor_user_id ? `User ${event.actor_user_id}` : "System"}</span></div>)}
+              {!auditEvents.isLoading && !auditEvents.data?.length && <div className="admin-empty-row">No audit events match this filter.</div>}
+            </div>
+          </section>
+        )}
+
         {tab === "settings" && (
           <section className="admin-section admin-settings-section">
             <div className="admin-section-head">
@@ -379,6 +595,23 @@ export function AdminConsole() {
                 <div className="admin-form-actions"><button type="button" onClick={() => setShowNewCompany(false)}>Cancel</button><button className="admin-primary" type="submit" disabled={createCompany.isPending}>{createCompany.isPending ? "Creating..." : "Create company"}</button></div>
               </form>
             )}
+          </section>
+        </div>
+      )}
+
+      {showNewRequest && (
+        <div className="admin-modal-backdrop" role="presentation" onMouseDown={() => setShowNewRequest(false)}>
+          <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="new-request-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header><div><h2 id="new-request-title">Record data request</h2><p>Create a tracked candidate privacy request with a 30-day due date.</p></div><button type="button" aria-label="Close" onClick={() => setShowNewRequest(false)}>x</button></header>
+            <form className="admin-user-form" onSubmit={(event) => { event.preventDefault(); createDataRequest.mutate(); }}>
+              <label>Company<select required value={newRequest.provider_id} onChange={(event) => setNewRequest((value) => ({ ...value, provider_id: event.target.value }))}><option value="">Select company</option>{(companies.data || []).filter((company) => company.organization_id).map((company) => <option key={company.provider_id} value={company.provider_id}>{company.company_name}</option>)}</select></label>
+              <label>Request type<select value={newRequest.request_type} onChange={(event) => setNewRequest((value) => ({ ...value, request_type: event.target.value }))}><option value="access">Access</option><option value="export">Portable export</option><option value="delete">Deletion</option></select></label>
+              <label>Candidate email<input required type="email" value={newRequest.candidate_email} onChange={(event) => setNewRequest((value) => ({ ...value, candidate_email: event.target.value }))} /></label>
+              <label>Requestor name<input value={newRequest.requestor_name} onChange={(event) => setNewRequest((value) => ({ ...value, requestor_name: event.target.value }))} /></label>
+              <label>Intake notes<textarea rows={3} value={newRequest.notes} onChange={(event) => setNewRequest((value) => ({ ...value, notes: event.target.value }))} placeholder="Request channel and initial verification information" /></label>
+              {createDataRequest.isError && <div className="admin-error">{apiMessage(createDataRequest.error, "The request could not be recorded.")}</div>}
+              <div className="admin-form-actions"><button type="button" onClick={() => setShowNewRequest(false)}>Cancel</button><button className="admin-primary" type="submit" disabled={createDataRequest.isPending}>{createDataRequest.isPending ? "Recording..." : "Record request"}</button></div>
+            </form>
           </section>
         </div>
       )}

@@ -28,12 +28,18 @@ from app.models.entities import (
     AssessmentSubmission,
     AssessmentTask,
     AssessmentType,
+    AuditLog,
     Course,
     CourseModule,
     Exam,
     ExamRule,
     ExamStatus,
+    HiringApplication,
+    HiringCandidate,
+    HiringStageEvent,
     Option,
+    OrganizationAuditEvent,
+    OrganizationMembership,
     ProviderProfile,
     ProviderType,
     Question,
@@ -133,6 +139,7 @@ def _get_or_create_standalone_course(db: Session, profile: ProviderProfile) -> C
 
 
 class IssueAssessmentRequest(BaseModel):
+    application_id: int = Field(gt=0)
     candidate_name: str = Field(min_length=2, max_length=200)
     candidate_email: EmailStr
 
@@ -143,10 +150,21 @@ class IssuedCandidateLoginRequest(BaseModel):
 
 
 class IssuedCandidateSubmitRequest(BaseModel):
+    submission_id: str | None = Field(default=None, min_length=16, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
     answers: dict[str, list[int] | int | None] = Field(default_factory=dict, max_length=200)
     submitted_data: dict[str, Any] = Field(default_factory=dict, max_length=2_000)
     time_taken_seconds: int | None = Field(default=None, ge=0, le=172_800)
     proctoring_events: list[dict[str, Any]] | dict[str, Any] | None = None
+
+
+class IssuedCandidateAutosaveRequest(BaseModel):
+    submission_id: str = Field(min_length=16, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    revision: int = Field(ge=1, le=2_000_000_000)
+    answers: dict[str, list[int] | int | None] = Field(default_factory=dict, max_length=200)
+    submitted_data: dict[str, Any] = Field(default_factory=dict, max_length=2_000)
+    current_question_index: int = Field(default=0, ge=0, le=10_000)
+    time_taken_seconds: int | None = Field(default=None, ge=0, le=172_800)
+    timer_state: dict[str, Any] = Field(default_factory=dict, max_length=100)
 
 
 class IssuedCandidateProctorEventRequest(BaseModel):
@@ -165,7 +183,35 @@ class IssuedCandidateConsentRequest(BaseModel):
 
 class AssessmentReviewFinalizeRequest(BaseModel):
     score_pct: float = Field(ge=0, le=100)
-    reviewer_notes: str = Field(default="", max_length=4000)
+    reviewer_notes: str = Field(min_length=10, max_length=4000)
+
+
+class IssuedAssessmentRevokeRequest(BaseModel):
+    reason: str = Field(default="Revoked by recruiter", min_length=3, max_length=500)
+
+
+def _append_issue_operation(issue: AssessmentIssue, operation: str, details: dict | None = None) -> None:
+    result = dict(issue.result_json) if isinstance(issue.result_json, dict) else {}
+    operations = result.get("operations") if isinstance(result.get("operations"), list) else []
+    operations.append(
+        {
+            "operation": operation,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "details": details or {},
+        },
+    )
+    result["operations"] = operations[-50:]
+    issue.result_json = result
+
+
+def _latest_invite_delivery(issue: AssessmentIssue) -> dict | None:
+    result = dict(issue.result_json) if isinstance(issue.result_json, dict) else {}
+    operations = result.get("operations") if isinstance(result.get("operations"), list) else []
+    for operation in reversed(operations):
+        if isinstance(operation, dict) and operation.get("operation") in {"invite_sent", "invite_resent"}:
+            details = operation.get("details")
+            return details if isinstance(details, dict) else None
+    return None
 
 
 def _create_issued_candidate_token(issue_id: int, session_token: str) -> str:
@@ -193,6 +239,26 @@ def _session_token_matches(stored_token: str | None, presented_token: str) -> bo
 
 def _json_size_bytes(value: Any) -> int:
     return len(json.dumps(value, separators=(",", ":"), ensure_ascii=True).encode("utf-8"))
+
+
+def _latest_issue_submission(db: Session, issue_id: int) -> AssessmentSubmission | None:
+    return db.scalar(
+        select(AssessmentSubmission)
+        .where(AssessmentSubmission.issue_id == issue_id)
+        .order_by(AssessmentSubmission.id.desc()),
+    )
+
+
+def _submission_runtime_metadata(submission: AssessmentSubmission | None) -> dict[str, Any]:
+    if not submission or not isinstance(submission.submitted_data_json, dict):
+        return {}
+    metadata = submission.submitted_data_json.get("_runtime")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _lock_issue_submission_transaction(db: Session, issue_id: int) -> None:
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(:issue_id)"), {"issue_id": int(issue_id)})
 
 
 def _bounded_candidate_events(value: list[dict[str, Any]] | dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -237,6 +303,8 @@ def _issued_issue_from_bearer_token(authorization: str | None, db: Session) -> A
     issue = db.get(AssessmentIssue, issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issued assessment not found")
+    if issue.status == "revoked":
+        raise HTTPException(status_code=410, detail="This assessment invitation has been revoked")
     if not _session_token_matches(issue.active_session_token, session_token):
         raise HTTPException(status_code=409, detail="This assessment is already open in another session. Use the latest opened session or ask the recruiter to re-issue.")
     if _is_expired(issue.access_expires_at):
@@ -1169,6 +1237,24 @@ def issue_assessment_to_candidate(
     if exam.status != ExamStatus.PUBLISHED:
         raise HTTPException(status_code=400, detail="Only published assessments can be issued")
 
+    application = db.get(HiringApplication, payload.application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Candidate application not found")
+    membership = db.scalar(
+        select(OrganizationMembership).where(
+            OrganizationMembership.organization_id == application.organization_id,
+            OrganizationMembership.user_id == current_user.id,
+            OrganizationMembership.status == "active",
+        ),
+    )
+    if current_user.role != UserRole.ADMIN and not membership:
+        raise HTTPException(status_code=403, detail="Candidate application does not belong to your organization")
+    if application.status != "active" or application.stage != "screening":
+        raise HTTPException(status_code=409, detail="Assessments can only be sent to active candidates in screening")
+    candidate = db.get(HiringCandidate, application.candidate_id)
+    if not candidate or candidate.organization_id != application.organization_id:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
     settings = get_settings()
     configured_candidate_url = str(settings.candidate_app_base_url or "").strip()
     if settings.is_production and not configured_candidate_url:
@@ -1180,10 +1266,13 @@ def issue_assessment_to_candidate(
 
     candidate_email = str(payload.candidate_email).strip().lower()
     candidate_name = str(payload.candidate_name).strip()
+    if candidate_email != str(candidate.email).strip().lower():
+        raise HTTPException(status_code=422, detail="Candidate email does not match the selected screening application")
     temp_password = secrets.token_urlsafe(16)
     issue = AssessmentIssue(
         exam_id=exam.id,
         issuer_user_id=current_user.id,
+        hiring_application_id=application.id,
         candidate_user_id=None,
         candidate_name=candidate_name,
         candidate_email=candidate_email,
@@ -1193,6 +1282,27 @@ def issue_assessment_to_candidate(
         status="issued",
     )
     db.add(issue)
+    application.stage = "assessment"
+    db.add(
+        HiringStageEvent(
+            organization_id=application.organization_id,
+            application_id=application.id,
+            actor_user_id=current_user.id,
+            from_stage="screening",
+            to_stage="assessment",
+            reason=f"Assessment issued: {exam.title}",
+        ),
+    )
+    db.add(
+        OrganizationAuditEvent(
+            organization_id=application.organization_id,
+            actor_user_id=current_user.id,
+            action="candidate_assessment_issued",
+            target_type="application",
+            target_id=application.id,
+            details_json={"exam_id": exam.id},
+        ),
+    )
     db.commit()
     db.refresh(issue)
     login_link = f"{base_url}/?issued_key={issue.access_key}"
@@ -1207,11 +1317,31 @@ def issue_assessment_to_candidate(
         privacy_url=f"{base_url}/legal/privacy-policy",
         retention_url=f"{base_url}/legal/data-retention-and-deletion",
     )
+    delivery_details = {
+        "sent": bool(email_delivery.get("sent")),
+        "reason": str(email_delivery.get("reason") or "")[:300] or None,
+        "recipient": candidate_email,
+    }
+    _append_issue_operation(issue, "invite_sent", delivery_details)
+    db.add(
+        AuditLog(
+            actor_user_id=current_user.id,
+            action="assessment_issued",
+            target_type="assessment_issue",
+            target_id=issue.id,
+            details_json={
+                "exam_id": exam.id,
+                "delivery_sent": delivery_details["sent"],
+            },
+        ),
+    )
+    db.commit()
     return {
         "issued_id": issue.id,
         "exam_id": exam.id,
         "internal_id": _internal_assessment_id(exam.id),
         "candidate_email": candidate_email,
+        "application_id": application.id,
         "temporary_password": temp_password,
         "login_link": login_link,
         "credentials_valid_till": issue.access_expires_at,
@@ -1241,6 +1371,7 @@ def list_issued_assessments_for_provider(
         out.append(
             {
                 "issued_id": row.id,
+                "application_id": row.hiring_application_id,
                 "exam_id": row.exam_id,
                 "internal_id": _internal_assessment_id(row.exam_id),
                 "assessment_title": exam.title if exam else f"Assessment #{row.exam_id}",
@@ -1256,9 +1387,132 @@ def list_issued_assessments_for_provider(
                 "completed_at": row.completed_at,
                 "time_taken_seconds": submission.time_taken_seconds if submission else None,
                 "submission_status": submission.status if submission else None,
+                "invite_delivery": _latest_invite_delivery(row),
             },
         )
     return out
+
+
+@router.post("/issued/{issue_id}/resend")
+def resend_issued_assessment_invitation(
+    issue_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    issue = db.get(AssessmentIssue, issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issued assessment not found")
+    if current_user.role != UserRole.ADMIN and int(issue.issuer_user_id) != int(current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if issue.status not in {"issued", "revoked"}:
+        raise HTTPException(status_code=409, detail="Only an unused or revoked invitation can be reissued")
+    exam = db.get(Exam, issue.exam_id)
+    if not exam:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    issuer_profile = db.scalar(
+        select(ProviderProfile).where(ProviderProfile.user_id == issue.issuer_user_id),
+    )
+
+    settings = get_settings()
+    base_url = str(settings.candidate_app_base_url or "").strip().rstrip("/")
+    if not base_url and not settings.is_production:
+        base_url = f"{request.url.scheme}://{request.headers.get('host')}".rstrip("/")
+    parsed_candidate_url = urlsplit(base_url)
+    if parsed_candidate_url.scheme not in {"http", "https"} or not parsed_candidate_url.netloc:
+        raise HTTPException(status_code=503, detail="Candidate portal URL is invalid")
+
+    temporary_password = secrets.token_urlsafe(16)
+    issue.candidate_password_hash = hash_password(temporary_password)
+    issue.access_key = secrets.token_urlsafe(24)
+    issue.access_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    issue.credential_used_at = None
+    issue.active_session_token = None
+    issue.active_session_started_at = None
+    issue.started_at = None
+    issue.completed_at = None
+    issue.status = "issued"
+    login_link = f"{base_url}/?issued_key={issue.access_key}"
+    email_delivery = _safe_send_assessment_issue_email(
+        to_email=issue.candidate_email,
+        candidate_name=issue.candidate_name,
+        assessment_title=exam.title,
+        login_link=login_link,
+        temporary_password=temporary_password,
+        expires_at=issue.access_expires_at,
+        company_name=(
+            issuer_profile.display_name
+            if issuer_profile and issuer_profile.display_name
+            else settings.app_name
+        ),
+        privacy_url=f"{base_url}/legal/privacy-policy",
+        retention_url=f"{base_url}/legal/data-retention-and-deletion",
+    )
+    delivery_details = {
+        "sent": bool(email_delivery.get("sent")),
+        "reason": str(email_delivery.get("reason") or "")[:300] or None,
+        "recipient": issue.candidate_email,
+    }
+    _append_issue_operation(issue, "invite_resent", delivery_details)
+    db.add(issue)
+    db.add(
+        AuditLog(
+            actor_user_id=current_user.id,
+            action="assessment_invitation_resent",
+            target_type="assessment_issue",
+            target_id=issue.id,
+            details_json={"delivery_sent": delivery_details["sent"]},
+        ),
+    )
+    db.commit()
+    return {
+        "issued_id": issue.id,
+        "status": issue.status,
+        "login_link": login_link,
+        "temporary_password": temporary_password,
+        "credentials_valid_till": issue.access_expires_at,
+        "email_delivery": email_delivery,
+    }
+
+
+@router.post("/issued/{issue_id}/revoke")
+def revoke_issued_assessment_invitation(
+    issue_id: int,
+    payload: IssuedAssessmentRevokeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    issue = db.get(AssessmentIssue, issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issued assessment not found")
+    if current_user.role != UserRole.ADMIN and int(issue.issuer_user_id) != int(current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if issue.status in {"completed", "manual_review", "review_pending", "reviewed"}:
+        raise HTTPException(status_code=409, detail="A submitted assessment cannot be revoked")
+    if issue.status == "revoked":
+        return {"issued_id": issue.id, "status": issue.status}
+
+    issue.status = "revoked"
+    issue.access_expires_at = datetime.now(timezone.utc)
+    issue.active_session_token = None
+    issue.active_session_started_at = None
+    _append_issue_operation(
+        issue,
+        "invite_revoked",
+        {"reason": payload.reason.strip(), "actor_user_id": current_user.id},
+    )
+    db.add(issue)
+    db.add(
+        AuditLog(
+            actor_user_id=current_user.id,
+            action="assessment_invitation_revoked",
+            target_type="assessment_issue",
+            target_id=issue.id,
+            details_json={"reason": payload.reason.strip()},
+        ),
+    )
+    db.commit()
+    return {"issued_id": issue.id, "status": issue.status}
 
 
 @router.get("/issued/{issue_id}/review")
@@ -1326,27 +1580,80 @@ def finalize_issued_assessment_review(
     if not exam or not submission:
         raise HTTPException(status_code=409, detail="No candidate submission is available for review")
     score_pct = round(float(payload.score_pct), 2)
+    reviewer_notes = payload.reviewer_notes.strip()
+    if len(reviewer_notes) < 10:
+        raise HTTPException(status_code=422, detail="Provide a review reason of at least 10 characters")
     total_marks = float(exam.total_marks or 0)
     final_marks = round((score_pct / 100.0) * total_marks, 2) if total_marks > 0 else None
+    previous_score_pct = issue.score_pct
     submission.manual_score = final_marks
     submission.score = final_marks
     submission.status = "reviewed"
     issue.score_pct = score_pct
     issue.passed = score_pct >= float(exam.pass_score or 70)
     issue.status = "reviewed"
-    result = issue.result_json if isinstance(issue.result_json, dict) else {}
-    result["review"] = {
+    result = dict(issue.result_json) if isinstance(issue.result_json, dict) else {}
+    review_record = {
         "reviewer_user_id": current_user.id,
         "reviewed_at": datetime.now(timezone.utc).isoformat(),
         "score_pct": score_pct,
         "passed": issue.passed,
-        "notes": payload.reviewer_notes.strip(),
+        "notes": reviewer_notes,
     }
+    review_history = result.get("review_history") if isinstance(result.get("review_history"), list) else []
+    review_history.append(review_record)
+    result["review_history"] = review_history[-50:]
+    result["review"] = review_record
     issue.result_json = result
+    application_stage = None
+    if issue.passed and issue.hiring_application_id:
+        application = db.get(HiringApplication, issue.hiring_application_id)
+        if application and application.status == "active" and application.stage == "assessment":
+            application.stage = "interview"
+            application_stage = "interview"
+            db.add(
+                HiringStageEvent(
+                    organization_id=application.organization_id,
+                    application_id=application.id,
+                    actor_user_id=current_user.id,
+                    from_stage="assessment",
+                    to_stage="interview",
+                    reason=f"Assessment cleared with a final score of {score_pct:.1f}%",
+                ),
+            )
+            db.add(
+                OrganizationAuditEvent(
+                    organization_id=application.organization_id,
+                    actor_user_id=current_user.id,
+                    action="candidate_advanced_after_assessment",
+                    target_type="application",
+                    target_id=application.id,
+                    details_json={"assessment_issue_id": issue.id, "score_pct": score_pct},
+                ),
+            )
     db.add(submission)
     db.add(issue)
+    db.add(
+        AuditLog(
+            actor_user_id=current_user.id,
+            action="assessment_review_finalized",
+            target_type="assessment_issue",
+            target_id=issue.id,
+            details_json={
+                "previous_score_pct": previous_score_pct,
+                "final_score_pct": score_pct,
+                "passed": issue.passed,
+                "reason": reviewer_notes,
+            },
+        ),
+    )
     db.commit()
-    return {"status": issue.status, "score_pct": issue.score_pct, "passed": issue.passed}
+    return {
+        "status": issue.status,
+        "score_pct": issue.score_pct,
+        "passed": issue.passed,
+        "application_stage": application_stage,
+    }
 
 
 @router.get("/catalog/published")
@@ -1451,6 +1758,8 @@ def issued_candidate_login_by_key(access_key: str, payload: IssuedCandidateLogin
     issue = db.scalar(select(AssessmentIssue).where(AssessmentIssue.access_key == access_key))
     if not issue or not verify_password(payload.password, issue.candidate_password_hash):
         raise HTTPException(status_code=401, detail="Invalid issued assessment credentials")
+    if issue.status == "revoked":
+        raise HTTPException(status_code=410, detail="This assessment invitation has been revoked")
     now = datetime.now(timezone.utc)
     if _is_expired(issue.access_expires_at):
         raise HTTPException(status_code=401, detail="Credentials expired. Ask issuer for re-issue.")
@@ -1483,6 +1792,21 @@ def issued_candidate_get_assessment(
     assessment_type = str(exam.assessment_type or AssessmentType.MCQ.value)
     task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == exam.id)) if assessment_type != AssessmentType.MCQ.value else None
     questions = _questions_for_issued_attempt(db, issue, exam) if assessment_type == AssessmentType.MCQ.value else []
+    draft_submission = _latest_issue_submission(db, issue.id)
+    draft = None
+    if draft_submission and draft_submission.status == "draft" and isinstance(draft_submission.submitted_data_json, dict):
+        saved = draft_submission.submitted_data_json
+        runtime = _submission_runtime_metadata(draft_submission)
+        draft = {
+            "submission_id": runtime.get("submission_id"),
+            "revision": int(runtime.get("revision") or 0),
+            "saved_at": runtime.get("saved_at"),
+            "answers": saved.get("answers") if isinstance(saved.get("answers"), dict) else {},
+            "submitted_data": saved.get("submitted_data") if isinstance(saved.get("submitted_data"), dict) else {},
+            "current_question_index": int(runtime.get("current_question_index") or 0),
+            "time_taken_seconds": draft_submission.time_taken_seconds,
+            "timer_state": runtime.get("timer_state") if isinstance(runtime.get("timer_state"), dict) else {},
+        }
     payload_questions = []
     for q in questions:
         opts = list(db.scalars(select(Option).where(Option.question_id == q.id).order_by(Option.position.asc(), Option.id.asc())).all())
@@ -1508,7 +1832,68 @@ def issued_candidate_get_assessment(
         "questions_per_attempt": exam.questions_per_attempt,
         "task": _candidate_task_to_dict(task),
         "questions": payload_questions,
+        "draft": draft,
     }
+
+
+@router.post("/issued/autosave")
+def issued_candidate_autosave(
+    payload: IssuedCandidateAutosaveRequest,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    issue = _issued_issue_from_bearer_token(authorization, db)
+    if issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
+        raise HTTPException(status_code=409, detail="Assessment is no longer active")
+    if _json_size_bytes(payload.submitted_data) > 3_000_000:
+        raise HTTPException(status_code=413, detail="Assessment draft is too large")
+    if _json_size_bytes(payload.answers) > 250_000 or _json_size_bytes(payload.timer_state) > 32_000:
+        raise HTTPException(status_code=413, detail="Assessment draft state is too large")
+
+    _lock_issue_submission_transaction(db, issue.id)
+    submission = _latest_issue_submission(db, issue.id)
+    if submission and submission.status != "draft":
+        raise HTTPException(status_code=409, detail="Assessment has already been submitted")
+    runtime = _submission_runtime_metadata(submission)
+    current_revision = int(runtime.get("revision") or 0)
+    current_submission_id = str(runtime.get("submission_id") or "")
+    if current_submission_id == payload.submission_id and payload.revision <= current_revision:
+        return {
+            "status": "unchanged",
+            "revision": current_revision,
+            "saved_at": runtime.get("saved_at"),
+        }
+
+    exam = db.get(Exam, issue.exam_id)
+    if not exam:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    saved_at = datetime.now(timezone.utc)
+    saved_data = {
+        "answers": payload.answers,
+        "submitted_data": payload.submitted_data,
+        "_runtime": {
+            "submission_id": payload.submission_id,
+            "revision": payload.revision,
+            "saved_at": saved_at.isoformat(),
+            "current_question_index": payload.current_question_index,
+            "timer_state": payload.timer_state,
+        },
+    }
+    if not submission:
+        submission = AssessmentSubmission(
+            assessment_id=exam.id,
+            candidate_id=issue.candidate_user_id,
+            issue_id=issue.id,
+            assessment_type=str(exam.assessment_type or AssessmentType.MCQ.value),
+            status="draft",
+            started_at=issue.started_at,
+        )
+    submission.submitted_data_json = saved_data
+    submission.time_taken_seconds = payload.time_taken_seconds
+    submission.updated_at = saved_at
+    db.add(submission)
+    db.commit()
+    return {"status": "saved", "revision": payload.revision, "saved_at": saved_at}
 
 
 @router.post("/issued/consent")
@@ -1585,7 +1970,9 @@ def issued_candidate_proctor_event(
         state["termination_reason"] = "warning_limit_reached"
         issue.status = "terminated"
         issue.completed_at = datetime.now(timezone.utc)
-    issue.result_json = {"proctoring": state}
+    result = dict(issue.result_json) if isinstance(issue.result_json, dict) else {}
+    result["proctoring"] = state
+    issue.result_json = result
     db.add(issue)
     db.commit()
     return {
@@ -1602,7 +1989,16 @@ def issued_candidate_submit(
     db: Session = Depends(get_db),
 ):
     issue = _issued_issue_from_bearer_token(authorization, db)
+    _lock_issue_submission_transaction(db, issue.id)
+    db.refresh(issue)
+    existing_submission = _latest_issue_submission(db, issue.id)
     if issue.status in {"completed", "manual_review", "review_pending", "reviewed"}:
+        existing_runtime = _submission_runtime_metadata(existing_submission)
+        if payload.submission_id and existing_runtime.get("submission_id") == payload.submission_id:
+            return {
+                "status": "submitted",
+                "message": "Your assessment has been submitted for recruiter review.",
+            }
         raise HTTPException(status_code=409, detail="Assessment already submitted")
     proctoring_state = _issued_proctoring_state(issue)
     forced_manual_review = bool(proctoring_state.get("terminated"))
@@ -1628,27 +2024,33 @@ def issued_candidate_submit(
         score_pct = _integrity_adjusted_score(raw_score_pct, proctoring_state)
         if forced_manual_review:
             submission_status = "manual_review"
-        submission = AssessmentSubmission(
-            assessment_id=exam.id,
-            candidate_id=issue.candidate_user_id,
-            issue_id=issue.id,
-            assessment_type=assessment_type,
-            submitted_data_json=submitted_data,
-            score=auto_score,
-            auto_score=auto_score,
-            manual_score=None,
-            status="review_pending",
-            started_at=issue.started_at,
-            submitted_at=submitted_at,
-            time_taken_seconds=payload.time_taken_seconds,
-            proctoring_events_json=recorded_events,
-        )
+        submission = existing_submission if existing_submission and existing_submission.status == "draft" else AssessmentSubmission()
+        submission.assessment_id = exam.id
+        submission.candidate_id = issue.candidate_user_id
+        submission.issue_id = issue.id
+        submission.assessment_type = assessment_type
+        submission.submitted_data_json = {
+            **submitted_data,
+            "_runtime": {
+                "submission_id": payload.submission_id,
+                "submitted_at": submitted_at.isoformat(),
+            },
+        }
+        submission.score = auto_score
+        submission.auto_score = auto_score
+        submission.manual_score = None
+        submission.status = "review_pending"
+        submission.started_at = issue.started_at
+        submission.submitted_at = submitted_at
+        submission.time_taken_seconds = payload.time_taken_seconds
+        submission.proctoring_events_json = recorded_events
         db.add(submission)
         issue.status = "review_pending"
         issue.score_pct = None
         issue.passed = None
         issue.completed_at = submitted_at
-        issue.result_json = {
+        issue_result = dict(issue.result_json) if isinstance(issue.result_json, dict) else {}
+        issue_result.update({
             "assessment_type": assessment_type,
             "provisional_score": auto_score,
             "raw_provisional_score_pct": raw_score_pct,
@@ -1658,7 +2060,8 @@ def issued_candidate_submit(
             "automatic_status": submission_status,
             "detail": score_detail,
             "proctoring": proctoring_state,
-        }
+        })
+        issue.result_json = issue_result
         db.add(issue)
         db.commit()
         return {
@@ -1732,7 +2135,8 @@ def issued_candidate_submit(
             "correct_count": competency_correct.get(competency, 0),
             "question_count": competency_questions.get(competency, 0),
         })
-    issue.result_json = {
+    issue_result = dict(issue.result_json) if isinstance(issue.result_json, dict) else {}
+    issue_result.update({
         "raw_provisional_score_pct": raw_percentage,
         "integrity_penalty_pct": float(proctoring_state.get("integrity_penalty_pct") or 0),
         "provisional_score_pct": percentage,
@@ -1744,23 +2148,28 @@ def issued_candidate_submit(
             "checkpoints": competency_checkpoints,
         },
         "proctoring": proctoring_state,
+    })
+    issue.result_json = issue_result
+    submission = existing_submission if existing_submission and existing_submission.status == "draft" else AssessmentSubmission()
+    submission.assessment_id = exam.id
+    submission.candidate_id = issue.candidate_user_id
+    submission.issue_id = issue.id
+    submission.assessment_type = assessment_type
+    submission.submitted_data_json = {
+        "answers": payload.answers or {},
+        "_runtime": {
+            "submission_id": payload.submission_id,
+            "submitted_at": submitted_at.isoformat(),
+        },
     }
-    db.add(
-        AssessmentSubmission(
-            assessment_id=exam.id,
-            candidate_id=issue.candidate_user_id,
-            issue_id=issue.id,
-            assessment_type=assessment_type,
-            submitted_data_json={"answers": payload.answers or {}},
-            score=awarded_marks,
-            auto_score=awarded_marks,
-            status="review_pending",
-            started_at=issue.started_at,
-            submitted_at=submitted_at,
-            time_taken_seconds=payload.time_taken_seconds,
-            proctoring_events_json=recorded_events,
-        ),
-    )
+    submission.score = awarded_marks
+    submission.auto_score = awarded_marks
+    submission.status = "review_pending"
+    submission.started_at = issue.started_at
+    submission.submitted_at = submitted_at
+    submission.time_taken_seconds = payload.time_taken_seconds
+    submission.proctoring_events_json = recorded_events
+    db.add(submission)
     db.add(issue)
     db.commit()
 

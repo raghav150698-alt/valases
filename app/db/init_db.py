@@ -30,6 +30,7 @@ _REQUIRED_PRODUCTION_TABLES = {
     "hiring_compliance_checks",
     "hiring_integrations",
     "organization_audit_events",
+    "data_subject_requests",
 }
 
 
