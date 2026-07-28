@@ -563,6 +563,10 @@ def hiring_workspace(
             "logo_url": organization_logo_url(organization.settings_json),
         },
         "membership_role": membership.role if membership else "platform_admin",
+        "current_user": {
+            "full_name": current_user.full_name or current_user.email.split("@", 1)[0],
+            "email": current_user.email,
+        },
         "permissions": sorted(_membership_permissions(current_user, membership)),
         "permission_catalog": sorted(_PERMISSIONS),
         "pipeline_stages": _PIPELINE_STAGES,

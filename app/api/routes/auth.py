@@ -367,13 +367,20 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             raise HTTPException(status_code=401, detail=str(exc) or "Unable to sign in with Supabase.") from exc
     if settings.auth_mode.lower() == "dummy" and not settings.is_production:
         email = payload.email.strip().lower()
-        if "provider" in email:
+        local_user = db.scalar(_normalized_user_query(email))
+        if local_user:
+            role = local_user.role
+            subject = str(local_user.id)
+        elif "provider" in email:
             role = UserRole.PROVIDER
+            subject = "1"
         elif "student" in email:
             role = UserRole.STUDENT
+            subject = "1"
         else:
             role = UserRole.ADMIN
-        token = create_access_token("1", role.value)
+            subject = "1"
+        token = create_access_token(subject, role.value)
         return TokenResponse(access_token=token, role=role)
 
     if not settings.enable_legacy_password_auth:

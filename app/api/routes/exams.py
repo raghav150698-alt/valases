@@ -31,6 +31,7 @@ from app.models.entities import (
     AuditLog,
     Course,
     CourseModule,
+    DesktopAppSession,
     Exam,
     ExamRule,
     ExamStatus,
@@ -50,6 +51,8 @@ from app.models.entities import (
 from app.schemas import AssessmentSubmissionIn, AssessmentTaskIn, ExamCreate, ExamOut, ExamRuleUpdate, ExamUpdate, QuestionCreate
 from app.services.ai_review import upsert_ai_review
 from app.services.default_assessments import install_default_assessment_for_provider, seed_default_assessment_templates
+from app.services.desktop_session_broker import desktop_app_spec
+from app.services.desktop_session_lifecycle import desktop_session_artifact_payload, finalize_desktop_sessions_for_issue
 from app.services.notifications import send_email
 from app.services.rule_engine import evaluate_exam_rules
 
@@ -1604,6 +1607,7 @@ def revoke_issued_assessment_invitation(
         ),
     )
     db.commit()
+    finalize_desktop_sessions_for_issue(db, issue.id, "assessment_revoked")
     return {"issued_id": issue.id, "status": issue.status}
 
 
@@ -1890,6 +1894,7 @@ def issued_candidate_get_assessment(
     if issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
         return {"status": "submitted", "message": "Your assessment has been submitted for recruiter review."}
     assessment_type = str(exam.assessment_type or AssessmentType.MCQ.value)
+    desktop_spec = desktop_app_spec(assessment_type)
     task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == exam.id)) if assessment_type != AssessmentType.MCQ.value else None
     questions = _questions_for_issued_attempt(db, issue, exam) if assessment_type == AssessmentType.MCQ.value else []
     draft_submission = _latest_issue_submission(db, issue.id)
@@ -1924,6 +1929,15 @@ def issued_candidate_get_assessment(
         "candidate_name": issue.candidate_name,
         "assessment_title": exam.title,
         "assessment_type": assessment_type,
+        "desktop_app": (
+            {
+                "app_key": desktop_spec["app_key"],
+                "display_name": desktop_spec["display_name"],
+                "heartbeat_seconds": max(10, min(120, int(get_settings().desktop_session_heartbeat_seconds))),
+            }
+            if desktop_spec and desktop_spec["configured"]
+            else None
+        ),
         "instructions": exam.instructions or "",
         **_exam_metadata_dict(exam),
         "duration_minutes": exam.duration_minutes,
@@ -2075,6 +2089,8 @@ def issued_candidate_proctor_event(
     issue.result_json = result
     db.add(issue)
     db.commit()
+    if should_terminate:
+        finalize_desktop_sessions_for_issue(db, issue.id, "integrity_termination")
     return {
         "warning_count": int(state["warning_count"]),
         "should_terminate": should_terminate,
@@ -2118,7 +2134,25 @@ def issued_candidate_submit(
         task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == exam.id))
         if not task:
             raise HTTPException(status_code=400, detail="Assessment task is missing")
-        submitted_data = payload.submitted_data or {}
+        submitted_data = dict(payload.submitted_data or {})
+        desktop_spec = desktop_app_spec(assessment_type)
+        if desktop_spec and desktop_spec["configured"]:
+            desktop_session_id = str(submitted_data.get("desktop_session_id") or "").strip()
+            desktop_session = db.get(DesktopAppSession, desktop_session_id) if desktop_session_id else None
+            if not desktop_session or desktop_session.issue_id != issue.id or desktop_session.app_key != desktop_spec["app_key"]:
+                raise HTTPException(status_code=409, detail="The assigned desktop application session is missing or does not belong to this assessment")
+            if desktop_session.status in {"failed", "terminated", "expired"} or not desktop_session.provider_session_id:
+                raise HTTPException(status_code=409, detail="The assigned desktop application session did not complete successfully")
+            finalize_desktop_sessions_for_issue(db, issue.id, "assessment_submitted", commit=False)
+            submitted_data["_desktop_session"] = {
+                "session_id": desktop_session.id,
+                "app_key": desktop_session.app_key,
+                "status": desktop_session.status,
+                "workspace_key": desktop_session.workspace_key,
+                "started_at": desktop_session.started_at.isoformat() if desktop_session.started_at else None,
+                "ended_at": desktop_session.ended_at.isoformat() if desktop_session.ended_at else None,
+                "artifacts": desktop_session_artifact_payload(db, desktop_session.id),
+            }
         auto_score, submission_status, score_detail = _score_task_submission(task, submitted_data)
         raw_score_pct = round((float(auto_score or 0) / float(task.marks or 1)) * 100.0, 2) if auto_score is not None and float(task.marks or 0) > 0 else None
         score_pct = _integrity_adjusted_score(raw_score_pct, proctoring_state)

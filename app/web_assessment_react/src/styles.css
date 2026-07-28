@@ -900,7 +900,8 @@ body { margin: 0; background: #f6f8fb; }
   background: #ffffff;
   color: #14785f;
 }
-.workspace-tools-mark .assessment-tool-icon { width: 22px; height: 22px; }
+.workspace-tools-mark .assessment-tool-icon,
+.workspace-tools-mark > svg { width: 22px; height: 22px; }
 .workspace-search {
   width: min(32vw, 360px);
   min-width: 240px;
@@ -964,10 +965,116 @@ body { margin: 0; background: #f6f8fb; }
 .workspace-new-btn svg { width: 17px; height: 17px; }
 .workspace-dashboard,
 .workspace-custom-grid,
-.workspace-assessment-grid {
+.workspace-assessment-grid,
+.workspace-library,
+.workspace-publish {
   display: grid;
   gap: 18px;
 }
+.workspace-new-inline {
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid #176b57;
+  border-radius: 5px;
+  background: #176b57;
+  color: #fff;
+  font-weight: 700;
+}
+.assessment-library-list,
+.default-assessment-list,
+.published-activity-list {
+  display: grid;
+}
+.assessment-library-row {
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: 36px minmax(220px, 1fr) 130px auto auto auto;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid #e4ebe7;
+}
+.assessment-library-row:first-child,
+.default-assessment-row:first-child,
+.published-activity-row:first-child { border-top: 0; }
+.assessment-library-row > div,
+.published-activity-row > div:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.assessment-library-row strong,
+.assessment-library-row small,
+.published-activity-row strong,
+.published-activity-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assessment-library-row small,
+.assessment-library-row > span,
+.published-activity-row small,
+.published-activity-row > span {
+  color: #64748b;
+  font-size: 12px;
+}
+.assessment-library-row > button,
+.default-assessment-row > button:last-child {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid #176b57;
+  border-radius: 5px;
+  background: #176b57;
+  color: #fff;
+  font-weight: 700;
+}
+.assessment-library-row > button.secondary-btn {
+  border-color: #cbd8d2;
+  background: #fff;
+  color: #285446;
+}
+.default-assessment-row {
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 80px 120px auto;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 0;
+  border-top: 1px solid #e4ebe7;
+}
+.default-assessment-row.active { background: #f6fbf8; }
+.default-assessment-main {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+.default-assessment-main > span { min-width: 0; display: grid; gap: 4px; }
+.default-assessment-main strong,
+.default-assessment-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.default-assessment-main small,
+.default-assessment-row > span { color: #64748b; font-size: 12px; }
+.published-activity-row {
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: 36px minmax(220px, 1fr) 100px auto auto;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid #e4ebe7;
+}
+.builder-footer { justify-content: flex-end; }
+.builder-workbook {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #e4ebe7;
+}
+.builder-workbook > strong { color: #173b31; font-size: 13px; }
 .workspace-kpi-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1781,6 +1888,12 @@ body { margin: 0; background: #f6f8fb; }
   .builder-review,
   .checkpoint-row,
   .review-decision { grid-template-columns: 1fr; }
+  .assessment-library-list,
+  .default-assessment-list,
+  .published-activity-list { overflow-x: auto; }
+  .assessment-library-row { min-width: 720px; }
+  .default-assessment-row { min-width: 620px; }
+  .published-activity-row { min-width: 700px; }
   .builder-stepper button { font-size: 0; justify-content: center; }
   .assessment-definition-stats { grid-template-columns: 1fr; }
 }
@@ -2291,6 +2404,65 @@ select { min-height: 42px; padding: 9px 12px; border-radius: 6px; border: 1px so
   min-height: inherit;
   border: 0;
   background: #020617;
+}
+.candidate-desktop-runtime {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  height: calc(100dvh - 116px);
+  background: #eef3f1;
+}
+.candidate-desktop-runtime > .remote-tool-assessment {
+  min-height: 0;
+  height: 100%;
+}
+.remote-tool-live {
+  overflow: hidden;
+  background: #111827;
+}
+.remote-tool-live .remote-tool-frame {
+  display: block;
+  min-height: 0;
+  height: 100%;
+}
+.remote-tool-provisioning,
+.remote-tool-unavailable {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 28px;
+  background: #fff;
+  color: #24473c;
+  text-align: center;
+}
+.remote-tool-provisioning small,
+.remote-tool-unavailable span {
+  max-width: 520px;
+  color: #687d75;
+  line-height: 1.5;
+}
+.remote-tool-unavailable button {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 5px;
+  background: #14785f;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.desktop-session-actions {
+  position: static;
+  min-height: 58px;
+  padding: 9px 16px;
+  border-top: 1px solid #cfdbd6;
+  background: #fff;
+}
+.desktop-session-actions span {
+  color: #60756d;
+  font-size: 12px;
 }
 
 .excel-assessment {

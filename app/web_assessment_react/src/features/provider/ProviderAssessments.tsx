@@ -8,9 +8,7 @@ import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
 import type { ExcelAssessmentSubmission } from "../tools/ExcelSimulator";
 
-const CodingEnv = lazy(() => import("../tools/CodingEnv"));
 const ExcelSimulator = lazy(() => import("../tools/ExcelSimulator").then((module) => ({ default: module.ExcelSimulator })));
-const RemoteDesktopTool = lazy(() => import("../tools/RemoteDesktopTool").then((module) => ({ default: module.RemoteDesktopTool })));
 
 function apiErrorMessage(error: unknown, fallback: string): string {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -86,7 +84,11 @@ type ScreeningApplication = {
   };
 };
 
-type WorkspaceTab = "dashboard" | "custom" | "assessments" | "results";
+type WorkspaceTab = "dashboard" | "assessments" | "publish" | "results";
+
+type AccountContext = {
+  full_name: string;
+};
 
 type DefaultAssessment = {
   id: string;
@@ -147,7 +149,7 @@ function NavIcon({ type }: { type: WorkspaceTab }) {
   if (type === "dashboard") {
     return <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="12" y="3" width="5" height="5" rx="1"/><rect x="3" y="12" width="5" height="5" rx="1"/><rect x="12" y="12" width="5" height="5" rx="1"/></svg>;
   }
-  if (type === "custom") {
+  if (type === "assessments") {
     return <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 4h12v12H4zM7 7h6M7 10h6M7 13h3" strokeLinecap="round"/></svg>;
   }
   if (type === "results") {
@@ -232,9 +234,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     red_flags: "",
     manual_review: true,
   });
-  const [showTools, setShowTools] = useState(true);
-  const [selectedTools, setSelectedTools] = useState<string[]>([]);
-  const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [showBuilder, setShowBuilder] = useState(false);
   const [excelTemplate, setExcelTemplate] = useState<ExcelAssessmentSubmission | null>(null);
   const [reviewIssueId, setReviewIssueId] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -248,7 +248,11 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   const [reviewNotes, setReviewNotes] = useState("");
   const [previewDefaultId, setPreviewDefaultId] = useState<string | null>(null);
 
-  const toolTypes = ["Excel", "Coding Env", "Desktop Accounting (GnuCash)", "Tax Software"];
+  const account = useQuery({
+    queryKey: ["auth-me-context"],
+    enabled: !embedded,
+    queryFn: async () => (await api.get<AccountContext>("/auth/me/context")).data,
+  });
 
   const exams = useQuery({
     queryKey: ["provider-assessments"],
@@ -308,7 +312,8 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     mutationFn: async (templateId: string) => (await api.post(`/exams/default-library/${templateId}/install`)).data,
     onSuccess: async (data) => {
       setSelectedExamId(Number(data.id));
-      setActiveTab("assessments");
+      setIssueExamId(Number(data.id));
+      setActiveTab("publish");
       await qc.invalidateQueries({ queryKey: ["provider-assessments"] });
     },
   });
@@ -335,9 +340,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
         instructions: form.instructions,
         about: form.about,
         tools: [
-          ...new Set(
-            [primaryTool, ...selectedTools, ...form.tools.split(/\r?\n|,/).map((x) => x.trim()).filter(Boolean)].filter(Boolean),
-          ),
+          ...new Set([primaryTool, ...form.tools.split(/\r?\n|,/).map((x) => x.trim()).filter(Boolean)].filter(Boolean)),
         ],
         topics: form.topics.split(/\r?\n|,/).map((x) => x.trim()).filter(Boolean),
         duration_minutes: Number(form.duration_minutes),
@@ -447,7 +450,8 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     },
     onSuccess: async (data) => {
       setSelectedExamId(Number(data.id));
-      setActiveTab("assessments");
+      setShowBuilder(false);
+      setActiveTab("publish");
       await qc.invalidateQueries({ queryKey: ["provider-assessments"] });
     },
   });
@@ -574,7 +578,9 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   const averageScore = scoredResults.length ? scoredResults.reduce((sum, row) => sum + Number(row.score_pct || 0), 0) / scoredResults.length : 0;
   const passRate = scoredResults.length ? (passedResults.length / scoredResults.length) * 100 : 0;
   const pendingReviewCount = issuedRows.filter((row) => row.status === "review_pending").length;
+  const activeIssuedRows = filteredIssued.filter((row) => !["review_pending", "reviewed", "completed"].includes(row.status) && row.passed == null);
   const resultRows = issuedRows.filter((row) => {
+    if (!["review_pending", "reviewed", "completed"].includes(row.status) && row.passed == null) return false;
     const assessmentMatches = resultAssessmentFilter === "all" || String(row.exam_id) === resultAssessmentFilter;
     const statusMatches = resultStatusFilter === "all"
       || (resultStatusFilter === "passed" && row.passed === true)
@@ -605,18 +611,14 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     && (isMcqForm || (form.task_prompt.trim().length >= 10 && form.task_marks > 0 && checkpointsAreComplete && checkpointWeight === 100));
   const canAddQuestion = questionText.trim().length >= 5 && validQuestionOptions.length >= 2 && validQuestionOptions.some((option) => option.is_correct);
   const canIssueAssessment = Boolean(issueExamId && candidateApplicationId && candidateName.trim().length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail.trim()));
-
-  const openTool = (tool: string) => {
-    setShowTools(true);
-    setActiveTool(tool);
-    setActiveTab("custom");
-  };
+  const accountName = account.data?.full_name?.trim() || "Recruiter";
+  const accountInitials = accountName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 
   const pageCopy = {
     dashboard: ["Dashboard", "Monitor assessment activity and move work forward."],
-    custom: ["Create assessment", "Configure the format, environment, timing, and scoring rules."],
-    assessments: ["Assessments", "Build, publish, issue, and review candidate assessments."],
-    results: ["Results & analytics", "Compare candidate outcomes and assessment effectiveness."],
+    assessments: ["Assessments", "Browse defaults and manage your assessment library."],
+    publish: ["Publish", "Prepare an assessment and send it to an eligible candidate."],
+    results: ["Results", "Review completed candidate outcomes."],
   } as const;
 
   const logout = async () => {
@@ -636,25 +638,25 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
         </div>
         <div className="workspace-rail-label">Workspace</div>
         <nav className="workspace-rail-nav" aria-label="Workspace navigation">
-          {(["dashboard", "custom", "assessments", "results"] as WorkspaceTab[]).map((tab) => (
+          {(["dashboard", "assessments", "publish", "results"] as WorkspaceTab[]).map((tab) => (
             <button key={tab} type="button" className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
               <NavIcon type={tab} />
-              <span>{tab === "custom" ? "Custom" : tab[0].toUpperCase() + tab.slice(1)}</span>
+              <span>{tab[0].toUpperCase() + tab.slice(1)}</span>
               {tab === "assessments" && assessmentRows.length > 0 && <em>{assessmentRows.length}</em>}
             </button>
           ))}
         </nav>
         <div className="workspace-rail-footer">
           <button type="button" onClick={() => setShowSettings(true)}><SettingsIcon /><span>Settings</span></button>
-          <div className="workspace-user-chip"><span>RA</span><div><strong>Recruiter Admin</strong><small>Workspace owner</small></div></div>
+          <div className="workspace-user-chip"><span>{accountInitials}</span><div><strong>{accountName}</strong></div></div>
         </div>
       </aside>}
 
       <main className="workspace-product-main">
       {embedded && <nav className="assessment-horizontal-tabs" aria-label="Assessment workspace navigation">
-        {(["dashboard", "custom", "assessments", "results"] as WorkspaceTab[]).map((tab) => (
+        {(["dashboard", "assessments", "publish", "results"] as WorkspaceTab[]).map((tab) => (
           <button key={tab} type="button" className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
-            <span>{tab === "custom" ? "Create" : tab === "results" ? "Results" : tab[0].toUpperCase() + tab.slice(1)}</span>
+            <span>{tab[0].toUpperCase() + tab.slice(1)}</span>
             {tab === "assessments" && assessmentRows.length > 0 && <em>{assessmentRows.length}</em>}
           </button>
         ))}
@@ -667,7 +669,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
           </div>
         </div>
         <div className="workspace-appbar-right">
-          <span className="workspace-tools-mark" title="Assessment tools"><AssessmentToolIcon /></span>
+          <span className="workspace-tools-mark" title="Assessment library"><NavIcon type="assessments" /></span>
           <label className="workspace-search">
             <SearchIcon />
             <input
@@ -681,7 +683,11 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
             type="button"
             className="workspace-new-btn"
             aria-label="Create new assessment"
-            onClick={() => setActiveTab("custom")}
+            onClick={() => {
+              setActiveTab("assessments");
+              setShowBuilder(true);
+              setBuilderStep(1);
+            }}
             title="New assessment"
           >
             <PlusIcon />
@@ -728,7 +734,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                     className="assessment-table-row"
                     onClick={() => {
                       setSelectedExamId(assessment.exam_id);
-                      setActiveTab("assessments");
+                      setActiveTab("publish");
                     }}
                   >
                     <div>
@@ -740,7 +746,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   </button>
                 ))}
                 {!exams.isLoading && !exams.isError && filteredAssessments.length === 0 && (
-                  <EmptyState title="No assessments yet" detail="Create your first assessment to begin inviting candidates." action={<button type="button" onClick={() => setActiveTab("custom")}>Create assessment</button>} />
+                  <EmptyState title="No assessments yet" detail="Create your first assessment to begin inviting candidates." action={<button type="button" onClick={() => { setActiveTab("assessments"); setShowBuilder(true); }}>Create assessment</button>} />
                 )}
               </div>
             </section>
@@ -795,81 +801,45 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
         </section>
       )}
 
-      {activeTab === "custom" && (
-        <section className="workspace-custom-grid">
+      {activeTab === "assessments" && (
+        <section className="workspace-library">
           <div className="workspace-main-column">
             <section className="workspace-surface">
-              {showTools && (
-                <div className="tool-lab-grid hrms-tools-grid">
-                  {toolTypes.map((tool) => {
-                    const active = selectedTools.includes(tool);
-                    const description =
-                      tool === "Excel"
-                        ? "Spreadsheet assessment workspace"
-                        : tool === "Coding Env"
-                          ? "Developer assessment environment"
-                          : tool === "Desktop Accounting (GnuCash)"
-                            ? "Desktop accounting practice environment"
-                            : "Tax and accounting workflow simulator";
-                    return (
-                      <article key={tool} className={`tool-lab-card${active ? " selected" : ""}`}>
-                        <div className="tool-lab-identity">
-                          <AssessmentToolIcon toolName={tool} />
-                          <span>
-                          <strong>{tool}</strong>
-                          <small>{description}</small>
-                          </span>
-                        </div>
-                        <div className="tool-lab-actions">
-                          <label className="toggle-row">
-                            <input
-                              type="checkbox"
-                              checked={active}
-                              onChange={(e) => {
-                                setSelectedTools((prev) =>
-                                  e.target.checked ? [...prev, tool] : prev.filter((x) => x !== tool),
-                                );
-                              }}
-                            />
-                            <span>Attach</span>
-                          </label>
-                          <button type="button" onClick={() => openTool(tool)}>Open</button>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
+              <div className="workspace-surface-head">
+                <div><h3>Assessment library</h3><p>Open an assessment to edit, publish, or send it.</p></div>
+                <button type="button" className="workspace-new-inline" onClick={() => { setShowBuilder(true); setBuilderStep(1); }}>New assessment</button>
+              </div>
+              <div className="assessment-library-list">
+                {filteredAssessments.map((assessment) => (
+                  <article className="assessment-library-row" key={assessment.exam_id}>
+                    <AssessmentToolIcon assessmentType={assessment.assessment_type} title={assessment.title} />
+                    <div><strong>{assessment.title}</strong><small>{assessment.assessment_type.replaceAll("_", " ")} | {assessment.duration_minutes} min</small></div>
+                    <span>{assessment.assessment_type === "mcq" ? `${assessment.question_count} questions` : `${assessment.checkpoint_count || 0} checkpoints`}</span>
+                    <StatusBadge value={assessment.status} />
+                    <button type="button" className="secondary-btn" onClick={() => { setSelectedExamId(assessment.exam_id); setActiveTab("publish"); }}>
+                      {assessment.status === "published" ? "View" : "Edit"}
+                    </button>
+                    <button type="button" onClick={() => { setSelectedExamId(assessment.exam_id); setIssueExamId(assessment.exam_id); setActiveTab("publish"); }}>
+                      {assessment.status === "published" ? "Send" : "Publish"}
+                    </button>
+                  </article>
+                ))}
+                {!exams.isLoading && filteredAssessments.length === 0 && <EmptyState title="No matching assessments" detail="Clear the search or create a new assessment." />}
+              </div>
             </section>
 
-            {activeTool === "Excel" && <Suspense fallback={<div className="tool-loading-state" role="status">Loading spreadsheet...</div>}><ExcelSimulator /></Suspense>}
-            {activeTool === "Coding Env" && (
-              <Suspense fallback={<div className="tool-loading-state" role="status">Loading coding workspace...</div>}>
-                <CodingEnv />
-              </Suspense>
-            )}
-            {activeTool === "Desktop Accounting (GnuCash)" && (
-              <Suspense fallback={<div className="tool-loading-state" role="status">Loading accounting workspace...</div>}><RemoteDesktopTool
-                  title="GnuCash Desktop Test"
-                  description="Server-hosted accounting desktop proof-of-concept for candidate task delivery."
-                /></Suspense>
-            )}
-            {activeTool === "Tax Software" && (
-              <div className="workspace-surface">
-                <h3>Tax software</h3>
-                <p>Accounting and tax simulator setup will appear here next.</p>
-              </div>
-            )}
-
             <section className="workspace-surface default-library">
-              <div className="workspace-surface-head"><div><h3>Default assessments</h3><p>Ready-to-issue, difficult assessments with answer keys and auditable scoring checkpoints.</p></div></div>
-              <div className="default-assessment-grid">
+              <div className="workspace-surface-head"><div><h3>Default assessments</h3><p>Challenging templates with answer keys and deterministic scoring checkpoints.</p></div></div>
+              <div className="default-assessment-list">
                 {(defaultAssessments.data || []).map((template) => (
-                  <article className="default-assessment-card" key={template.id}>
-                    <div className="default-assessment-card-head"><StatusBadge value={template.assessment_type.replaceAll("_", " ")} /><span>{template.duration_minutes} min</span></div>
-                    <h4>{template.title}</h4><p>{template.summary}</p>
-                    <div className="default-assessment-meta"><span>{template.question_count ? `${template.question_count} questions` : `${template.checkpoint_count} checkpoints`}</span><span>{template.checkpoint_count ? `${template.checkpoint_count} competency checks` : `${template.pass_score}% pass mark`}</span></div>
-                    <div className="default-assessment-actions"><button type="button" className="secondary-btn" onClick={() => setPreviewDefaultId((current) => current === template.id ? null : template.id)}>View scoring key</button><button type="button" onClick={() => installDefault.mutate(template.id)} disabled={installDefault.isPending}>Use this assessment</button></div>
+                  <article className={`default-assessment-row${previewDefaultId === template.id ? " active" : ""}`} key={template.id}>
+                    <button type="button" className="default-assessment-main" onClick={() => setPreviewDefaultId((current) => current === template.id ? null : template.id)}>
+                      <AssessmentToolIcon assessmentType={template.assessment_type} title={template.title} />
+                      <span><strong>{template.title}</strong><small>{template.summary}</small></span>
+                    </button>
+                    <span>{template.duration_minutes} min</span>
+                    <span>{template.question_count ? `${template.question_count} questions` : `${template.checkpoint_count} checkpoints`}</span>
+                    <button type="button" onClick={() => installDefault.mutate(template.id)} disabled={installDefault.isPending}>Add</button>
                   </article>
                 ))}
               </div>
@@ -881,8 +851,8 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
               {installDefault.isError && <div className="workspace-error">{apiErrorMessage(installDefault.error, "The default assessment could not be added.")}</div>}
             </section>
 
-            <section className="workspace-surface assessment-builder-v2">
-              <div className="workspace-surface-head"><div><h3>Build a custom assessment</h3><p>Four focused steps. Candidates are always reviewed before results become final.</p></div></div>
+            {showBuilder && <section className="workspace-surface assessment-builder-v2">
+              <div className="workspace-surface-head"><div><h3>New assessment</h3><p>Define the candidate task and its scoring evidence.</p></div><button type="button" className="workspace-icon-btn" aria-label="Close assessment builder" onClick={() => setShowBuilder(false)}>x</button></div>
               <div className="builder-stepper" aria-label="Assessment builder progress">
                 {["Basics", "Candidate task", "Answer key", "Review"].map((label, stepIndex) => <button type="button" key={label} className={builderStep === stepIndex + 1 ? "active" : builderStep > stepIndex + 1 ? "complete" : ""} onClick={() => setBuilderStep(stepIndex + 1)}><span>{stepIndex + 1}</span>{label}</button>)}
               </div>
@@ -900,6 +870,17 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 {isMcqForm ? <div className="builder-info workspace-span-2"><strong>Question builder comes next</strong><span>Create this assessment, then add the 25 or more scored questions from its assessment setup page.</span></div> : <label className="field-stack workspace-span-2"><span>Task brief</span><textarea rows={7} value={form.task_prompt} onChange={(e) => setForm((p) => ({ ...p, task_prompt: e.target.value }))} placeholder="State the facts, required outputs, constraints, and acceptable assumptions." /></label>}
                 {!isMcqForm && <label className="field-stack workspace-span-2"><span>Reference links</span><textarea rows={2} value={form.attachment_links} onChange={(e) => setForm((p) => ({ ...p, attachment_links: e.target.value }))} placeholder="One URL per line" /></label>}
                 {form.assessment_type === "coding" && <><label className="field-stack"><span>Language</span><select value={form.coding_language} onChange={(e) => setForm((p) => ({ ...p, coding_language: e.target.value }))}><option value="python">Python</option><option value="javascript">JavaScript</option><option value="typescript">TypeScript</option><option value="java">Java</option><option value="sql">SQL</option></select></label><label className="field-stack workspace-span-2"><span>Starter code</span><textarea className="code-input" rows={5} value={form.starter_code} onChange={(e) => setForm((p) => ({ ...p, starter_code: e.target.value }))} /></label></>}
+                {form.assessment_type === "spreadsheet" && <div className="workspace-span-2 builder-workbook">
+                  <strong>Candidate workbook</strong>
+                  <Suspense fallback={<div className="tool-loading-state" role="status">Loading workbook setup...</div>}>
+                    <ExcelSimulator
+                      title="Workbook setup"
+                      description="Prepare the workbook the candidate will receive."
+                      instructions="Upload an xlsx file or prepare the grid, then keep answer cells unlocked."
+                      onAutosave={(submission) => setExcelTemplate(submission)}
+                    />
+                  </Suspense>
+                </div>}
               </div>}
 
               {builderStep === 3 && <div className="builder-stage">
@@ -922,55 +903,16 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 <details className="builder-advanced"><summary>Advanced settings</summary><div className="workspace-form-grid compact"><label className="field-stack"><span>Pass score</span><input type="number" min="70" max="100" value={form.pass_score} onChange={(e) => setForm((p) => ({ ...p, pass_score: Number(e.target.value) }))} /></label><label className="field-stack"><span>Maximum attempts</span><input type="number" min="1" max="3" value={form.max_attempts} onChange={(e) => setForm((p) => ({ ...p, max_attempts: Number(e.target.value) }))} /></label></div></details>
               </div>}
 
-              <div className="workspace-form-footer builder-footer"><button type="button" className="secondary-btn" disabled={builderStep === 1} onClick={() => setBuilderStep((step) => Math.max(1, step - 1))}>Back</button>{builderStep < 4 ? <button type="button" onClick={() => setBuilderStep((step) => Math.min(4, step + 1))}>Next</button> : <button onClick={() => createAssessment.mutate()} disabled={createAssessment.isPending || !canCreateAssessment}>{createAssessment.isPending ? "Creating..." : "Create draft"}</button>}</div>
+              <div className="workspace-form-footer builder-footer">{builderStep < 4 ? <button type="button" onClick={() => setBuilderStep((step) => Math.min(4, step + 1))}>Next</button> : <button onClick={() => createAssessment.mutate()} disabled={createAssessment.isPending || !canCreateAssessment}>{createAssessment.isPending ? "Creating..." : "Create draft"}</button>}</div>
               {!canCreateAssessment && builderStep === 4 && <div className="workspace-form-note">Complete the required fields{isMcqForm ? "." : " and make checkpoint weights total 100%."}</div>}
               {createAssessment.isError && <div className="workspace-error">{apiErrorMessage(createAssessment.error, "The assessment could not be created. Review the fields and try again.")}</div>}
-            </section>
-
-            {form.assessment_type === "spreadsheet" && (
-              <section className="workspace-surface">
-                <div className="workspace-surface-head">
-                  <div>
-                    <h3>Excel setup</h3>
-                    <p>Prepare the workbook candidates will receive and keep answer cells editable.</p>
-                  </div>
-                </div>
-                <Suspense fallback={<div className="tool-loading-state" role="status">Loading spreadsheet setup...</div>}><ExcelSimulator
-                    title="Recruiter Excel Setup"
-                    description="Prepare the workbook candidates will receive."
-                    instructions="Use the grid or upload an xlsx file. Candidate answer cells should remain unlocked."
-                    onAutosave={(submission) => setExcelTemplate(submission)}
-                  /></Suspense>
-              </section>
-            )}
+            </section>}
           </div>
-
-          <aside className="workspace-side-column">
-            <section className="workspace-surface workspace-side-panel">
-              <h3>Assessment inventory</h3>
-              <div className="assessment-list">
-                {filteredAssessments.map((assessment) => (
-                  <button
-                    key={assessment.exam_id}
-                    type="button"
-                    className={`assessment-list-item${selectedExamId === assessment.exam_id ? " active" : ""}`}
-                    onClick={() => {
-                      setSelectedExamId(assessment.exam_id);
-                      setActiveTab("assessments");
-                    }}
-                  >
-                    <AssessmentToolIcon assessmentType={assessment.assessment_type} title={assessment.title} />
-                    <span><strong>{assessment.title}</strong><small>{assessment.status}</small></span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          </aside>
         </section>
       )}
 
-      {activeTab === "assessments" && (
-        <section className="workspace-assessment-grid">
+      {activeTab === "publish" && (
+        <section className="workspace-publish">
           <div className="workspace-main-column">
             <section className="workspace-surface">
               <div className="workspace-surface-head">
@@ -1137,10 +1079,6 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 </label>
               </div>
               <div className="workspace-form-footer">
-                <div className="workspace-selection-summary">
-                  <strong>Issue flow</strong>
-                  <span>Candidates enter through their own issued access link, not through this workspace.</span>
-                </div>
                 <button onClick={() => issueMutation.mutate()} disabled={issueMutation.isPending || !canIssueAssessment}>
                   {issueMutation.isPending ? "Sending..." : "Send invite"}
                 </button>
@@ -1153,26 +1091,27 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
               {issueNotice && <div className="workspace-success">{issueNotice}</div>}
             </section>
 
-          </div>
-
-          <aside className="workspace-side-column">
-            <section className="workspace-surface workspace-side-panel">
-              <h3>Assessment inventory</h3>
-              <div className="assessment-list">
-                {filteredAssessments.map((assessment) => (
-                  <button
-                    key={assessment.exam_id}
-                    type="button"
-                    className={`assessment-list-item${selectedExamId === assessment.exam_id ? " active" : ""}`}
-                    onClick={() => setSelectedExamId(assessment.exam_id)}
-                  >
-                    <AssessmentToolIcon assessmentType={assessment.assessment_type} title={assessment.title} />
-                    <span><strong>{assessment.title}</strong><small>{assessment.status}</small></span>
-                  </button>
+            <section className="workspace-surface">
+              <div className="workspace-surface-head"><div><h3>Published activity</h3><p>Invitations and assessments that are not yet complete.</p></div></div>
+              <div className="published-activity-list">
+                {activeIssuedRows.map((row) => (
+                  <article className="published-activity-row" key={row.issued_id}>
+                    <AssessmentToolIcon assessmentType={row.assessment_type} title={row.assessment_title} />
+                    <div><strong>{row.assessment_title}</strong><small>{row.candidate_name} | {row.candidate_email}</small></div>
+                    <span>{formatResultDate(row.issued_at)}</span>
+                    <StatusBadge value={row.status} />
+                    <div className="issued-list-actions">
+                      {["issued", "revoked"].includes(row.status) && <button type="button" className="secondary-btn" disabled={resendInvitation.isPending} onClick={() => void resendInvitation.mutate(row.issued_id)}>Resend</button>}
+                      {["issued", "started"].includes(row.status) && <button type="button" className="issued-revoke-btn" disabled={revokeInvitation.isPending} onClick={() => {
+                        if (window.confirm("Revoke this invitation and close any active candidate session?")) revokeInvitation.mutate(row.issued_id);
+                      }}>Revoke</button>}
+                    </div>
+                  </article>
                 ))}
+                {!issued.isLoading && activeIssuedRows.length === 0 && <EmptyState title="No active invitations" detail="Send a published assessment to a candidate in Screening." />}
               </div>
             </section>
-          </aside>
+          </div>
         </section>
       )}
       {activeTab === "results" && (

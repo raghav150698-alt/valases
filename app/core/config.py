@@ -28,6 +28,17 @@ class Settings(BaseSettings):
     enable_shared_graph_excel: bool = False
     enable_proctor_evidence_upload: bool = False
     enable_startup_database_management: bool = False
+    enable_desktop_app_sessions: bool = False
+    desktop_session_broker_mode: str = "disabled"  # disabled | mock | http
+    desktop_session_broker_url: str = ""
+    desktop_session_broker_token: str = ""
+    desktop_session_gateway_origin: str = ""
+    desktop_session_timeout_seconds: int = 10800
+    desktop_session_heartbeat_seconds: int = 30
+    desktop_session_broker_timeout_seconds: int = 20
+    desktop_app_assignments_json: str = '{"spreadsheet":"excel","accounting":"quickbooks","tax_simulator":"drake_tax"}'
+    desktop_app_catalog_json: str = "{}"
+    desktop_license_attestations_json: str = "{}"
     enforce_production_security: bool = True
     admin_recovery_key: str = ""
     firebase_project_id: str = ""
@@ -290,6 +301,15 @@ class Settings(BaseSettings):
             errors.append("Proctor evidence uploads require private S3 storage in production")
         if self.enable_startup_database_management:
             errors.append("ENABLE_STARTUP_DATABASE_MANAGEMENT must be false in production")
+        if self.enable_desktop_app_sessions:
+            if (self.desktop_session_broker_mode or "").strip().lower() != "http":
+                errors.append("DESKTOP_SESSION_BROKER_MODE must be http when desktop app sessions are enabled")
+            if not str(self.desktop_session_broker_url or "").startswith("https://"):
+                errors.append("DESKTOP_SESSION_BROKER_URL must be an HTTPS URL")
+            if len(str(self.desktop_session_broker_token or "").strip()) < 32:
+                errors.append("DESKTOP_SESSION_BROKER_TOKEN must contain at least 32 characters")
+            if not str(self.desktop_session_gateway_origin or "").startswith("https://"):
+                errors.append("DESKTOP_SESSION_GATEWAY_ORIGIN must be an HTTPS origin")
         if not self.rate_limit_enabled:
             errors.append("RATE_LIMIT_ENABLED must be true in production")
         if not self.admin_email_set:

@@ -186,6 +186,7 @@ def evaluate_launch_readiness(
                 critical=False,
             ),
             integration_check,
+            _desktop_application_check(active_settings),
             LaunchCheck(
                 "backup_restore",
                 "warning",
@@ -206,3 +207,33 @@ def evaluate_launch_readiness(
         },
         "checks": [asdict(check) for check in checks],
     }
+
+
+def _desktop_application_check(settings: Settings) -> LaunchCheck:
+    from app.services.desktop_session_broker import desktop_session_readiness
+
+    readiness = desktop_session_readiness(settings)
+    if not settings.enable_desktop_app_sessions:
+        return LaunchCheck(
+            "desktop_assessment_apps",
+            "warning",
+            "Windows application sessions are disabled until the licensed host and broker are connected.",
+            critical=False,
+        )
+    if readiness["ready"]:
+        return LaunchCheck(
+            "desktop_assessment_apps",
+            "pass",
+            "The session broker, secure gateway, application mappings, and license attestations are ready.",
+        )
+    incomplete_apps = [
+        item["display_name"]
+        for item in readiness["apps"]
+        if not item["ready"]
+    ]
+    detail = ", ".join(incomplete_apps) if incomplete_apps else "session broker or secure gateway"
+    return LaunchCheck(
+        "desktop_assessment_apps",
+        "fail",
+        f"Desktop assessment configuration is incomplete for: {detail}.",
+    )

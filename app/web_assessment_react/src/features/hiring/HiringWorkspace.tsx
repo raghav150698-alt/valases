@@ -12,6 +12,7 @@ const ProviderAssessments = lazy(() => import("../provider/ProviderAssessments")
 
 type Workspace = {
   organization: { id: number; name: string; slug: string; plan_code: string; logo_url: string };
+  current_user: { full_name: string; email: string };
   membership_role: string;
   permissions: string[];
   permission_catalog: string[];
@@ -161,6 +162,23 @@ type SsoConfiguration = {
   };
 };
 
+type DesktopApplicationReadiness = {
+  enabled: boolean;
+  broker_mode: string;
+  broker_ready: boolean;
+  gateway_origin_configured: boolean;
+  ready: boolean;
+  apps: Array<{
+    assessment_type: string;
+    app_key: string;
+    display_name: string;
+    application_configured: boolean;
+    license_approved: boolean;
+    license_reference?: string;
+    ready: boolean;
+  }>;
+};
+
 type Tab = "overview" | "jobs" | "candidates" | "pipeline" | "interviews" | "assessments" | "integrations" | "team" | "settings";
 
 const stageLabel = (stage: string) => stage.replace(/_/g, " ").replace(/\b\w/g, (value) => value.toUpperCase());
@@ -218,6 +236,11 @@ export function HiringWorkspace() {
   const integrationsQuery = useQuery({ queryKey: ["hiring", "integrations"], queryFn: async () => (await api.get<Integration[]>("/hiring/integrations")).data, enabled: can("integrations.view") });
   const membersQuery = useQuery({ queryKey: ["hiring", "members"], queryFn: async () => (await api.get<Member[]>("/hiring/members")).data, enabled: can("members.manage") });
   const ssoQuery = useQuery({ queryKey: ["hiring", "sso"], queryFn: async () => (await api.get<SsoConfiguration>("/hiring/sso")).data, enabled: can("sso.manage") });
+  const desktopReadinessQuery = useQuery({
+    queryKey: ["hiring", "desktop-app-readiness"],
+    queryFn: async () => (await api.get<DesktopApplicationReadiness>("/desktop-sessions/readiness")).data,
+    enabled: can("organization.manage"),
+  });
   const applicationDetailQuery = useQuery({
     queryKey: ["hiring", "application-detail", selectedApplication?.id],
     queryFn: async () => (await api.get<ApplicationDetail>(`/hiring/applications/${selectedApplication?.id}`)).data,
@@ -314,7 +337,7 @@ export function HiringWorkspace() {
     <div className="hiring-shell">
       <aside className="hiring-sidebar">
         <div className="hiring-brand"><img className="hiring-company-logo" src={workspace?.organization.logo_url || "/assets/brand/valases-logo.png"} alt="" /><span>{workspace?.organization.name || "Your organization"}</span></div>
-        <div className="hiring-org-switch"><small>Workspace access</small><strong>{stageLabel(workspace?.membership_role || "recruiter")}</strong></div>
+        <div className="hiring-user-name">{workspace?.current_user?.full_name || "Recruiter"}</div>
         <nav aria-label="Hiring navigation">
           {navigation.map(([id, label]) => (
             <button type="button" className={tab === id ? "active" : ""} key={id} onClick={() => setTab(id)}>{label}</button>
@@ -328,8 +351,6 @@ export function HiringWorkspace() {
           <div><p>{tab === "overview" ? "Hiring command center" : stageLabel(tab)}</p><h1>{tab === "overview" ? "Build a stronger hiring signal" : stageLabel(tab)}</h1></div>
           <div className="hiring-topbar-actions">
             {["jobs", "candidates", "pipeline", "interviews", "integrations"].includes(tab) && <label className="hiring-search"><SearchIcon /><input value={workspaceSearch} onChange={(event) => setWorkspaceSearch(event.target.value)} placeholder={`Search ${stageLabel(tab).toLowerCase()}`} aria-label={`Search ${tab}`} /></label>}
-            {can("candidates.manage") && <button type="button" className="hiring-button secondary" onClick={() => setDialog("candidate")}>Add candidate</button>}
-            {can("jobs.manage") && <button type="button" className="hiring-button primary" onClick={() => setDialog("job")}>New job</button>}
           </div>
         </header>
 
@@ -343,7 +364,7 @@ export function HiringWorkspace() {
         {tab === "assessments" && <Suspense fallback={<div className="hiring-section-empty">Loading assessment workspace...</div>}><ProviderAssessments embedded /></Suspense>}
         {tab === "integrations" && <IntegrationsView integrations={filteredIntegrations} canManage={can("integrations.manage")} onConnect={(integration) => void connectIntegration(integration)} onConfigure={(integration) => { setSelectedIntegration(integration); setDialog("integration"); }} />}
         {tab === "team" && <TeamView members={membersQuery.data || []} onAddMember={() => setDialog("member")} onRefresh={refresh} />}
-        {tab === "settings" && <SettingsView organization={workspace?.organization} role={workspace?.membership_role || "recruiter"} permissions={workspace?.permissions || []} sso={ssoQuery.data} onRefresh={refresh} onSignOut={async () => { try { if (supabase) await supabase.auth.signOut(); } finally { clearSession(); } }} />}
+        {tab === "settings" && <SettingsView organization={workspace?.organization} role={workspace?.membership_role || "recruiter"} permissions={workspace?.permissions || []} sso={ssoQuery.data} desktopReadiness={desktopReadinessQuery.data} onRefresh={refresh} onSignOut={async () => { try { if (supabase) await supabase.auth.signOut(); } finally { clearSession(); } }} />}
       </main>
 
       {selectedDetails && <ApplicationDrawer key={selectedDetails.id} application={selectedDetails} detail={applicationDetailQuery.data} loading={applicationDetailQuery.isLoading} transitionError={stageError} stages={pipelineStages} onClose={() => { setStageError(""); setSelectedApplication(null); }} onScreen={() => screenMutation.mutate(selectedDetails.id)} onCompliance={() => complianceMutation.mutate(selectedDetails.id)} onOpenInterviews={() => { setSelectedApplication(null); setTab("interviews"); }} onAddScorecard={() => {
@@ -480,32 +501,59 @@ function IntegrationsView({ integrations, canManage, onConnect, onConfigure }: {
   </section>;
 }
 
-function SettingsView({ organization, role, permissions, sso, onRefresh, onSignOut }: {
+function SettingsView({ organization, role, permissions, sso, desktopReadiness, onRefresh, onSignOut }: {
   organization?: Workspace["organization"];
   role: string;
   permissions: string[];
   sso?: SsoConfiguration;
+  desktopReadiness?: DesktopApplicationReadiness;
   onRefresh: () => void;
   onSignOut: () => Promise<void>;
 }) {
-  const [section, setSection] = useState<"profile" | "sso">("profile");
+  const [section, setSection] = useState<"profile" | "applications">("profile");
   const canManageSso = permissions.includes("sso.manage");
   const canManageOrganization = permissions.includes("organization.manage");
   return <div className="hiring-settings-layout">
     <aside className="hiring-settings-nav" aria-label="Workspace settings">
       <button type="button" className={section === "profile" ? "active" : ""} onClick={() => setSection("profile")}>Workspace</button>
-      {canManageSso && <button type="button" className={section === "sso" ? "active" : ""} onClick={() => setSection("sso")}>Single sign-on</button>}
+      {canManageOrganization && <button type="button" className={section === "applications" ? "active" : ""} onClick={() => setSection("applications")}>Assessment apps</button>}
     </aside>
     <section className="hiring-panel hiring-full-panel hiring-settings">
       {section === "profile" && <>
         <div className="hiring-panel-header"><div><h2>Company profile</h2><p>The identity shown to your hiring team across Valases.</p></div></div>
         {organization && canManageOrganization ? <OrganizationProfileForm organization={organization} onSaved={onRefresh} /> : <div className="hiring-settings-row"><div><strong>Company</strong><span>{organization?.name || "Your organization"}</span></div></div>}
         <div className="hiring-settings-row"><div><strong>Access role</strong><span>{stageLabel(role)}</span></div><small>{permissions.length} permissions</small></div>
+        {canManageSso && <SsoForm value={sso} onSaved={onRefresh} />}
         <div className="hiring-settings-row danger"><div><strong>Sign out</strong><span>End this browser session on this device.</span></div><button type="button" className="hiring-button secondary" onClick={() => void onSignOut()}>Sign out</button></div>
       </>}
-      {section === "sso" && <SsoForm value={sso} onSaved={onRefresh} />}
+      {section === "applications" && <DesktopApplicationSettings readiness={desktopReadiness} />}
     </section>
   </div>;
+}
+
+function DesktopApplicationSettings({ readiness }: { readiness?: DesktopApplicationReadiness }) {
+  if (!readiness) {
+    return <div className="hiring-settings-loading" role="status">Checking application hosting...</div>;
+  }
+  return <>
+    <div className="hiring-panel-header">
+      <div><h2>Assessment applications</h2><p>Availability of isolated application sessions used by candidates.</p></div>
+      <StatusPill status={readiness.ready ? "ready" : readiness.enabled ? "setup_required" : "disabled"} />
+    </div>
+    <div className="hiring-application-summary">
+      <span><b>Session service</b>{readiness.broker_ready ? "Ready" : "Not ready"}</span>
+      <span><b>Secure gateway</b>{readiness.gateway_origin_configured ? "Ready" : "Not configured"}</span>
+    </div>
+    <div className="hiring-application-readiness">
+      {readiness.apps.map((app) => <div className="hiring-application-row" key={`${app.assessment_type}:${app.app_key}`}>
+        <div><strong>{app.display_name}</strong><small>{stageLabel(app.assessment_type)} assessment</small></div>
+        <span className={app.application_configured ? "complete" : ""}>{app.application_configured ? "Application mapped" : "Application not mapped"}</span>
+        <span className={app.license_approved ? "complete" : ""}>{app.license_approved ? "License approved" : "License approval required"}</span>
+        <StatusPill status={app.ready ? "ready" : "setup_required"} />
+      </div>)}
+    </div>
+    {!readiness.enabled && <p className="hiring-application-note">Candidate desktop sessions remain disabled until the licensed Windows environment is connected.</p>}
+  </>;
 }
 
 function TeamView({ members, onAddMember, onRefresh }: { members: Member[]; onAddMember: () => void; onRefresh: () => void }) {

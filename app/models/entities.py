@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from uuid import uuid4
 
 from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -596,6 +597,45 @@ class AssessmentSubmission(Base):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     time_taken_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     proctoring_events_json: Mapped[list | dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DesktopAppSession(Base):
+    __tablename__ = "desktop_app_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    issue_id: Mapped[int] = mapped_column(ForeignKey("assessment_issues.id"), index=True)
+    active_key: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True, index=True)
+    app_key: Mapped[str] = mapped_column(String(80), index=True)
+    broker_provider: Mapped[str] = mapped_column(String(40), default="http", index=True)
+    provider_session_id: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
+    host_id: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
+    workspace_key: Mapped[str] = mapped_column(String(180), unique=True, index=True)
+    candidate_name_snapshot: Mapped[str] = mapped_column(String(200))
+    candidate_email_snapshot: Mapped[str] = mapped_column(String(320))
+    status: Mapped[str] = mapped_column(String(30), default="provisioning", index=True)
+    status_detail: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DesktopSessionArtifact(Base):
+    __tablename__ = "desktop_session_artifacts"
+    __table_args__ = (UniqueConstraint("session_id", "artifact_key", name="uq_desktop_session_artifact"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("desktop_app_sessions.id"), index=True)
+    artifact_key: Mapped[str] = mapped_column(String(160))
+    artifact_type: Mapped[str] = mapped_column(String(80), default="working_file", index=True)
+    storage_uri: Mapped[str] = mapped_column(String(2000))
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

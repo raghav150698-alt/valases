@@ -8,6 +8,7 @@ import type { ExcelAssessmentSubmission } from "../tools/ExcelSimulator";
 import { BrandLogo } from "../../components/BrandLogo";
 
 const ExcelSimulator = lazy(() => import("../tools/ExcelSimulator").then((module) => ({ default: module.ExcelSimulator })));
+const RemoteDesktopTool = lazy(() => import("../tools/RemoteDesktopTool").then((module) => ({ default: module.RemoteDesktopTool })));
 
 type IssuedOption = { id: number; text: string };
 type IssuedQuestion = { question_id: number; question_text: string; question_type: string; options: IssuedOption[] };
@@ -15,6 +16,11 @@ type IssuedExam = {
   issued_id: number;
   assessment_title: string;
   assessment_type: string;
+  desktop_app?: {
+    app_key: string;
+    display_name: string;
+    heartbeat_seconds: number;
+  } | null;
   instructions?: string;
   duration_minutes: number;
   timing_mode: "question" | "assessment";
@@ -58,6 +64,7 @@ export function IssuedCandidatePanel() {
   const [taskFileLink, setTaskFileLink] = useState("");
   const [taxValues, setTaxValues] = useState<Record<string, string>>({});
   const [identifiedFlags, setIdentifiedFlags] = useState("");
+  const [desktopSession, setDesktopSession] = useState({ sessionId: "", status: "not_started", ready: false });
   const [proctorEvents, setProctorEvents] = useState<Array<Record<string, unknown>>>([]);
   const [policyWarning, setPolicyWarning] = useState<{ reason: string; count: number } | null>(null);
   const [consentAccepted, setConsentAccepted] = useState(false);
@@ -282,6 +289,7 @@ export function IssuedCandidatePanel() {
 
   const buildSubmittedData = useCallback((): Record<string, unknown> => {
     if (!paper) return {};
+    if (paper.desktop_app) return { desktop_session_id: desktopSession.sessionId };
     if (paper.assessment_type === "spreadsheet") {
       return excelSubmission || { final_sheet_json: {}, formulas_json: {}, calculated_values_json: {}, activity_log: [] };
     }
@@ -295,7 +303,7 @@ export function IssuedCandidatePanel() {
       };
     }
     return { response_text: taskResponse, attachment_url: taskFileLink };
-  }, [excelSubmission, identifiedFlags, paper, taskFileLink, taskResponse, taxValues]);
+  }, [desktopSession.sessionId, excelSubmission, identifiedFlags, paper, taskFileLink, taskResponse, taxValues]);
 
   const submit = async (endReason: "fullscreen" | "policy" | "manual" | null = null) => {
     if (!paper || submittingRef.current) return;
@@ -598,7 +606,24 @@ export function IssuedCandidatePanel() {
               <span>Timer: {timerDisplay}</span>
             </div>
           </div>
-          {paper.assessment_type === "spreadsheet" && paper.task && (
+          {paper.desktop_app && (
+            <section className="candidate-desktop-runtime">
+              <Suspense fallback={<div className="tool-loading-state" role="status">Preparing application...</div>}>
+                <RemoteDesktopTool
+                  title={paper.desktop_app.display_name}
+                  assessmentMode
+                  candidateToken={token}
+                  heartbeatSeconds={paper.desktop_app.heartbeat_seconds}
+                  onSessionChange={setDesktopSession}
+                />
+              </Suspense>
+              <div className="assessment-action-bar desktop-session-actions">
+                <span>{desktopSession.ready ? "Your work is saved to this assessment session." : "The submit action will become available when your application session is ready."}</span>
+                <button className="assessment-primary-btn" type="button" disabled={!desktopSession.ready} onClick={() => void submit()}>Submit assessment</button>
+              </div>
+            </section>
+          )}
+          {!paper.desktop_app && paper.assessment_type === "spreadsheet" && paper.task && (
             <Suspense fallback={<div className="tool-loading-state" role="status">Loading spreadsheet...</div>}>
               <ExcelSimulator
                 title={paper.task.title || paper.assessment_title}
@@ -676,7 +701,7 @@ export function IssuedCandidatePanel() {
             </footer>
             </main>
           )}
-          {!isMcqAssessment && paper.assessment_type !== "spreadsheet" && paper.task && (
+          {!paper.desktop_app && !isMcqAssessment && paper.assessment_type !== "spreadsheet" && paper.task && (
             <section className="task-candidate-workspace">
               <div className="task-candidate-brief">
                 <span>Task brief</span>

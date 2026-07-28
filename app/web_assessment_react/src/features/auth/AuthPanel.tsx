@@ -82,20 +82,35 @@ export function AuthPanel() {
   useEffect(() => {
     if (!supabaseConfigured || !supabase) return;
     let active = true;
-    void supabase.auth.getSession().then(async ({ data, error: sessionError }) => {
-      if (!active || sessionError || !data.session?.access_token) return;
+    void (async () => {
       try {
+        const { data: authConfig } = await api.get<FirebaseConfigResponse>("/config/firebase");
+        if (String(authConfig?.auth_mode || "").trim().toLowerCase() === "dummy") {
+          await supabase.auth.signOut({ scope: "local" });
+          return;
+        }
+        const { data, error: sessionError } = await supabase.auth.getSession();
+        if (!active || sessionError || !data.session?.access_token) return;
         await completeSupabaseSession(data.session.access_token);
       } catch (sessionCompletionError) {
         if (active) setError(humanizeAuthError(sessionCompletionError));
       }
-    });
+    })();
     return () => { active = false; };
   }, []);
 
   const onSubmit = async (values: Form) => {
     setError("");
     try {
+      const { data: authConfig } = await api.get<FirebaseConfigResponse>("/config/firebase");
+      const authMode = String(authConfig?.auth_mode || "").trim().toLowerCase();
+
+      if (authMode === "dummy") {
+        const { data } = await api.post("/auth/login", values);
+        setSession(data.access_token, data.role);
+        return;
+      }
+
       if (supabaseConfigured && supabase) {
         try {
           const { data, error: signInError } = await supabase.auth.signInWithPassword({
@@ -117,9 +132,6 @@ export function AuthPanel() {
           return;
         }
       }
-
-      const { data: authConfig } = await api.get<FirebaseConfigResponse>("/config/firebase");
-      const authMode = String(authConfig?.auth_mode || "").trim().toLowerCase();
 
       if (authMode === "firebase") {
         const apiKey = String(authConfig?.apiKey || "").trim();

@@ -147,7 +147,14 @@ async def apply_security_headers(request: Request, call_next):
         supabase_origin = ""
         if str(settings.supabase_url or "").startswith("https://"):
             supabase_origin = f" {str(settings.supabase_url).rstrip('/')}"
+        desktop_gateway_origin = ""
+        desktop_gateway_websocket = ""
+        if str(settings.desktop_session_gateway_origin or "").startswith(("https://", "http://")):
+            desktop_gateway_origin = f" {str(settings.desktop_session_gateway_origin).rstrip('/')}"
+            if str(settings.desktop_session_gateway_origin).startswith("https://"):
+                desktop_gateway_websocket = f" wss://{str(settings.desktop_session_gateway_origin).split('://', 1)[1].rstrip('/')}"
         frame_sources = "'self'" if settings.is_production else "'self' http://127.0.0.1:* http://localhost:*"
+        frame_sources = f"{frame_sources}{desktop_gateway_origin}"
         csp = (
             "default-src 'self'; "
             "img-src 'self' data: blob: https:; "
@@ -155,7 +162,7 @@ async def apply_security_headers(request: Request, call_next):
             "script-src 'self' 'wasm-unsafe-eval' https://www.gstatic.com https://www.googleapis.com https://storage.googleapis.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' data: https://fonts.gstatic.com; "
-            f"connect-src 'self'{supabase_origin} https://www.gstatic.com https://www.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://storage.googleapis.com; "
+            f"connect-src 'self'{supabase_origin}{desktop_gateway_origin}{desktop_gateway_websocket} https://www.gstatic.com https://www.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://storage.googleapis.com; "
             "worker-src 'self' blob:; "
             f"frame-src {frame_sources}; "
             f"frame-ancestors {settings.security_csp_frame_ancestors}; "
