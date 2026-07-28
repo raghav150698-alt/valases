@@ -12,6 +12,7 @@ from app.api.routes.hiring import (
     IntegrationUpdate,
     MembershipCreate,
     OrganizationProfileUpdate,
+    SsoConfigurationUpdate,
     InterviewCreate,
     JobCreate,
     ScorecardCreate,
@@ -26,11 +27,13 @@ from app.api.routes.hiring import (
     hiring_workspace,
     list_candidates,
     list_integrations,
+    get_sso_configuration,
     run_compliance_checks,
     screen_application,
     submit_scorecard,
     update_application_stage,
     update_organization_profile,
+    update_sso_configuration,
 )
 from app.api.routes.exams import (
     AssessmentReviewFinalizeRequest,
@@ -47,6 +50,7 @@ from app.models.entities import (
     Exam,
     ExamStatus,
     HiringApplication,
+    Organization,
     OrganizationMembership,
     ProviderProfile,
     ProviderType,
@@ -311,6 +315,46 @@ class HiringWorkspaceTest(unittest.TestCase):
             ),
         )
         self.assertEqual(membership.role, "recruiter")
+
+    def test_sso_only_member_is_pre_authorized_without_password_invitation(self) -> None:
+        workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)
+        organization_id = workspace["organization"]["id"]
+        configured = update_sso_configuration(
+            SsoConfigurationUpdate(
+                provider="wso2",
+                domains=["edutripindia.com"],
+                idp_metadata_url="https://idp.edutripindia.com/saml/metadata",
+                initial_admin_email="founders@edutripindia.com",
+            ),
+            organization_id=organization_id,
+            db=self.db,
+            current_user=self.recruiter,
+        )
+        self.assertEqual(configured["connection_status"], "ready_for_registration")
+
+        result = add_member(
+            MembershipCreate(
+                email="founders@edutripindia.com",
+                full_name="Edutrip Founder",
+                role="org_admin",
+                authentication="sso_only",
+            ),
+            organization_id=organization_id,
+            db=self.db,
+            current_user=self.recruiter,
+        )
+
+        self.assertFalse(result["invitation_sent"])
+        self.assertEqual(result["status"], "pending_sso")
+        pending_user = self.db.scalar(select(User).where(User.email == "founders@edutripindia.com"))
+        self.assertEqual(pending_user.password_hash, "sso_pending")
+        sso = get_sso_configuration(
+            organization_id=organization_id,
+            db=self.db,
+            current_user=self.recruiter,
+        )
+        self.assertEqual(sso["provider"], "wso2")
+        self.assertEqual(sso["initial_admin_email"], "founders@edutripindia.com")
 
     def test_passing_linked_assessment_advances_candidate_to_interview(self) -> None:
         workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)

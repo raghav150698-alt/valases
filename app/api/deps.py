@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import func, select
@@ -6,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.entities import ApprovalStatus, BannedIdentity, Organization, OrganizationMembership, ProviderProfile, User, UserApproval, UserRole
+from app.models.entities import ApprovalStatus, BannedIdentity, Organization, OrganizationAuditEvent, OrganizationMembership, ProviderProfile, User, UserApproval, UserRole
 from app.services.account_rules import is_configured_admin_email, resolve_identity_role
 from app.services.firebase_auth import set_firebase_custom_claims, verify_firebase_token
 from app.services.supabase_auth import verify_supabase_token
@@ -83,6 +85,60 @@ def _resolve_non_admin_role(
     return UserRole.PROVIDER if provider_profile_id else UserRole.STUDENT
 
 
+def _is_saml_session(payload: dict) -> bool:
+    provider = str((payload.get("app_metadata") or {}).get("provider") or "").strip().lower()
+    if provider == "sso:saml":
+        return True
+    return any(
+        str(item.get("method") or "").strip().lower() == "sso/saml"
+        for item in (payload.get("amr") or [])
+        if isinstance(item, dict)
+    )
+
+
+def _activate_pending_sso_memberships(db: Session, user: User, payload: dict) -> None:
+    if not _is_saml_session(payload):
+        return
+    pending = list(
+        db.execute(
+            select(OrganizationMembership, Organization)
+            .join(Organization, Organization.id == OrganizationMembership.organization_id)
+            .where(
+                OrganizationMembership.user_id == user.id,
+                OrganizationMembership.status == "pending_sso",
+                Organization.status == "active",
+            ),
+        ).all(),
+    )
+    email_domain = str(user.email or "").rsplit("@", 1)[-1].lower()
+    changed = False
+    for membership, organization in pending:
+        settings_json = dict(organization.settings_json or {})
+        sso = dict(settings_json.get("sso") or {})
+        domains = {str(domain).strip().lower() for domain in sso.get("domains") or []}
+        if email_domain not in domains:
+            continue
+        membership.status = "active"
+        sso["connection_status"] = "verified"
+        sso["verified_at"] = datetime.now(timezone.utc).isoformat()
+        sso["verified_by_email"] = user.email
+        settings_json["sso"] = sso
+        organization.settings_json = settings_json
+        db.add(
+            OrganizationAuditEvent(
+                organization_id=organization.id,
+                actor_user_id=user.id,
+                action="organization_sso_verified",
+                target_type="organization",
+                target_id=organization.id,
+                details_json={"email_domain": email_domain},
+            ),
+        )
+        changed = True
+    if changed:
+        db.commit()
+
+
 def get_current_user(
     token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
@@ -112,7 +168,6 @@ def get_current_user(
         name = payload.get("name") or (email.split("@")[0] if email else "Authenticated User")
         role_claim = str(payload.get("role") or "").strip().lower()
         approval_claim = str(payload.get("approval_status") or "").strip().lower()
-        auth_provider = str((payload.get("app_metadata") or {}).get("provider") or "").strip().lower()
         if not firebase_uid:
             raise credentials_exception
     except Exception as exc:
@@ -186,6 +241,8 @@ def get_current_user(
         db.commit()
         db.refresh(user)
 
+    _activate_pending_sso_memberships(db, user, payload)
+
     state = str(user.account_state or "active").lower()
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account is inactive.")
@@ -210,7 +267,7 @@ def get_current_user(
         for organization in organizations:
             sso = dict((organization.settings_json or {}).get("sso") or {})
             domains = {str(domain).strip().lower() for domain in sso.get("domains") or []}
-            if sso.get("enabled") and sso.get("enforce_for_members") and email_domain in domains and auth_provider != "sso:saml":
+            if sso.get("enabled") and sso.get("enforce_for_members") and email_domain in domains and not _is_saml_session(payload):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Your organization requires company SSO. Sign out and use Continue with company SSO.",

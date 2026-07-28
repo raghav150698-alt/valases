@@ -117,6 +117,7 @@ class MembershipCreate(BaseModel):
     full_name: str = Field(default="", max_length=200)
     role: Literal["org_admin", "recruiter", "custom"] = "recruiter"
     permissions: list[str] = Field(default_factory=list, max_length=40)
+    authentication: Literal["email_invite", "sso_only"] = "email_invite"
 
 
 class MembershipUpdate(BaseModel):
@@ -126,8 +127,20 @@ class MembershipUpdate(BaseModel):
 
 
 class SsoConfigurationUpdate(BaseModel):
-    provider: Literal["azure_ad", "okta", "google_workspace", "generic_saml"]
+    provider: Literal[
+        "microsoft_entra",
+        "azure_ad",
+        "okta",
+        "google_workspace",
+        "ping_identity",
+        "onelogin",
+        "wso2",
+        "other_saml",
+        "generic_saml",
+    ]
     domains: list[str] = Field(min_length=1, max_length=20)
+    idp_metadata_url: str = Field(default="", max_length=2000)
+    initial_admin_email: str = Field(default="", max_length=320)
     enabled: bool = False
     enforce_for_members: bool = False
 
@@ -642,26 +655,36 @@ def add_member(
     permissions = _clean_permissions(role, payload.permissions)
     if role == "custom" and not permissions:
         raise HTTPException(status_code=422, detail="Choose at least one permission for a custom role")
-    user = db.scalar(select(User).where(func.lower(User.email) == payload.email.strip().lower()))
+    email = payload.email.strip().lower()
+    user = db.scalar(select(User).where(func.lower(User.email) == email))
     invitation_sent = False
+    membership_status = "active"
     if not user:
-        email = payload.email.strip().lower()
         full_name = payload.full_name.strip() or email.split("@", 1)[0]
-        try:
-            invitation = invite_supabase_user(
-                email=email,
-                full_name=full_name,
-                redirect_to=f"{get_settings().app_base_url.rstrip('/')}/assessment/",
-                settings=get_settings(),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=502, detail=f"Could not send the member invitation: {exc}") from exc
-        if not invitation.get("configured"):
-            raise HTTPException(status_code=503, detail="Supabase member invitations are not configured")
+        if payload.authentication == "sso_only":
+            sso = dict((organization.settings_json or {}).get("sso") or {})
+            domains = {str(domain).strip().lower() for domain in sso.get("domains") or []}
+            email_domain = email.rsplit("@", 1)[-1] if "@" in email else ""
+            if email_domain not in domains:
+                raise HTTPException(status_code=422, detail="The member email must use a domain configured for this organization's SSO")
+            membership_status = "pending_sso"
+        else:
+            try:
+                invitation = invite_supabase_user(
+                    email=email,
+                    full_name=full_name,
+                    redirect_to=f"{get_settings().app_base_url.rstrip('/')}/assessment/",
+                    settings=get_settings(),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=502, detail=f"Could not send the member invitation: {exc}") from exc
+            if not invitation.get("configured"):
+                raise HTTPException(status_code=503, detail="Supabase member invitations are not configured")
+            invitation_sent = bool(invitation.get("sent"))
         user = User(
             email=email,
             full_name=full_name,
-            password_hash="supabase",
+            password_hash="sso_pending" if payload.authentication == "sso_only" else "supabase",
             role=UserRole.PROVIDER,
             is_active=True,
             account_state="active",
@@ -687,19 +710,61 @@ def add_member(
                 reviewed_at=datetime.now(timezone.utc),
             ),
         )
-        invitation_sent = bool(invitation.get("sent"))
+    elif payload.authentication == "sso_only":
+        existing_for_organization = db.scalar(
+            select(OrganizationMembership).where(
+                OrganizationMembership.organization_id == organization.id,
+                OrganizationMembership.user_id == user.id,
+            ),
+        )
+        if not existing_for_organization and user.password_hash != "sso_pending":
+            raise HTTPException(
+                status_code=409,
+                detail="This email already has a non-SSO account. Use a new work email or add the existing account with an email invitation.",
+            )
+        membership_status = "pending_sso"
     existing = db.scalar(select(OrganizationMembership).where(OrganizationMembership.organization_id == organization.id, OrganizationMembership.user_id == user.id))
     if existing:
         if existing.role == "owner":
             raise HTTPException(status_code=409, detail="The organization owner role cannot be replaced")
         existing.role = role
         existing.permissions_json = permissions
-        existing.status = "active"
+        existing.status = membership_status
     else:
-        db.add(OrganizationMembership(organization_id=organization.id, user_id=user.id, role=role, permissions_json=permissions))
-    _write_audit(db, organization.id, current_user.id, "organization_member_added", "user", user.id, {"role": role, "permissions": permissions})
+        db.add(
+            OrganizationMembership(
+                organization_id=organization.id,
+                user_id=user.id,
+                role=role,
+                permissions_json=permissions,
+                status=membership_status,
+            ),
+        )
+    _write_audit(
+        db,
+        organization.id,
+        current_user.id,
+        "organization_member_added",
+        "user",
+        user.id,
+        {
+            "role": role,
+            "permissions": permissions,
+            "authentication": payload.authentication,
+            "membership_status": membership_status,
+        },
+    )
     db.commit()
-    return {"user_id": user.id, "email": user.email, "full_name": user.full_name, "role": role, "permissions": permissions, "invitation_sent": invitation_sent}
+    return {
+        "user_id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": role,
+        "permissions": permissions,
+        "status": membership_status,
+        "authentication": payload.authentication,
+        "invitation_sent": invitation_sent,
+    }
 
 
 @router.get("/members")
@@ -1338,12 +1403,30 @@ def get_sso_configuration(
     organization, membership = _organization_context(db, current_user, organization_id)
     _require_permission(current_user, membership, "sso.manage")
     sso = dict((organization.settings_json or {}).get("sso") or {})
+    supabase_url = str(get_settings().supabase_url or "").strip().rstrip("/")
+    metadata_url = f"{supabase_url}/auth/v1/sso/saml/metadata" if supabase_url.startswith("https://") else ""
+    connection_status = str(sso.get("connection_status") or "not_configured")
+    provider = {"azure_ad": "microsoft_entra", "generic_saml": "other_saml"}.get(
+        str(sso.get("provider") or ""),
+        str(sso.get("provider") or "microsoft_entra"),
+    )
     return {
-        "provider": sso.get("provider", "azure_ad"),
+        "provider": provider,
         "domains": list(sso.get("domains") or []),
+        "idp_metadata_url": str(sso.get("idp_metadata_url") or ""),
+        "initial_admin_email": str(sso.get("initial_admin_email") or ""),
         "enabled": bool(sso.get("enabled")),
         "enforce_for_members": bool(sso.get("enforce_for_members")),
-        "status": "configured" if sso.get("enabled") and sso.get("domains") else "not_configured",
+        "connection_status": connection_status,
+        "status": "active" if sso.get("enabled") else connection_status,
+        "service_provider": {
+            "entity_id": metadata_url,
+            "metadata_url": metadata_url,
+            "metadata_download_url": f"{metadata_url}?download=true" if metadata_url else "",
+            "acs_url": f"{supabase_url}/auth/v1/sso/saml/acs" if supabase_url.startswith("https://") else "",
+            "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+            "required_email_claim": "email",
+        },
     }
 
 
@@ -1365,18 +1448,61 @@ def update_sso_configuration(
     )
     if not domains:
         raise HTTPException(status_code=422, detail="Add at least one valid company email domain")
+    metadata_url = payload.idp_metadata_url.strip()
+    if metadata_url and not metadata_url.startswith("https://"):
+        raise HTTPException(status_code=422, detail="Identity-provider metadata must use an HTTPS URL")
+    admin_email = payload.initial_admin_email.strip().lower()
+    if admin_email:
+        admin_domain = admin_email.rsplit("@", 1)[-1] if "@" in admin_email else ""
+        if admin_domain not in domains:
+            raise HTTPException(status_code=422, detail="The initial administrator must use one of the configured company domains")
+    existing_sso = dict((organization.settings_json or {}).get("sso") or {})
+    existing_provider = {"azure_ad": "microsoft_entra", "generic_saml": "other_saml"}.get(
+        str(existing_sso.get("provider") or ""),
+        str(existing_sso.get("provider") or ""),
+    )
+    verified = (
+        existing_sso.get("connection_status") == "verified"
+        and existing_provider == payload.provider
+        and sorted(str(domain).strip().lower() for domain in existing_sso.get("domains") or []) == domains
+        and str(existing_sso.get("idp_metadata_url") or "").strip() == metadata_url
+    )
+    if payload.enabled and not verified:
+        raise HTTPException(status_code=409, detail="Complete a successful SAML test login before enabling SSO")
+    if payload.enforce_for_members and not payload.enabled:
+        raise HTTPException(status_code=422, detail="Enable SSO before requiring it for organization members")
+    connection_status = "verified" if verified else ("ready_for_registration" if metadata_url else "metadata_required")
     settings_json = dict(organization.settings_json or {})
     settings_json["sso"] = {
         "provider": payload.provider,
         "domains": domains,
+        "idp_metadata_url": metadata_url,
+        "initial_admin_email": admin_email,
         "enabled": payload.enabled,
         "enforce_for_members": payload.enforce_for_members if payload.enabled else False,
+        "connection_status": connection_status,
+        "verified_at": existing_sso.get("verified_at"),
+        "verified_by_email": existing_sso.get("verified_by_email"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     organization.settings_json = settings_json
-    _write_audit(db, organization.id, current_user.id, "organization_sso_updated", "organization", organization.id, {"provider": payload.provider, "domains": domains, "enabled": payload.enabled, "enforced": payload.enforce_for_members})
+    _write_audit(
+        db,
+        organization.id,
+        current_user.id,
+        "organization_sso_updated",
+        "organization",
+        organization.id,
+        {
+            "provider": payload.provider,
+            "domains": domains,
+            "metadata_url_configured": bool(metadata_url),
+            "enabled": payload.enabled,
+            "enforced": payload.enforce_for_members,
+        },
+    )
     db.commit()
-    return {**settings_json["sso"], "status": "configured" if payload.enabled else "disabled"}
+    return {**settings_json["sso"], "status": "active" if payload.enabled else connection_status}
 
 
 @router.get("/integrations")

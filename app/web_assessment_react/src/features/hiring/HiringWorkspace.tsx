@@ -145,15 +145,35 @@ type Member = {
 type SsoConfiguration = {
   provider: string;
   domains: string[];
+  idp_metadata_url: string;
+  initial_admin_email: string;
   enabled: boolean;
   enforce_for_members: boolean;
+  connection_status: string;
   status: string;
+  service_provider: {
+    entity_id: string;
+    metadata_url: string;
+    metadata_download_url: string;
+    acs_url: string;
+    name_id_format: string;
+    required_email_claim: string;
+  };
 };
 
 type Tab = "overview" | "jobs" | "candidates" | "pipeline" | "interviews" | "assessments" | "integrations" | "team" | "settings";
 
 const stageLabel = (stage: string) => stage.replace(/_/g, " ").replace(/\b\w/g, (value) => value.toUpperCase());
 const splitList = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
+const ssoProviderGuide: Record<string, string> = {
+  microsoft_entra: "Microsoft Entra admin center > Enterprise applications > New application > Create your own application > SAML",
+  okta: "Okta Admin Console > Applications > Create App Integration > SAML 2.0",
+  google_workspace: "Google Admin console > Apps > Web and mobile apps > Add app > Add custom SAML app",
+  ping_identity: "PingOne admin console > Connections > Applications > Add application > SAML",
+  onelogin: "OneLogin Administration > Applications > Add App > SAML Custom Connector",
+  wso2: "WSO2 Console > Applications > New Application > Traditional Web Application > SAML",
+  other_saml: "Create a SAML 2.0 service-provider application in the customer's identity-provider console.",
+};
 
 function SearchIcon() {
   return <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" /><path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
@@ -549,9 +569,27 @@ function OrganizationProfileForm({ organization, onSaved }: { organization: Work
 }
 
 function SsoForm({ value, onSaved }: { value?: SsoConfiguration; onSaved: () => void }) {
-  const [form, setForm] = useState({ provider: value?.provider || "azure_ad", domains: (value?.domains || []).join(", "), enabled: Boolean(value?.enabled), enforce_for_members: Boolean(value?.enforce_for_members) });
+  const [form, setForm] = useState({
+    provider: value?.provider || "microsoft_entra",
+    domains: (value?.domains || []).join(", "),
+    idp_metadata_url: value?.idp_metadata_url || "",
+    initial_admin_email: value?.initial_admin_email || "",
+    enabled: Boolean(value?.enabled),
+    enforce_for_members: Boolean(value?.enforce_for_members),
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const verified = value?.connection_status === "verified";
+  useEffect(() => {
+    setForm({
+      provider: value?.provider || "microsoft_entra",
+      domains: (value?.domains || []).join(", "),
+      idp_metadata_url: value?.idp_metadata_url || "",
+      initial_admin_email: value?.initial_admin_email || "",
+      enabled: Boolean(value?.enabled),
+      enforce_for_members: Boolean(value?.enforce_for_members),
+    });
+  }, [value]);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
@@ -566,13 +604,51 @@ function SsoForm({ value, onSaved }: { value?: SsoConfiguration; onSaved: () => 
     }
   };
   return <form className="hiring-form hiring-sso-form" onSubmit={submit}>
-    <div className="hiring-panel-header"><div><h2>Single sign-on</h2><p>Route members through the identity provider associated with their company email domain.</p></div><StatusPill status={value?.status || "not_configured"} /></div>
-    <label>Identity provider<select value={form.provider} onChange={(event) => setForm({ ...form, provider: event.target.value })}><option value="azure_ad">Microsoft Entra ID</option><option value="okta">Okta</option><option value="google_workspace">Google Workspace</option><option value="generic_saml">SAML 2.0 provider</option></select></label>
-    <label>Company domains<input required value={form.domains} onChange={(event) => setForm({ ...form, domains: event.target.value })} placeholder="company.com, subsidiary.com" /></label>
-    <label className="hiring-checkbox"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} />Enable SSO for these domains</label>
-    <label className="hiring-checkbox"><input type="checkbox" checked={form.enforce_for_members} disabled={!form.enabled} onChange={(event) => setForm({ ...form, enforce_for_members: event.target.checked })} />Require organization members to use SSO</label>
+    <div className="hiring-panel-header"><div><h2>Single sign-on</h2><p>Connect one SAML 2.0 identity provider for this organization.</p></div><StatusPill status={value?.status || "not_configured"} /></div>
+    <div className="hiring-sso-notice">
+      <strong>Supabase Pro activation required</strong>
+      <span>You can complete and save the customer setup now. Enable and enforce SSO only after SAML is activated and a test login succeeds.</span>
+    </div>
+    <div className="hiring-sso-step">
+      <header><span>1</span><div><strong>Customer identity</strong><small>Select a setup guide and identify the company domain.</small></div></header>
+      <label>Identity provider<select value={form.provider} onChange={(event) => setForm({ ...form, provider: event.target.value })}>
+        <option value="microsoft_entra">Microsoft Entra ID</option>
+        <option value="okta">Okta</option>
+        <option value="google_workspace">Google Workspace</option>
+        <option value="ping_identity">Ping Identity</option>
+        <option value="onelogin">OneLogin</option>
+        <option value="wso2">WSO2</option>
+        <option value="other_saml">Other SAML 2.0 provider</option>
+      </select></label>
+      <p className="hiring-form-context"><strong>Customer setup path</strong><span>{ssoProviderGuide[form.provider]}</span></p>
+      <div className="hiring-form-grid">
+        <label>Company domains<input required value={form.domains} onChange={(event) => setForm({ ...form, domains: event.target.value })} placeholder="company.com" /></label>
+        <label>Initial administrator<input type="email" value={form.initial_admin_email} onChange={(event) => setForm({ ...form, initial_admin_email: event.target.value })} placeholder="admin@company.com" /></label>
+      </div>
+    </div>
+    <div className="hiring-sso-step">
+      <header><span>2</span><div><strong>Give these values to the customer</strong><small>Their IT administrator adds them to the SAML application.</small></div></header>
+      <dl className="hiring-sso-values">
+        <div><dt>Entity ID</dt><dd>{value?.service_provider?.entity_id || "Available after Supabase configuration"}</dd></div>
+        <div><dt>ACS / Reply URL</dt><dd>{value?.service_provider?.acs_url || "Available after Supabase configuration"}</dd></div>
+        <div><dt>Metadata URL</dt><dd>{value?.service_provider?.metadata_url || "Available after Supabase configuration"}</dd></div>
+        <div><dt>NameID format</dt><dd>{value?.service_provider?.name_id_format || "emailAddress"}</dd></div>
+        <div><dt>Required claim</dt><dd>{value?.service_provider?.required_email_claim || "email"}</dd></div>
+      </dl>
+    </div>
+    <div className="hiring-sso-step">
+      <header><span>3</span><div><strong>Receive customer metadata</strong><small>Use the HTTPS metadata URL supplied by their identity administrator.</small></div></header>
+      <label>Identity-provider metadata URL<input type="url" value={form.idp_metadata_url} onChange={(event) => setForm({ ...form, idp_metadata_url: event.target.value })} placeholder="https://idp.company.com/saml/metadata" /></label>
+      <p className="hiring-form-hint">Metadata XML upload and certificate rotation support will be available in the managed operator workflow. Never enter passwords or private signing keys here.</p>
+    </div>
+    <div className="hiring-sso-step">
+      <header><span>4</span><div><strong>Test and activate</strong><small>A successful SAML login changes the connection status to verified.</small></div></header>
+      <label className="hiring-checkbox"><input type="checkbox" checked={form.enabled} disabled={!verified} onChange={(event) => setForm({ ...form, enabled: event.target.checked, enforce_for_members: event.target.checked ? form.enforce_for_members : false })} />Enable SSO for these domains</label>
+      <label className="hiring-checkbox"><input type="checkbox" checked={form.enforce_for_members} disabled={!verified || !form.enabled} onChange={(event) => setForm({ ...form, enforce_for_members: event.target.checked })} />Require organization members to use SSO</label>
+      {!verified && <p className="hiring-form-hint">Activation remains locked until the SAML provider is registered and the pending administrator completes a test login.</p>}
+    </div>
     {error && <p className="hiring-form-error">{error}</p>}
-    <footer><button type="submit" className="hiring-button primary" disabled={loading}>{loading ? "Saving..." : "Save SSO policy"}</button></footer>
+    <footer><button type="submit" className="hiring-button primary" disabled={loading}>{loading ? "Saving..." : "Save SSO setup"}</button></footer>
   </form>;
 }
 
@@ -704,7 +780,7 @@ const permissionDescription: Record<string, string> = {
 };
 
 function MemberForm({ permissionCatalog, onClose, onSaved }: { permissionCatalog: string[]; onClose: () => void; onSaved: (message: string) => void }) {
-  const [form, setForm] = useState({ full_name: "", email: "", role: "recruiter", permissions: [] as string[] });
+  const [form, setForm] = useState({ full_name: "", email: "", role: "recruiter", permissions: [] as string[], authentication: "email_invite" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const togglePermission = (permission: string) => setForm((current) => ({
@@ -717,7 +793,7 @@ function MemberForm({ permissionCatalog, onClose, onSaved }: { permissionCatalog
     setError("");
     try {
       const { data } = await api.post("/hiring/members", form);
-      onSaved(data.invitation_sent ? `Invitation sent to ${form.email}.` : `${form.email} now has organization access.`);
+      onSaved(data.status === "pending_sso" ? `${form.email} is ready for the first company SSO login.` : data.invitation_sent ? `Invitation sent to ${form.email}.` : `${form.email} now has organization access.`);
     } catch (reason) {
       setError(apiError(reason, "Could not add this organization member."));
     } finally {
@@ -727,6 +803,11 @@ function MemberForm({ permissionCatalog, onClose, onSaved }: { permissionCatalog
   return <Modal title="Invite organization member" onClose={onClose}>
     <form className="hiring-form" onSubmit={submit}>
       <div className="hiring-form-grid"><label>Full name<input required value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label><label>Work email<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label></div>
+      <fieldset className="hiring-auth-options">
+        <legend>Sign-in method</legend>
+        <label><input type="radio" name="member-authentication" value="email_invite" checked={form.authentication === "email_invite"} onChange={(event) => setForm({ ...form, authentication: event.target.value })} /><span><strong>Email invitation</strong><small>Create a standard Supabase account and send an invitation.</small></span></label>
+        <label><input type="radio" name="member-authentication" value="sso_only" checked={form.authentication === "sso_only"} onChange={(event) => setForm({ ...form, authentication: event.target.value })} /><span><strong>Company SSO</strong><small>Pre-authorize this user without creating a password identity.</small></span></label>
+      </fieldset>
       <fieldset className="hiring-role-options">
         <legend>Access role</legend>
         <label><input type="radio" name="member-role" value="org_admin" checked={form.role === "org_admin"} onChange={(event) => setForm({ ...form, role: event.target.value })} /><span><strong>Organization admin</strong><small>All organization controls, including people, SSO, integrations, and billing.</small></span></label>
@@ -735,7 +816,7 @@ function MemberForm({ permissionCatalog, onClose, onSaved }: { permissionCatalog
       </fieldset>
       {form.role === "custom" && <fieldset className="hiring-permission-grid"><legend>Custom access</legend>{permissionCatalog.map((permission) => <label key={permission}><input type="checkbox" checked={form.permissions.includes(permission)} onChange={() => togglePermission(permission)} /><span>{permissionDescription[permission] || stageLabel(permission)}</span></label>)}</fieldset>}
       {error && <p className="hiring-form-error">{error}</p>}
-      <footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading || (form.role === "custom" && !form.permissions.length)}>{loading ? "Sending invitation..." : "Send invitation"}</button></footer>
+      <footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading || (form.role === "custom" && !form.permissions.length)}>{loading ? "Saving..." : form.authentication === "sso_only" ? "Pre-authorize member" : "Send invitation"}</button></footer>
     </form>
   </Modal>;
 }

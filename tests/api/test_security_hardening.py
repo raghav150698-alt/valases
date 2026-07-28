@@ -179,6 +179,61 @@ class ProvisioningAndApprovalTest(unittest.TestCase):
         authenticated = get_current_user("sso-token", self.db, None, None, None, None)
         self.assertEqual(authenticated.id, user.id)
 
+    @patch("app.api.deps.verify_supabase_token")
+    @patch("app.api.deps.get_settings")
+    def test_first_saml_login_activates_pre_authorized_membership(self, settings_mock, verify_mock) -> None:
+        settings_mock.return_value = _production_settings()
+        user = User(
+            email="founders@edutripindia.com",
+            full_name="Edutrip Founder",
+            password_hash="sso_pending",
+            role=UserRole.PROVIDER,
+            is_active=True,
+            account_state="active",
+        )
+        self.db.add(user)
+        self.db.flush()
+        self.db.add(UserApproval(user_id=user.id, status=ApprovalStatus.APPROVED))
+        organization = Organization(
+            name="Edutrip India",
+            slug="edutrip-india",
+            settings_json={
+                "sso": {
+                    "provider": "wso2",
+                    "domains": ["edutripindia.com"],
+                    "connection_status": "ready_for_registration",
+                    "enabled": False,
+                    "enforce_for_members": False,
+                },
+            },
+        )
+        self.db.add(organization)
+        self.db.flush()
+        membership = OrganizationMembership(
+            organization_id=organization.id,
+            user_id=user.id,
+            role="org_admin",
+            status="pending_sso",
+        )
+        self.db.add(membership)
+        self.db.commit()
+
+        verify_mock.return_value = {
+            "uid": "saml-user-id",
+            "email": user.email,
+            "name": user.full_name,
+            "role": "provider",
+            "app_metadata": {"provider": "sso:saml"},
+        }
+        authenticated = get_current_user("sso-token", self.db, None, None, None, None)
+
+        self.assertEqual(authenticated.id, user.id)
+        self.db.refresh(membership)
+        self.db.refresh(organization)
+        self.assertEqual(membership.status, "active")
+        self.assertEqual(organization.settings_json["sso"]["connection_status"], "verified")
+        self.assertEqual(organization.settings_json["sso"]["verified_by_email"], user.email)
+
     @patch("app.services.account_rules.get_settings")
     def test_startup_sync_preserves_rejected_approval(self, settings_mock) -> None:
         settings_mock.return_value = _production_settings()
