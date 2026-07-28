@@ -22,7 +22,7 @@ from app.models.entities import (
 )
 
 
-TEMPLATE_CATALOG_VERSION = 6
+TEMPLATE_CATALOG_VERSION = 8
 STANDALONE_ASSESSMENT_CATEGORY = "__standalone_assessment__"
 SUPERSEDED_TEMPLATE_PREFIX = "__platform_superseded__"
 
@@ -247,11 +247,30 @@ DEFAULT_ASSESSMENTS = [
     },
     {
         "id":"month-end-close","title":"Month-End Close & Exception Review","summary":"Complete a bank, receivables, accrual, and control close with traceable outputs.",
-        "assessment_type":"accounting","duration_minutes":70,"pass_score":75,"topics":["Month-end close","Reconciliation","Accruals","Controls"],"tools":["Accounting workspace"],
+        "assessment_type":"accounting","duration_minutes":70,"pass_score":75,"topics":["Month-end close","Reconciliation","Accruals","Controls"],"tools":["LedgeBook"],
         "instructions":"Enter the calculated close balances and identify every control exception supported by the case.","about":"Tough default practical assessment for accounting and controllership candidates.",
         "task":{"title":"Month-end close and exception review","marks":100,"description":"The bank statement is 486,240. Outstanding cheques are 42,800; deposits in transit 31,500; bank charges 640; and an unrecorded customer receipt is 18,200. Ledger cash before adjustments is 456,380. AR control is 612,900 while the subledger totals 606,400. Services received but unbilled are 27,500. Depreciation is 14,250. A vendor invoice of 9,800 appears twice.",
             "instructions":"Calculate adjusted bank and book cash, reconciliation difference, AR adjustment, accrual, depreciation, corrected AP duplicate amount, and identify the exceptions.",
-            "metadata":{"workspace":"accounting","answer_format":"structured","form_fields":["adjusted_bank_cash","adjusted_book_cash","cash_difference","ar_adjustment","expense_accrual","depreciation_entry","duplicate_ap_correction"],"red_flag_options":["Duplicate vendor invoice","AR control/subledger mismatch","Unrecorded bank charge","Unrecorded customer receipt","Missing service accrual"]},
+            "metadata":{
+                "workspace":"accounting",
+                "answer_format":"accounting_workbench",
+                "form_fields":["adjusted_bank_cash","adjusted_book_cash","cash_difference","ar_adjustment","expense_accrual","depreciation_entry","duplicate_ap_correction"],
+                "red_flag_options":["Duplicate vendor invoice","AR control/subledger mismatch","Unrecorded bank charge","Unrecorded customer receipt","Missing service accrual","Bank statement ending balance transposed","Deposit in transit recorded twice","Customer balance requires write-off","Fixed-asset schedule is unsupported","Vendor payment was posted to the wrong period"],
+                "accounting_case":{
+                    "companyName":"Northstar Services LLC",
+                    "periodLabel":"June 2026 close",
+                    "statementBalance":486240,
+                    "ledgerCashBalance":456380,
+                    "arControlBalance":612900,
+                    "arSubledgerBalance":606400,
+                    "bankItems":[
+                        {"id":"outstanding-checks","date":"Jun 27-30","description":"Outstanding checks","reference":"4 checks","amount":42800,"evidence":"Issued before period end; not cleared by bank."},
+                        {"id":"deposits-transit","date":"Jun 30","description":"Deposits in transit","reference":"DEP-0630","amount":31500,"evidence":"Recorded in ledger; credited by bank on July 1."},
+                        {"id":"bank-charge","date":"Jun 30","description":"Bank service charge","reference":"BANK-FEE","amount":640,"evidence":"Appears on statement; not recorded in ledger."},
+                        {"id":"customer-receipt","date":"Jun 30","description":"Customer ACH receipt","reference":"ACH-8841","amount":18200,"evidence":"Bank received directly; not recorded in ledger."}
+                    ]
+                }
+            },
             "expected_output":{"expected_form_values":{"adjusted_bank_cash":474940,"adjusted_book_cash":473940,"cash_difference":1000,"ar_adjustment":6500,"expense_accrual":27500,"depreciation_entry":14250,"duplicate_ap_correction":9800},"red_flags":["Duplicate vendor invoice","AR control/subledger mismatch","Unrecorded bank charge","Unrecorded customer receipt","Missing service accrual"]},
             "grading_config":{"evaluation_mode":"deterministic","checkpoints":[
                 {"id":"bank-cash","label":"Adjusted bank cash","weight":15,"source":"field:adjusted_bank_cash","comparator":"numeric","expected":474940,"tolerance":1},
@@ -261,24 +280,57 @@ DEFAULT_ASSESSMENTS = [
                 {"id":"accrual","label":"Missing expense accrual","weight":15,"source":"field:expense_accrual","comparator":"numeric","expected":27500,"tolerance":1},
                 {"id":"depreciation","label":"Depreciation entry","weight":10,"source":"field:depreciation_entry","comparator":"numeric","expected":14250,"tolerance":1},
                 {"id":"duplicate","label":"Duplicate AP correction","weight":10,"source":"field:duplicate_ap_correction","comparator":"numeric","expected":9800,"tolerance":1},
-                {"id":"flags","label":"Control exceptions","weight":15,"source":"identified_red_flags","comparator":"set_contains_all","expected":["Duplicate vendor invoice","AR control/subledger mismatch","Unrecorded bank charge","Unrecorded customer receipt","Missing service accrual"]}]},
+                {"id":"flags","label":"Control exceptions","weight":15,"source":"identified_red_flags","comparator":"set_exact","expected":["Duplicate vendor invoice","AR control/subledger mismatch","Unrecorded bank charge","Unrecorded customer receipt","Missing service accrual"]}]},
         },
     },
     {
         "id":"individual-tax-review","title":"Complex Individual Tax Review","summary":"Calculate a return and identify documentation and compliance exceptions.",
-        "assessment_type":"tax_simulator","duration_minutes":65,"pass_score":75,"topics":["Individual tax","Adjustments","Credits","Compliance review"],"tools":["Tax software"],
-        "instructions":"Use the supplied case values. Enter calculated fields and select every supported review flag.","about":"Tough default tax-preparer and reviewer assessment.",
-        "task":{"title":"Individual return calculation and review","marks":100,"description":"Case: wages 118,000; interest 2,400; Schedule C receipts 46,000 and substantiated expenses 18,500; deductible HSA contribution 3,850; standard deduction 14,600; pre-credit tax 22,940; nonrefundable credits 2,000; withholding 24,500. A 6,200 vehicle claim has no mileage log, a dependent SSN is missing, and a 1099-NEC is absent from source documents.",
-            "instructions":"Calculate Schedule C profit, AGI, taxable income, tax after credits, and refund/balance due. Identify all documentation exceptions.",
-            "metadata":{"workspace":"tax","answer_format":"structured","form_fields":["schedule_c_profit","adjusted_gross_income","taxable_income","tax_after_credits","refund"],"red_flag_options":["Vehicle expense lacks mileage log","Dependent SSN missing","1099-NEC source document missing"]},
-            "expected_output":{"expected_form_values":{"schedule_c_profit":27500,"adjusted_gross_income":144050,"taxable_income":129450,"tax_after_credits":20940,"refund":3560},"red_flags":["Vehicle expense lacks mileage log","Dependent SSN missing","1099-NEC source document missing"]},
+        "assessment_type":"tax_simulator","duration_minutes":75,"pass_score":75,"topics":["Individual tax","Schedule C","Adjustments","Credits","Source-document review","Compliance diagnostics"],"tools":["1040 Individual Tax"],
+        "instructions":"Prepare the return from the client file. Enter source amounts, determine supported Schedule C deductions, complete the federal calculation, and select only diagnostics supported by the evidence.","about":"Tough default tax-preparer and reviewer assessment.",
+        "task":{"title":"Individual return preparation and source review","marks":100,"description":"Prepare Alex Rivera's 2025 federal individual return using the mailbox, organizer, tax statements, business records, and document checklist. Unsupported deductions and false-positive diagnostics reduce the score.",
+            "instructions":"Complete the return, review generated forms, select only evidence-supported diagnostics, and document unresolved source records for reviewer follow-up.",
+            "metadata":{"workspace":"tax","answer_format":"tax_workbench","tax_case":{"taxpayerName":"Alex Rivera","maskedSsn":"***-**-4821","filingStatus":"Head of household","taxYear":2025,"occupation":"Independent marketing consultant","dependentName":"Mateo Rivera"},"form_fields":["schedule_c_profit","adjusted_gross_income","taxable_income","tax_after_credits","refund"],"red_flag_options":["Vehicle expense lacks mileage log","Dependent SSN missing","1099-NEC source document missing","W-2 withholding exceeds reported wages","HSA contribution exceeds the case limit","Taxpayer filing status is unsupported","Interest income is nontaxable","Standard deduction is unavailable"]},
+            "expected_output":{"expected_form_values":{"wages":118000,"federal_withholding":24500,"taxable_interest":2400,"business_receipts":46000,"allowable_business_expenses":18500,"hsa_deduction":3850,"standard_deduction":23625,"pre_credit_tax":20010,"nonrefundable_credits":2000,"schedule_c_profit":27500,"adjusted_gross_income":144050,"taxable_income":120425,"tax_after_credits":18010,"refund":6490},"red_flags":["Vehicle expense lacks mileage log","Dependent SSN missing","1099-NEC source document missing"]},
             "grading_config":{"evaluation_mode":"deterministic","checkpoints":[
-                {"id":"schedule-c","label":"Schedule C profit","weight":20,"source":"field:schedule_c_profit","comparator":"numeric","expected":27500,"tolerance":1},
-                {"id":"agi","label":"Adjusted gross income","weight":20,"source":"field:adjusted_gross_income","comparator":"numeric","expected":144050,"tolerance":1},
-                {"id":"taxable","label":"Taxable income","weight":20,"source":"field:taxable_income","comparator":"numeric","expected":129450,"tolerance":1},
-                {"id":"tax","label":"Tax after credits","weight":15,"source":"field:tax_after_credits","comparator":"numeric","expected":20940,"tolerance":1},
-                {"id":"refund","label":"Refund","weight":10,"source":"field:refund","comparator":"numeric","expected":3560,"tolerance":1},
-                {"id":"flags","label":"Compliance exceptions","weight":15,"source":"identified_red_flags","comparator":"set_contains_all","expected":["Vehicle expense lacks mileage log","Dependent SSN missing","1099-NEC source document missing"]}]},
+                {"id":"wages","label":"W-2 wages","weight":8,"source":"field:wages","comparator":"numeric","expected":118000,"tolerance":1},
+                {"id":"withholding","label":"Federal withholding","weight":5,"source":"field:federal_withholding","comparator":"numeric","expected":24500,"tolerance":1},
+                {"id":"interest","label":"Taxable interest","weight":5,"source":"field:taxable_interest","comparator":"numeric","expected":2400,"tolerance":1},
+                {"id":"receipts","label":"Schedule C gross receipts","weight":8,"source":"field:business_receipts","comparator":"numeric","expected":46000,"tolerance":1},
+                {"id":"expenses","label":"Allowable business expenses","weight":12,"source":"field:allowable_business_expenses","comparator":"numeric","expected":18500,"tolerance":1},
+                {"id":"schedule-c","label":"Schedule C profit","weight":10,"source":"field:schedule_c_profit","comparator":"numeric","expected":27500,"tolerance":1},
+                {"id":"hsa","label":"HSA deduction","weight":5,"source":"field:hsa_deduction","comparator":"numeric","expected":3850,"tolerance":1},
+                {"id":"standard","label":"Standard deduction","weight":5,"source":"field:standard_deduction","comparator":"numeric","expected":23625,"tolerance":1},
+                {"id":"agi","label":"Adjusted gross income","weight":10,"source":"field:adjusted_gross_income","comparator":"numeric","expected":144050,"tolerance":1},
+                {"id":"taxable","label":"Taxable income","weight":10,"source":"field:taxable_income","comparator":"numeric","expected":120425,"tolerance":1},
+                {"id":"tax","label":"Tax after credits","weight":8,"source":"field:tax_after_credits","comparator":"numeric","expected":18010,"tolerance":1},
+                {"id":"refund","label":"Refund","weight":5,"source":"field:refund","comparator":"numeric","expected":6490,"tolerance":1},
+                {"id":"flags","label":"Compliance exceptions","weight":9,"source":"identified_red_flags","comparator":"set_exact","expected":["Vehicle expense lacks mileage log","Dependent SSN missing","1099-NEC source document missing"]}]},
+        },
+    },
+    {
+        "id":"corporate-tax-1120-review","title":"Complex Corporate Tax Return Review","summary":"Prepare Form 1120, reconcile book-to-tax income, and resolve corporate filing diagnostics.",
+        "assessment_type":"tax_1120","duration_minutes":95,"pass_score":75,"topics":["Corporate tax","Form 1120","Schedule J","Schedule L","Schedule M-1","Book-tax differences","Compliance diagnostics"],"tools":["1120 Corporate Tax"],
+        "instructions":"Prepare the corporation return from the client file. Determine supported deductions, complete the charitable-contribution limitation and book-tax reconciliation, and select only evidence-supported diagnostics.","about":"Advanced default practical assessment for corporate tax preparers and reviewers.",
+        "task":{"title":"Corporate return preparation and book-tax reconciliation","marks":100,"description":"Prepare Sterling Ridge Analytics, Inc.'s 2025 Form 1120 from its trial balance, tax workpapers, fixed-asset report, contribution support, payment confirmations, and year-end balance sheet. Unsupported deductions and false-positive diagnostics reduce the score.",
+            "instructions":"Complete Page 1, Schedule J, Schedule L, and Schedule M-1 outputs; identify every supported tax and source-document issue; and leave a concise reviewer note.",
+            "metadata":{"workspace":"tax_1120","answer_format":"corporate_tax_workbench","corporate_tax_case":{"corporationName":"Sterling Ridge Analytics, Inc.","maskedEin":"**-***7314","taxYear":2025,"entityType":"Domestic C corporation","returnType":"Form 1120","accountingMethod":"Accrual","taxYearEnd":"December 31, 2025"},"form_fields":["net_sales","gross_profit","total_income","total_deductions","taxable_income","income_tax","amount_owed","m1_taxable_income"],"red_flag_options":["Federal income tax provision is nondeductible","Meals require a 50% limitation","Fines and penalties are nondeductible","Bad-debt allowance requires a tax adjustment","Charitable contribution exceeds the current-year limit","Tax depreciation exceeds book depreciation","Contractor information-return support is incomplete","Corporation qualifies for S corporation treatment","Tax-exempt interest is taxable","All charitable contributions are fully deductible","Schedule M-3 is required"]},
+            "expected_output":{"expected_form_values":{"gross_receipts":2980000,"returns_allowances":45000,"cost_of_goods_sold":1065000,"net_sales":2935000,"gross_profit":1870000,"taxable_interest":18500,"capital_gain":42000,"other_income":12000,"total_income":1942500,"allowable_bad_debts":16000,"allowable_taxes":72000,"tax_depreciation":118000,"allowable_charitable_contribution":52300,"other_deductions":153000,"total_deductions":1471800,"taxable_income":470700,"income_tax":98847,"estimated_payments":90000,"amount_owed":8847,"book_net_income":318500,"m1_additions":178200,"m1_deductions":26000,"m1_taxable_income":470700},"red_flags":["Federal income tax provision is nondeductible","Meals require a 50% limitation","Fines and penalties are nondeductible","Bad-debt allowance requires a tax adjustment","Charitable contribution exceeds the current-year limit","Tax depreciation exceeds book depreciation","Contractor information-return support is incomplete"]},
+            "grading_config":{"evaluation_mode":"deterministic","checkpoints":[
+                {"id":"receipts","label":"Gross receipts","weight":5,"source":"field:gross_receipts","comparator":"numeric","expected":2980000,"tolerance":1},
+                {"id":"cogs","label":"Cost of goods sold","weight":6,"source":"field:cost_of_goods_sold","comparator":"numeric","expected":1065000,"tolerance":1},
+                {"id":"income","label":"Total income","weight":8,"source":"field:total_income","comparator":"numeric","expected":1942500,"tolerance":1},
+                {"id":"bad-debts","label":"Allowable bad debts","weight":6,"source":"field:allowable_bad_debts","comparator":"numeric","expected":16000,"tolerance":1},
+                {"id":"taxes","label":"Allowable taxes and licenses","weight":5,"source":"field:allowable_taxes","comparator":"numeric","expected":72000,"tolerance":1},
+                {"id":"depreciation","label":"Tax depreciation","weight":6,"source":"field:tax_depreciation","comparator":"numeric","expected":118000,"tolerance":1},
+                {"id":"contribution","label":"Allowable charitable contribution","weight":8,"source":"field:allowable_charitable_contribution","comparator":"numeric","expected":52300,"tolerance":1},
+                {"id":"other","label":"Other deductions","weight":6,"source":"field:other_deductions","comparator":"numeric","expected":153000,"tolerance":1},
+                {"id":"deductions","label":"Total deductions","weight":9,"source":"field:total_deductions","comparator":"numeric","expected":1471800,"tolerance":1},
+                {"id":"taxable","label":"Taxable income","weight":10,"source":"field:taxable_income","comparator":"numeric","expected":470700,"tolerance":1},
+                {"id":"tax","label":"Corporate income tax","weight":7,"source":"field:income_tax","comparator":"numeric","expected":98847,"tolerance":1},
+                {"id":"due","label":"Amount owed","weight":5,"source":"field:amount_owed","comparator":"numeric","expected":8847,"tolerance":1},
+                {"id":"m1-additions","label":"Schedule M-1 additions","weight":6,"source":"field:m1_additions","comparator":"numeric","expected":178200,"tolerance":1},
+                {"id":"m1-income","label":"Schedule M-1 taxable income","weight":7,"source":"field:m1_taxable_income","comparator":"numeric","expected":470700,"tolerance":1},
+                {"id":"flags","label":"Corporate return diagnostics","weight":6,"source":"identified_red_flags","comparator":"set_exact","expected":["Federal income tax provision is nondeductible","Meals require a 50% limitation","Fines and penalties are nondeductible","Bad-debt allowance requires a tax adjustment","Charitable contribution exceeds the current-year limit","Tax depreciation exceeds book depreciation","Contractor information-return support is incomplete"]}]},
         },
     },
 ]

@@ -1623,6 +1623,26 @@ body { margin: 0; background: #f6f8fb; }
 }
 .assessment-tool-icon { width: 34px; height: 34px; flex: none; object-fit: contain; }
 .assessment-tool-icon svg { width: 100%; height: 100%; }
+.assessment-tool-icon-tax-1040,
+.assessment-tool-icon-tax-1120 {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 28px;
+  border: 1px solid #b9d4ca;
+  border-radius: 4px;
+  background: #fff;
+  color: #087a55;
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1;
+}
+.assessment-tool-icon-tax-1120 {
+  border-color: #a9c8bb;
+  background: #edf7f3;
+  color: #075f44;
+}
 .tool-lab-identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .tool-lab-identity > span { display: grid; gap: 4px; min-width: 0; }
 .assessment-select-with-icon { min-height: 42px; display: flex; align-items: center; gap: 9px; padding: 0 8px; border: 1px solid #d6dee8; border-radius: 5px; background: #fff; }
@@ -2091,6 +2111,8 @@ body { margin: 0; background: #f6f8fb; }
   background: #ffffff;
 }
 .issued-assessment-runtime > .excel-assessment,
+.issued-assessment-runtime > .candidate-accounting-runtime,
+.issued-assessment-runtime > .candidate-tax-runtime,
 .issued-assessment-runtime > .task-candidate-workspace,
 .issued-assessment-runtime > .question-runtime-surface {
   width: 100%;
@@ -2100,6 +2122,15 @@ body { margin: 0; background: #f6f8fb; }
 .issued-assessment-runtime > .excel-assessment {
   flex: 1 1 auto;
   height: auto;
+}
+.issued-assessment-runtime > .candidate-accounting-runtime,
+.issued-assessment-runtime > .candidate-tax-runtime {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+.candidate-accounting-runtime > .accounting-app,
+.candidate-tax-runtime > .tax-app {
+  min-height: 100%;
 }
 .issued-assessment-runtime > .task-candidate-workspace,
 .issued-assessment-runtime > .question-runtime-surface {

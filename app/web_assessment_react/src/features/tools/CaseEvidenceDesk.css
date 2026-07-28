@@ -1,0 +1,126 @@
+.case-desk-window {
+  position: fixed;
+  z-index: 72;
+  right: 18px;
+  bottom: 54px;
+  left: 18px;
+  height: min(72dvh, 690px);
+  overflow: hidden;
+  border: 1px solid #b8c7c1;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 22px 60px rgba(20, 44, 36, .24);
+  color: #172b26;
+}
+.case-desk-titlebar { display: flex; justify-content: space-between; align-items: center; height: 38px; padding: 0 8px 0 12px; border-bottom: 1px solid #d9e3df; background: #f8faf9; }
+.case-desk-titlebar > div { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+.case-desk-titlebar button,
+.case-document-viewer > header button { display: grid; place-items: center; width: 29px; height: 29px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #50635d; }
+.case-desk-titlebar button:hover,
+.case-document-viewer > header button:hover { background: #e9efec; }
+
+.case-mail-layout { display: grid; grid-template-columns: 150px 290px minmax(0, 1fr); height: calc(100% - 38px); }
+.case-mail-folders { padding: 16px 10px; border-right: 1px solid #dfe7e3; background: #f6f9f7; }
+.case-mail-folders > strong { display: block; padding: 0 9px 13px; font-size: 11px; }
+.case-mail-folders button { display: grid; grid-template-columns: 18px minmax(0, 1fr) 20px; align-items: center; gap: 7px; width: 100%; min-height: 35px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: #52665f; text-align: left; font-size: 10px; }
+.case-mail-folders button.active { background: #dff1e9; color: #075f44; font-weight: 800; }
+.case-mail-folders button em { font-style: normal; text-align: right; }
+.case-mail-list { min-width: 0; border-right: 1px solid #dfe7e3; }
+.case-mail-list > label { display: flex; align-items: center; gap: 7px; height: 45px; margin: 0 10px; color: #73857e; }
+.case-mail-list > label input { width: 100%; min-height: 31px; padding: 0 8px; border: 1px solid #cad7d2; border-radius: 4px; outline: 0; font-size: 10px; }
+.case-mail-list > div { height: calc(100% - 45px); overflow: auto; }
+.case-mail-list > div > button { position: relative; display: grid; gap: 4px; width: 100%; min-height: 88px; padding: 12px 14px; border: 0; border-top: 1px solid #e7ecea; background: #fff; color: #53675f; text-align: left; }
+.case-mail-list > div > button:hover { background: #f8fbf9; }
+.case-mail-list > div > button.selected { background: #eaf6f1; box-shadow: inset 3px 0 #087a55; }
+.case-mail-list > div > button.unread b,
+.case-mail-list > div > button.unread strong { color: #172b26; font-weight: 850; }
+.case-mail-list button > span { display: flex; justify-content: space-between; gap: 8px; font-size: 9px; }
+.case-mail-list button time { color: #788a83; font-size: 8px; }
+.case-mail-list button b { overflow: hidden; color: #40564e; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.case-mail-list button small { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.case-mail-list button > em { position: absolute; right: 12px; bottom: 8px; display: flex; align-items: center; gap: 2px; font-size: 8px; font-style: normal; }
+.case-mail-reading { min-width: 0; overflow: auto; background: #fff; }
+.case-mail-reading > header { padding: 22px 25px 16px; border-bottom: 1px solid #e2e9e6; }
+.case-mail-reading > header > span { display: flex; align-items: center; gap: 3px; color: #71837c; font-size: 8px; }
+.case-mail-reading h2 { margin: 10px 0 18px; font-size: 18px; letter-spacing: 0; }
+.case-mail-reading header > div { display: flex; align-items: center; gap: 9px; }
+.case-sender-avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: #cfe9de; color: #075f44; font-size: 10px; font-weight: 850; }
+.case-mail-reading header p { display: grid; gap: 3px; margin: 0; font-size: 10px; }
+.case-mail-reading header small { color: #74867f; font-size: 8px; }
+.case-message-body { max-width: 760px; padding: 16px 25px; color: #3f554d; font-size: 10px; line-height: 1.7; }
+.case-mail-reading > footer { padding: 15px 25px 24px; border-top: 1px solid #e5ebe9; }
+.case-mail-reading > footer > strong { display: flex; align-items: center; gap: 5px; font-size: 9px; }
+.case-mail-reading > footer > div { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.case-mail-reading > footer button { display: flex; align-items: center; gap: 9px; min-width: 190px; padding: 9px 10px; border: 1px solid #ccd9d4; border-radius: 5px; background: #fff; color: #087a55; text-align: left; }
+.case-mail-reading > footer button span { display: grid; gap: 2px; color: #304840; }
+.case-mail-reading > footer button b { font-size: 9px; }
+.case-mail-reading > footer button small { color: #758780; font-size: 8px; }
+
+.case-files-layout { display: grid; grid-template-columns: 185px minmax(0, 1fr); height: calc(100% - 38px); }
+.case-files-layout > aside { display: flex; flex-direction: column; gap: 6px; padding: 20px; border-right: 1px solid #dfe7e3; background: #f6f9f7; color: #087a55; }
+.case-files-layout > aside strong { color: #243a33; font-size: 11px; }
+.case-files-layout > aside small { color: #71837c; font-size: 9px; }
+.case-files-layout > div { overflow: auto; }
+.case-files-layout > div > header,
+.case-files-layout > div > button { display: grid; grid-template-columns: 24px minmax(160px, .7fr) 70px minmax(220px, 1fr); align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 0 15px; border: 0; border-bottom: 1px solid #e5ebe8; background: #fff; color: #53675f; text-align: left; font-size: 9px; }
+.case-files-layout > div > header { min-height: 36px; background: #f8faf9; color: #72847d; font-weight: 800; }
+.case-files-layout > div > header span:first-child { grid-column: 2; }
+.case-files-layout > div > button:hover { background: #f3f8f5; }
+.case-files-layout > div > button svg { color: #087a55; }
+.case-files-layout > div > button strong { overflow: hidden; color: #293f37; text-overflow: ellipsis; white-space: nowrap; }
+
+.case-document-backdrop { position: fixed; inset: 0; z-index: 88; display: grid; place-items: center; padding: 20px; background: rgba(18, 34, 29, .52); }
+.case-document-viewer { display: grid; grid-template-rows: 48px minmax(0, 1fr); width: min(94vw, 900px); height: min(90dvh, 820px); overflow: hidden; border-radius: 7px; background: #eef1ef; box-shadow: 0 25px 80px rgba(0,0,0,.3); }
+.case-document-viewer > header { display: flex; justify-content: space-between; align-items: center; padding: 0 12px 0 16px; border-bottom: 1px solid #cbd4d0; background: #fff; }
+.case-document-viewer > header > div { display: flex; align-items: center; gap: 9px; color: #087a55; }
+.case-document-viewer > header span { display: grid; color: #263d35; font-size: 10px; }
+.case-document-viewer > header small { color: #75877f; font-size: 8px; }
+.case-document-canvas { overflow: auto; padding: 24px; }
+.case-document-page { width: min(100%, 720px); min-height: 820px; margin: 0 auto; padding: 42px 46px; background: #fff; box-shadow: 0 2px 12px rgba(27, 47, 40, .13); color: #263b34; }
+.case-document-letterhead { display: flex; justify-content: space-between; gap: 20px; padding-bottom: 18px; border-bottom: 2px solid #087a55; }
+.case-document-letterhead strong { font-size: 15px; }
+.case-document-letterhead span { color: #6d7f78; font-size: 8px; }
+.case-document-section { margin-top: 24px; }
+.case-document-section h3 { margin: 0 0 10px; font-size: 12px; }
+.case-document-section dl { margin: 0; }
+.case-document-section dl > div { display: flex; justify-content: space-between; gap: 20px; padding: 7px 0; border-bottom: 1px solid #e5ebe8; font-size: 9px; }
+.case-document-section dl > div.emphasis { margin-top: 4px; border-top: 1px solid #aebdb7; color: #0a6146; font-weight: 850; }
+.case-document-section dd { margin: 0; font-weight: 750; }
+.case-document-table-scroll { overflow: auto; }
+.case-document-section table { width: 100%; border-collapse: collapse; font-size: 8px; }
+.case-document-section th,
+.case-document-section td { padding: 7px 6px; border: 1px solid #dce5e1; text-align: left; }
+.case-document-section th { background: #edf6f2; color: #355249; }
+.case-document-note { padding: 10px 12px; border-left: 3px solid #d49345; background: #fff8ee; color: #70532e; font-size: 8px; line-height: 1.6; }
+
+.case-taskbar { position: fixed; z-index: 75; right: 0; bottom: 0; left: 0; display: flex; align-items: center; gap: 3px; height: 44px; padding: 0 8px; border-top: 1px solid #aab8b3; background: rgba(242, 246, 244, .98); box-shadow: 0 -4px 15px rgba(24, 48, 40, .12); backdrop-filter: blur(10px); }
+.case-taskbar > button { position: relative; display: grid; place-items: center; width: 37px; height: 34px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #354f46; }
+.case-taskbar > button:hover,
+.case-taskbar > button.active { background: #dce7e2; color: #087a55; }
+.case-taskbar > button.active::after { position: absolute; right: 7px; bottom: 1px; left: 7px; height: 2px; background: #087a55; content: ""; }
+.case-taskbar > button em { position: absolute; top: 1px; right: 1px; min-width: 14px; padding: 1px 3px; border-radius: 8px; background: #b84732; color: #fff; font-size: 7px; font-style: normal; }
+.case-taskbar-app-name { margin-left: 4px; color: #5c6f68; font-size: 9px; font-weight: 750; }
+.case-taskbar-system { display: flex; align-items: center; gap: 9px; margin-left: auto; padding: 0 7px; color: #40574f; }
+.case-taskbar-system time { min-width: 48px; font-size: 8px; text-align: right; }
+
+@media (max-width: 760px) {
+  .case-desk-window { inset: 8px 8px 48px; height: auto; }
+  .case-mail-layout { grid-template-columns: minmax(130px, .8fr) minmax(0, 1.4fr); }
+  .case-mail-folders { display: none; }
+  .case-mail-reading { grid-column: 2; }
+  .case-files-layout { grid-template-columns: 1fr; }
+  .case-files-layout > aside { display: none; }
+  .case-document-backdrop { padding: 8px; }
+  .case-document-page { min-height: 100%; padding: 25px 20px; }
+}
+
+@media (max-width: 560px) {
+  .case-mail-layout { display: block; overflow: auto; }
+  .case-mail-list { height: 42%; border-right: 0; }
+  .case-mail-reading { height: 58%; border-top: 1px solid #dfe7e3; }
+  .case-taskbar-app-name { display: none; }
+  .case-files-layout > div > header,
+  .case-files-layout > div > button { grid-template-columns: 22px minmax(120px, 1fr) 50px; }
+  .case-files-layout > div > header span:last-child,
+  .case-files-layout > div > button small { display: none; }
+}

@@ -5,9 +5,15 @@ import { useAssessmentSession } from "../assessment/useAssessmentSession";
 import { useAssessmentTimer } from "../assessment/useAssessmentTimer";
 import type { TimerState } from "../assessment/assessmentRuntime";
 import type { ExcelAssessmentSubmission } from "../tools/ExcelSimulator";
+import type { AccountingAssessmentSubmission, AccountingCase } from "../tools/AccountingTool";
+import type { TaxAssessmentSubmission, TaxCase } from "../tools/TaxTool";
+import type { CorporateTaxAssessmentSubmission, CorporateTaxCase } from "../tools/CorporateTaxTool";
 import { BrandLogo } from "../../components/BrandLogo";
 
 const ExcelSimulator = lazy(() => import("../tools/ExcelSimulator").then((module) => ({ default: module.ExcelSimulator })));
+const AccountingTool = lazy(() => import("../tools/AccountingTool").then((module) => ({ default: module.AccountingTool })));
+const TaxTool = lazy(() => import("../tools/TaxTool").then((module) => ({ default: module.TaxTool })));
+const CorporateTaxTool = lazy(() => import("../tools/CorporateTaxTool").then((module) => ({ default: module.CorporateTaxTool })));
 const RemoteDesktopTool = lazy(() => import("../tools/RemoteDesktopTool").then((module) => ({ default: module.RemoteDesktopTool })));
 
 type IssuedOption = { id: number; text: string };
@@ -60,10 +66,11 @@ export function IssuedCandidatePanel() {
   const [status, setStatus] = useState("");
   const [accessKey, setAccessKey] = useState("");
   const [excelSubmission, setExcelSubmission] = useState<ExcelAssessmentSubmission | null>(null);
+  const [accountingSubmission, setAccountingSubmission] = useState<AccountingAssessmentSubmission | null>(null);
+  const [taxSubmission, setTaxSubmission] = useState<TaxAssessmentSubmission | null>(null);
+  const [corporateTaxSubmission, setCorporateTaxSubmission] = useState<CorporateTaxAssessmentSubmission | null>(null);
   const [taskResponse, setTaskResponse] = useState("");
   const [taskFileLink, setTaskFileLink] = useState("");
-  const [taxValues, setTaxValues] = useState<Record<string, string>>({});
-  const [identifiedFlags, setIdentifiedFlags] = useState("");
   const [desktopSession, setDesktopSession] = useState({ sessionId: "", status: "not_started", ready: false });
   const [proctorEvents, setProctorEvents] = useState<Array<Record<string, unknown>>>([]);
   const [policyWarning, setPolicyWarning] = useState<{ reason: string; count: number } | null>(null);
@@ -130,10 +137,11 @@ export function IssuedCandidatePanel() {
     setIndex(Math.min(Math.max(Number(draft?.current_question_index || 0), 0), Math.max(me.questions.length - 1, 0)));
     setAnswers(Object.fromEntries(Object.entries(draft?.answers || {}).map(([key, value]) => [Number(key), value])));
     setExcelSubmission((draftData.final_sheet_json ? draftData : null) as ExcelAssessmentSubmission | null);
+    setAccountingSubmission((draftData.accounting_workspace ? draftData : null) as AccountingAssessmentSubmission | null);
+    setTaxSubmission((draftData.tax_workspace ? draftData : null) as TaxAssessmentSubmission | null);
+    setCorporateTaxSubmission((draftData.corporate_tax_workspace ? draftData : null) as CorporateTaxAssessmentSubmission | null);
     setTaskResponse(String(draftData.code || draftData.response_text || draftData.notes || me.task?.metadata?.starter_code || ""));
     setTaskFileLink(String(draftData.attachment_url || ""));
-    setTaxValues((draftData.entered_form_values || {}) as Record<string, string>);
-    setIdentifiedFlags(Array.isArray(draftData.identified_red_flags) ? draftData.identified_red_flags.join("\n") : "");
     const timerState = draft?.timer_state;
     setRestoredTimerState(
       timerState && Number.isFinite(timerState.remainingAssessmentSec)
@@ -294,16 +302,49 @@ export function IssuedCandidatePanel() {
       return excelSubmission || { final_sheet_json: {}, formulas_json: {}, calculated_values_json: {}, activity_log: [] };
     }
     if (paper.assessment_type === "coding") return { code: taskResponse, attachment_url: taskFileLink };
-    if (paper.assessment_type === "tax_simulator" || paper.assessment_type === "accounting") {
-      return {
-        entered_form_values: taxValues,
-        identified_red_flags: identifiedFlags.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean),
-        notes: taskResponse,
-        attachment_url: taskFileLink,
+    if (paper.assessment_type === "accounting") {
+      return accountingSubmission || {
+        entered_form_values: {},
+        identified_red_flags: [],
+        notes: "",
+        accounting_workspace: {
+          bank_treatments: {},
+          book_treatments: {},
+          ar_adjustment: 0,
+          duplicate_invoice_voided: false,
+          transactions: [],
+          posted_journal_entries: [],
+          activity_log: [],
+          completed_workflows: [],
+        },
+      };
+    }
+    if (paper.assessment_type === "tax_simulator") {
+      return taxSubmission || {
+        entered_form_values: {},
+        identified_red_flags: [],
+        notes: "",
+        tax_workspace: {
+          inputs: {},
+          activity_log: [],
+          completed_sections: [],
+        },
+      };
+    }
+    if (paper.assessment_type === "tax_1120") {
+      return corporateTaxSubmission || {
+        entered_form_values: {},
+        identified_red_flags: [],
+        notes: "",
+        corporate_tax_workspace: {
+          inputs: {},
+          activity_log: [],
+          completed_sections: [],
+        },
       };
     }
     return { response_text: taskResponse, attachment_url: taskFileLink };
-  }, [desktopSession.sessionId, excelSubmission, identifiedFlags, paper, taskFileLink, taskResponse, taxValues]);
+  }, [accountingSubmission, corporateTaxSubmission, desktopSession.sessionId, excelSubmission, paper, taskFileLink, taskResponse, taxSubmission]);
 
   const submit = async (endReason: "fullscreen" | "policy" | "manual" | null = null) => {
     if (!paper || submittingRef.current) return;
@@ -656,6 +697,117 @@ export function IssuedCandidatePanel() {
               />
             </Suspense>
           )}
+          {!paper.desktop_app && paper.assessment_type === "accounting" && paper.task && (
+            <section className="candidate-accounting-runtime">
+              <Suspense fallback={<div className="tool-loading-state" role="status">Preparing accounting workbench...</div>}>
+                <AccountingTool
+                  title={paper.task.title || paper.assessment_title}
+                  description={paper.task.description}
+                  instructions={paper.task.instructions || paper.instructions || ""}
+                  caseData={(paper.task.metadata?.accounting_case || {}) as Partial<AccountingCase>}
+                  initialSubmission={accountingSubmission}
+                  candidateMode
+                  onAutosave={setAccountingSubmission}
+                  onSubmit={async (submission) => {
+                    if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
+                    if (submittingRef.current) return;
+                    submittingRef.current = true;
+                    setAccountingSubmission(submission);
+                    try {
+                      const response = await issuedApi<{ status: string; message?: string }>("POST", "/exams/issued/submit", {
+                        submission_id: submissionIdRef.current,
+                        answers: {},
+                        submitted_data: submission,
+                        proctoring_events: proctorEvents,
+                        time_taken_seconds: Math.max(
+                          0,
+                          Number(paper.duration_minutes || 0) * 60 - Number(timerStateRef.current?.remainingAssessmentSec ?? Number(paper.duration_minutes || 0) * 60),
+                        ),
+                      });
+                      finishCandidateSession("Assessment submitted", response.message || "Thank you. Your assessment was submitted successfully for recruiter review.");
+                    } catch {
+                      submittingRef.current = false;
+                      setStatus("Submission failed. Check your connection and try again.");
+                    }
+                  }}
+                />
+              </Suspense>
+            </section>
+          )}
+          {!paper.desktop_app && paper.assessment_type === "tax_simulator" && paper.task && (
+            <section className="candidate-tax-runtime">
+              <Suspense fallback={<div className="tool-loading-state" role="status">Preparing tax return...</div>}>
+                <TaxTool
+                  title={paper.task.title || paper.assessment_title}
+                  description={paper.task.description}
+                  instructions={paper.task.instructions || paper.instructions || ""}
+                  caseData={(paper.task.metadata?.tax_case || {}) as Partial<TaxCase>}
+                  initialSubmission={taxSubmission}
+                  candidateMode
+                  onAutosave={setTaxSubmission}
+                  onSubmit={async (submission) => {
+                    if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
+                    if (submittingRef.current) return;
+                    submittingRef.current = true;
+                    setTaxSubmission(submission);
+                    try {
+                      const response = await issuedApi<{ status: string; message?: string }>("POST", "/exams/issued/submit", {
+                        submission_id: submissionIdRef.current,
+                        answers: {},
+                        submitted_data: submission,
+                        proctoring_events: proctorEvents,
+                        time_taken_seconds: Math.max(
+                          0,
+                          Number(paper.duration_minutes || 0) * 60 - Number(timerStateRef.current?.remainingAssessmentSec ?? Number(paper.duration_minutes || 0) * 60),
+                        ),
+                      });
+                      finishCandidateSession("Assessment submitted", response.message || "Thank you. Your assessment was submitted successfully for recruiter review.");
+                    } catch {
+                      submittingRef.current = false;
+                      setStatus("Submission failed. Check your connection and try again.");
+                    }
+                  }}
+                />
+              </Suspense>
+            </section>
+          )}
+          {!paper.desktop_app && paper.assessment_type === "tax_1120" && paper.task && (
+            <section className="candidate-tax-runtime">
+              <Suspense fallback={<div className="tool-loading-state" role="status">Preparing corporate tax return...</div>}>
+                <CorporateTaxTool
+                  title={paper.task.title || paper.assessment_title}
+                  description={paper.task.description}
+                  instructions={paper.task.instructions || paper.instructions || ""}
+                  caseData={(paper.task.metadata?.corporate_tax_case || {}) as Partial<CorporateTaxCase>}
+                  initialSubmission={corporateTaxSubmission}
+                  candidateMode
+                  onAutosave={setCorporateTaxSubmission}
+                  onSubmit={async (submission) => {
+                    if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
+                    if (submittingRef.current) return;
+                    submittingRef.current = true;
+                    setCorporateTaxSubmission(submission);
+                    try {
+                      const response = await issuedApi<{ status: string; message?: string }>("POST", "/exams/issued/submit", {
+                        submission_id: submissionIdRef.current,
+                        answers: {},
+                        submitted_data: submission,
+                        proctoring_events: proctorEvents,
+                        time_taken_seconds: Math.max(
+                          0,
+                          Number(paper.duration_minutes || 0) * 60 - Number(timerStateRef.current?.remainingAssessmentSec ?? Number(paper.duration_minutes || 0) * 60),
+                        ),
+                      });
+                      finishCandidateSession("Assessment submitted", response.message || "Thank you. Your assessment was submitted successfully for recruiter review.");
+                    } catch {
+                      submittingRef.current = false;
+                      setStatus("Submission failed. Check your connection and try again.");
+                    }
+                  }}
+                />
+              </Suspense>
+            </section>
+          )}
           {isMcqAssessment && current && (
             <main className="mcq-runtime">
             <div className="question-runtime-surface">
@@ -701,7 +853,7 @@ export function IssuedCandidatePanel() {
             </footer>
             </main>
           )}
-          {!paper.desktop_app && !isMcqAssessment && paper.assessment_type !== "spreadsheet" && paper.task && (
+          {!paper.desktop_app && !isMcqAssessment && !["spreadsheet", "accounting", "tax_simulator", "tax_1120"].includes(paper.assessment_type) && paper.task && (
             <section className="task-candidate-workspace">
               <div className="task-candidate-brief">
                 <span>Task brief</span>
@@ -717,21 +869,6 @@ export function IssuedCandidatePanel() {
                   </div>
                 )}
               </div>
-              {["tax_simulator", "accounting"].includes(paper.assessment_type) && Array.isArray(paper.task.metadata?.form_fields) && (
-                <div className="task-response-panel">
-                  <strong>{paper.assessment_type === "accounting" ? "Close outputs" : "Return values"}</strong>
-                  <div className="workspace-form-grid compact">
-                    {(paper.task.metadata.form_fields as string[]).map((field) => <label key={field} className="field-stack"><span>{field}</span><input value={taxValues[field] || ""} onChange={(event) => setTaxValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}
-                  </div>
-                  {Array.isArray(paper.task.metadata?.red_flag_options) ? <fieldset className="task-flag-options"><legend>Exceptions identified</legend>{(paper.task.metadata.red_flag_options as string[]).map((flag) => {
-                    const selected = identifiedFlags.split(/\r?\n/).includes(flag);
-                    return <label key={flag}><input type="checkbox" checked={selected} onChange={(event) => {
-                      const currentFlags = identifiedFlags.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-                      setIdentifiedFlags((event.target.checked ? [...currentFlags, flag] : currentFlags.filter((value) => value !== flag)).join("\n"));
-                    }} /><span>{flag}</span></label>;
-                  })}</fieldset> : <label className="field-stack"><span>Red flags identified</span><textarea rows={3} value={identifiedFlags} onChange={(event) => setIdentifiedFlags(event.target.value)} placeholder="One item per line" /></label>}
-                </div>
-              )}
               <div className="task-response-panel">
                 <label className="field-stack">
                   <span>{paper.assessment_type === "coding" ? "Solution code" : "Candidate response"}</span>
@@ -739,7 +876,7 @@ export function IssuedCandidatePanel() {
                 </label>
                 {paper.task.metadata?.answer_format === "file_or_text" && <label className="field-stack"><span>Submission file link</span><input type="url" value={taskFileLink} onChange={(event) => setTaskFileLink(event.target.value)} placeholder="https://..." /></label>}
               </div>
-              <div className="assessment-action-bar inline"><button className="assessment-primary-btn" type="button" disabled={!taskResponse.trim() && Object.keys(taxValues).length === 0} onClick={() => void submit()}>Submit Assessment</button></div>
+              <div className="assessment-action-bar inline"><button className="assessment-primary-btn" type="button" disabled={!taskResponse.trim() && !taskFileLink.trim()} onClick={() => void submit()}>Submit Assessment</button></div>
             </section>
           )}
           {status && <div>{status}</div>}

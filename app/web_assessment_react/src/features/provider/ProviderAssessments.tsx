@@ -85,7 +85,7 @@ type ScreeningApplication = {
 };
 
 type WorkspaceTab = "dashboard" | "assessments" | "publish" | "results";
-type AssessmentToolFilter = "all" | "spreadsheet" | "coding" | "accounting" | "tax_simulator";
+type AssessmentToolFilter = "all" | "spreadsheet" | "coding" | "accounting" | "tax_simulator" | "tax_1120";
 
 type AccountContext = {
   full_name: string;
@@ -228,7 +228,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     tools: "",
     topics: "",
     pass_score: 70,
-    assessment_type: "mcq" as "mcq" | "spreadsheet" | "coding" | "accounting" | "tax_simulator" | "case_study",
+    assessment_type: "mcq" as "mcq" | "spreadsheet" | "coding" | "accounting" | "tax_simulator" | "tax_1120" | "case_study",
     max_attempts: 3,
     questions_per_attempt: 25,
     timing_mode: "question" as "question" | "assessment",
@@ -346,7 +346,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   const createAssessment = useMutation({
     mutationFn: async () => {
       const assessmentType = form.assessment_type;
-      const primaryTool = assessmentType === "spreadsheet" ? "Excel" : assessmentType === "coding" ? "Coding environment" : assessmentType === "accounting" ? "Accounting workspace" : assessmentType === "tax_simulator" ? "Tax software" : "Assessment workspace";
+      const primaryTool = assessmentType === "spreadsheet" ? "Excel" : assessmentType === "coding" ? "Coding environment" : assessmentType === "accounting" ? "Accounting workspace" : assessmentType === "tax_simulator" ? "1040 Individual Tax" : assessmentType === "tax_1120" ? "1120 Corporate Tax" : "Assessment workspace";
       const payload = {
         title: form.title,
         assessment_type: assessmentType,
@@ -406,14 +406,14 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
             expected_output: { test_cases: testCases },
             grading_config: { evaluation_mode: "deterministic_static_review", manual_review_required: true, checkpoints: normalizedCheckpoints },
           });
-        } else if (assessmentType === "tax_simulator" || assessmentType === "accounting") {
+        } else if (assessmentType === "tax_simulator" || assessmentType === "tax_1120" || assessmentType === "accounting") {
           const expectedFormValues = Object.fromEntries(form.expected_values.split(/\r?\n/).map((line) => {
             const separator = line.indexOf("=");
             return separator > 0 ? [line.slice(0, separator).trim(), line.slice(separator + 1).trim()] : null;
           }).filter((entry): entry is [string, string] => Boolean(entry)));
           await api.put(`/exams/${created.id}/task`, {
             ...baseTask,
-            metadata: { ...baseTask.metadata, workspace: assessmentType === "tax_simulator" ? "tax" : "accounting", form_fields: [...new Set(normalizedCheckpoints.filter((item) => String(item.source).startsWith("field:")).map((item) => String(item.source).split(":", 2)[1]))] },
+            metadata: { ...baseTask.metadata, workspace: assessmentType === "tax_simulator" ? "tax" : assessmentType === "tax_1120" ? "tax_1120" : "accounting", form_fields: [...new Set(normalizedCheckpoints.filter((item) => String(item.source).startsWith("field:")).map((item) => String(item.source).split(":", 2)[1]))] },
             expected_output: {
               expected_form_values: expectedFormValues,
               red_flags: form.red_flags.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean),
@@ -699,7 +699,8 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 ["spreadsheet", "Microsoft Excel"],
                 ["coding", "Visual Studio Code"],
                 ["accounting", "QuickBooks"],
-                ["tax_simulator", "Drake Tax"],
+                ["tax_simulator", "1040 Individual Tax"],
+                ["tax_1120", "1120 Corporate Tax"],
               ] as Array<[Exclude<AssessmentToolFilter, "all">, string]>).map(([assessmentType, label]) => (
                 <button type="button" role="menuitem" key={assessmentType} className={toolFilter === assessmentType ? "active" : ""} onClick={(event) => { setToolFilter(assessmentType); setActiveTab("assessments"); event.currentTarget.closest("details")?.removeAttribute("open"); }}>
                   <AssessmentToolIcon assessmentType={assessmentType} />
@@ -896,7 +897,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
 
               {builderStep === 1 && <div className="builder-stage workspace-form-grid">
                 <label className="field-stack"><span>Assessment title</span><input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Senior accountant practical" /></label>
-                <label className="field-stack"><span>Format</span><select value={form.assessment_type} onChange={(e) => setForm((p) => ({ ...p, assessment_type: e.target.value as typeof form.assessment_type }))}><option value="mcq">Multiple choice</option><option value="spreadsheet">Excel</option><option value="coding">Coding</option><option value="accounting">Accounting</option><option value="tax_simulator">Tax</option><option value="case_study">Case study</option></select></label>
+                <label className="field-stack"><span>Format</span><select value={form.assessment_type} onChange={(e) => setForm((p) => ({ ...p, assessment_type: e.target.value as typeof form.assessment_type }))}><option value="mcq">Multiple choice</option><option value="spreadsheet">Excel</option><option value="coding">Coding</option><option value="accounting">Accounting</option><option value="tax_simulator">1040 Individual Tax</option><option value="tax_1120">1120 Corporate Tax</option><option value="case_study">Case study</option></select></label>
                 <label className="field-stack workspace-span-2"><span>Internal purpose</span><input value={form.about} onChange={(e) => setForm((p) => ({ ...p, about: e.target.value }))} placeholder="Role, seniority, and what this assessment should prove" /></label>
                 <label className="field-stack"><span>Topics</span><input value={form.topics} onChange={(e) => setForm((p) => ({ ...p, topics: e.target.value }))} placeholder="Close, reconciliations, controls" /></label>
                 <label className="field-stack"><span>Duration</span><div className="input-with-suffix"><input type="number" min="1" value={form.duration_minutes} onChange={(e) => setForm((p) => ({ ...p, duration_minutes: Number(e.target.value) }))} /><span>minutes</span></div></label>

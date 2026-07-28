@@ -12,6 +12,7 @@ const HiringWorkspace = lazy(() => import("../features/hiring/HiringWorkspace").
 const ExcelSimulator = lazy(() => import("../features/tools/ExcelSimulator").then((module) => ({ default: module.ExcelSimulator })));
 const AccountingTool = lazy(() => import("../features/tools/AccountingTool").then((module) => ({ default: module.AccountingTool })));
 const TaxTool = lazy(() => import("../features/tools/TaxTool").then((module) => ({ default: module.TaxTool })));
+const CorporateTaxTool = lazy(() => import("../features/tools/CorporateTaxTool").then((module) => ({ default: module.CorporateTaxTool })));
 
 function WorkspaceLoader({ label = "Opening workspace..." }: { label?: string }) {
   return <main className="hiring-loading" role="status"><BrandLogo /><p>{label}</p></main>;
@@ -229,6 +230,14 @@ export function App() {
     return (
       <EmbeddedToolShell>
         <Suspense fallback={<WorkspaceLoader label="Loading tax workspace..." />}><TaxTool /></Suspense>
+      </EmbeddedToolShell>
+    );
+  }
+
+  if (embedded && ["1120", "tax-1120", "corporate-tax"].includes(tool)) {
+    return (
+      <EmbeddedToolShell>
+        <Suspense fallback={<WorkspaceLoader label="Loading corporate tax workspace..." />}><CorporateTaxTool /></Suspense>
       </EmbeddedToolShell>
     );
   }

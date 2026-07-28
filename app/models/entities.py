@@ -50,6 +50,7 @@ class AssessmentType(StrEnum):
     SPREADSHEET = "spreadsheet"
     ACCOUNTING = "accounting"
     TAX_SIMULATOR = "tax_simulator"
+    TAX_1120 = "tax_1120"
     CASE_STUDY = "case_study"
 
 

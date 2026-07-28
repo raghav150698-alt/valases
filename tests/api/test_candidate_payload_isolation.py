@@ -17,6 +17,9 @@ class CandidatePayloadIsolationTest(unittest.TestCase):
                 "workspace": "spreadsheet",
                 "initial_spreadsheet_data": {"A1": "Input"},
                 "locked_cells": ["A1"],
+                "accounting_case": {"companyName": "Northstar Services LLC"},
+                "tax_case": {"taxpayerName": "Alex Rivera"},
+                "corporate_tax_case": {"corporationName": "Sterling Ridge Analytics, Inc."},
                 "private_solution": {"B2": 125000},
             },
             expected_output_json={"B2": 125000},
@@ -33,6 +36,9 @@ class CandidatePayloadIsolationTest(unittest.TestCase):
         self.assertNotIn("grading_config", payload)
         self.assertNotIn("private_solution", payload["metadata"])
         self.assertEqual(payload["metadata"]["initial_spreadsheet_data"], {"A1": "Input"})
+        self.assertEqual(payload["metadata"]["accounting_case"]["companyName"], "Northstar Services LLC")
+        self.assertEqual(payload["metadata"]["tax_case"]["taxpayerName"], "Alex Rivera")
+        self.assertEqual(payload["metadata"]["corporate_tax_case"]["corporationName"], "Sterling Ridge Analytics, Inc.")
 
 
 if __name__ == "__main__":

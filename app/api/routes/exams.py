@@ -474,6 +474,9 @@ def _candidate_task_to_dict(task: AssessmentTask | None) -> dict | None:
             "public_examples",
             "form_fields",
             "red_flag_options",
+            "accounting_case",
+            "tax_case",
+            "corporate_tax_case",
         )
         if key in metadata
     }
@@ -549,6 +552,10 @@ def _checkpoint_matches(actual, checkpoint: dict) -> tuple[bool, str]:
     elif comparator == "set_contains_all":
         actual_set = {str(item).strip().casefold() for item in (actual or [])}
         matched = all(str(item).strip().casefold() in actual_set for item in (expected or []))
+    elif comparator == "set_exact":
+        actual_set = {str(item).strip().casefold() for item in (actual or [])}
+        expected_set = {str(item).strip().casefold() for item in (expected or [])}
+        matched = actual_set == expected_set
     else:
         matched = _values_match(actual, expected, float(checkpoint.get("tolerance") or 0))
     return matched, "Matched" if matched else "Not matched"
@@ -638,7 +645,7 @@ def _score_task_submission(task: AssessmentTask, submitted_data: dict) -> tuple[
     if task_type == AssessmentType.SPREADSHEET.value:
         score, detail = _score_spreadsheet_submission(task, submitted_data)
         return score, "auto_scored", detail
-    if task_type in {AssessmentType.ACCOUNTING.value, AssessmentType.TAX_SIMULATOR.value}:
+    if task_type in {AssessmentType.ACCOUNTING.value, AssessmentType.TAX_SIMULATOR.value, AssessmentType.TAX_1120.value}:
         entered = submitted_data.get("entered_form_values") or {}
         expected_values = expected.get("expected_form_values") or {}
         value_score, value_detail = _score_expected_mapping(entered, expected_values, total_marks * 0.65)

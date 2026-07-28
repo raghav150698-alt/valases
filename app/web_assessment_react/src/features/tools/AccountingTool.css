@@ -1,2 +1,334 @@
-.accounting-app{min-height:100dvh;display:grid;grid-template-columns:224px minmax(0,1fr);background:#f4f6f8;color:#172033}.accounting-sidebar{display:flex;flex-direction:column;gap:22px;padding:22px 14px 18px;background:#172b3a;color:#d9e7ed}.accounting-brand{display:flex;align-items:center;gap:10px;padding:0 10px;color:#fff}.accounting-brand-mark{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#2ca36b;color:#fff;font-weight:800}.accounting-create-btn{min-height:40px;border:1px solid #5bc18b;border-radius:7px;background:#2ca36b;color:#fff;font-weight:800}.accounting-sidebar nav{display:grid;gap:4px}.accounting-sidebar nav button,.accounting-sidebar-footer button{display:flex;align-items:center;gap:12px;min-height:40px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:#bdd0d8;text-align:left;font-weight:600}.accounting-sidebar nav button:hover,.accounting-sidebar nav button.active{background:#284657;color:#fff}.accounting-sidebar nav button span{width:18px;color:#8ddab1;font-size:17px;text-align:center}.accounting-sidebar-footer{display:grid;gap:10px;margin-top:auto}.accounting-sidebar-footer small{padding:0 12px;color:#8fa9b4;font-size:11px}.accounting-main{min-width:0;padding:0 34px 48px}.accounting-topbar{display:flex;justify-content:space-between;align-items:center;min-height:92px;border-bottom:1px solid #dbe2e7}.accounting-kicker{display:block;color:#607684;font-size:10px;font-weight:800;letter-spacing:.08em}.accounting-topbar h1{margin:5px 0 0;color:#182b39;font-size:25px}.accounting-top-actions{display:flex;align-items:center;gap:12px}.accounting-icon-btn{width:36px;height:36px;padding:0;border:1px solid #d3dde2;border-radius:6px;background:#fff;color:#46606e;font-size:19px}.accounting-avatar{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#d8efe3;color:#167545;font-size:11px;font-weight:800}.accounting-summary-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:24px 0}.accounting-summary-row>div{display:grid;gap:7px;min-width:0;padding:17px 18px;border:1px solid #dce4e8;border-radius:6px;background:#fff}.accounting-summary-row span,.accounting-summary-row small{color:#667b87;font-size:12px}.accounting-summary-row strong{color:#1c3341;font-size:22px}.positive{color:#16834c!important}.warning{color:#b36a08!important}.accounting-content-panel{overflow:hidden;border:1px solid #d9e2e6;border-radius:6px;background:#fff}.accounting-panel-head{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:21px 22px 17px}.accounting-panel-head h2,.accounting-placeholder h2,.accounting-form-head h2{margin:4px 0 5px;color:#1b3442;font-size:19px}.accounting-panel-head p,.accounting-form-head p,.accounting-placeholder p{margin:0;color:#697d87;font-size:13px}.accounting-primary-btn{min-height:38px;padding:0 15px;border:1px solid #16804a;border-radius:6px;background:#17864d;color:#fff;font-weight:800}.accounting-toolbar{display:flex;gap:10px;padding:12px 22px;border-top:1px solid #e5eaed;border-bottom:1px solid #e5eaed;background:#fbfcfc}.accounting-search{display:flex;align-items:center;flex:1;gap:8px;min-width:160px;padding:0 11px;border:1px solid #cfdbe0;border-radius:5px;background:#fff;color:#70848d}.accounting-search input{width:100%;min-height:34px;border:0;outline:0;color:#213945}.accounting-toolbar select,.accounting-filter-btn{min-height:36px;padding:0 11px;border:1px solid #cfdbe0;border-radius:5px;background:#fff;color:#38515d;font-weight:600}.accounting-table-wrap{overflow-x:auto}.accounting-table{width:100%;min-width:840px;border-collapse:collapse;font-size:13px}.accounting-table th{padding:12px 14px;border-bottom:1px solid #dbe3e7;color:#667b87;font-size:11px;font-weight:800;text-align:left;white-space:nowrap}.accounting-table td{padding:15px 14px;border-bottom:1px solid #edf0f2;color:#526a76;white-space:nowrap}.accounting-table tbody tr:hover{background:#f7fbf9}.accounting-table th:first-child,.accounting-table td:first-child{padding-left:22px;width:35px}.accounting-table input{accent-color:#17864d}.accounting-table td strong{color:#263d49}.number-cell{text-align:right}.transaction-status{display:inline-flex;padding:4px 8px;border-radius:4px;font-size:11px;font-weight:800}.transaction-status.paid{background:#e0f4e8;color:#167545}.transaction-status.open{background:#e6f0fb;color:#24669c}.transaction-status.overdue{background:#fff0df;color:#a75a00}.accounting-row-action{border:0;background:transparent;color:#738791;letter-spacing:2px}.accounting-empty{padding:34px;color:#6a7f89;text-align:center}.accounting-table-footer{display:flex;justify-content:space-between;padding:14px 22px;color:#748792;font-size:12px}.accounting-table-footer button{border:0;background:transparent;color:#167545;font-weight:800}.accounting-placeholder{display:grid;gap:12px;max-width:700px;margin-top:30px;padding:28px}.accounting-placeholder .accounting-primary-btn{width:fit-content;margin-top:8px}.accounting-modal-backdrop{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:20px;background:rgba(21,42,56,.46)}.accounting-form-panel{width:min(100%,620px);border:1px solid #cedbe0;border-radius:8px;background:#fff;box-shadow:0 24px 70px rgba(20,43,56,.25)}.accounting-form-head{display:flex;justify-content:space-between;gap:20px;padding:23px 25px 18px;border-bottom:1px solid #e2e8eb}.accounting-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:22px 25px 18px}.accounting-form-wide{grid-column:1/-1}.accounting-form-grid .field-stack span{color:#36505c}.accounting-form-grid input,.accounting-form-grid select{min-height:39px;padding:0 10px;border:1px solid #becdd3;border-radius:5px;background:#fff;color:#213945}.accounting-form-grid input:focus,.accounting-form-grid select:focus{outline:2px solid #9bd6b5;border-color:#17864d}.field-stack em{margin-left:5px;color:#17864d;font-size:10px;font-style:normal;font-weight:700}.autofill-hint{color:#17864d;font-size:11px}.accounting-autofill-callout{display:grid;gap:3px;margin:0 25px 18px;padding:11px 13px;border-left:3px solid #2ca36b;background:#eff9f3;color:#2c5c43;font-size:12px}.accounting-autofill-callout strong{color:#167545}.accounting-form-footer{display:flex;justify-content:flex-end;gap:10px;padding:15px 25px;border-top:1px solid #e2e8eb;background:#fbfcfc}.accounting-form-footer .secondary-btn{min-height:38px;padding:0 15px;border:1px solid #c8d5da;border-radius:6px;color:#36505c;font-weight:700}.accounting-saved-notice{position:fixed;right:24px;bottom:24px;z-index:120;padding:12px 16px;border-radius:6px;background:#173f2b;color:#fff;font-size:13px;font-weight:700;box-shadow:0 12px 25px rgba(15,50,31,.25)}
-@media(max-width:900px){.accounting-app{grid-template-columns:72px minmax(0,1fr)}.accounting-sidebar{padding:16px 8px}.accounting-brand{justify-content:center;padding:0}.accounting-brand strong,.accounting-create-btn,.accounting-sidebar-footer small{display:none}.accounting-sidebar nav button{justify-content:center;padding:0;font-size:0}.accounting-sidebar nav button span{font-size:17px}.accounting-sidebar-footer button{justify-content:center;padding:0;font-size:0}.accounting-main{padding:0 18px 34px}.accounting-summary-row{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:560px){.accounting-topbar{min-height:76px}.accounting-summary-row{gap:8px}.accounting-summary-row>div{padding:12px}.accounting-summary-row strong{font-size:17px}.accounting-panel-head{align-items:flex-start;flex-direction:column}.accounting-toolbar{flex-wrap:wrap;padding:10px 14px}.accounting-search{flex-basis:100%}.accounting-form-grid{grid-template-columns:1fr}.accounting-form-wide{grid-column:auto}}
+.accounting-app {
+  --acc-green: #087a55;
+  --acc-green-dark: #075f44;
+  --acc-green-soft: #eaf6f1;
+  --acc-text: #172b26;
+  --acc-muted: #60736d;
+  --acc-border: #d9e3df;
+  --acc-surface: #fff;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  background: #f5f7f6;
+  color: var(--acc-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.accounting-app button,
+.accounting-app input,
+.accounting-app select,
+.accounting-app textarea { font: inherit; }
+.accounting-app button { cursor: pointer; }
+.accounting-app button:disabled { cursor: not-allowed; opacity: .55; }
+
+.accounting-sidebar {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding: 18px 13px;
+  border-right: 1px solid var(--acc-border);
+  background: #fff;
+  overflow-y: auto;
+}
+
+.accounting-product { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 8px; }
+.accounting-product-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; background: var(--acc-green); color: #fff; }
+.accounting-product div,
+.accounting-company-switcher > span:nth-child(2),
+.accounting-sidebar-footer > div > span:last-child { display: grid; min-width: 0; }
+.accounting-product strong { font-size: 15px; }
+.accounting-product small,
+.accounting-company-switcher small,
+.accounting-sidebar-footer small { color: #758780; font-size: 10px; }
+
+.accounting-company-switcher {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  min-height: 58px;
+  margin: 16px 0 14px;
+  padding: 8px 9px;
+  border: 1px solid var(--acc-border);
+  border-radius: 6px;
+  background: #fbfcfb;
+  color: var(--acc-text);
+  text-align: left;
+}
+.accounting-company-switcher > span:first-child { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 5px; background: #e6efeb; color: var(--acc-green-dark); }
+.accounting-company-switcher strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+.accounting-sidebar nav { display: grid; gap: 3px; }
+.accounting-sidebar nav button,
+.accounting-sidebar-footer > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 39px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #50635d;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 650;
+}
+.accounting-sidebar nav button:hover,
+.accounting-sidebar-footer > button:hover { background: #f1f5f3; color: var(--acc-text); }
+.accounting-sidebar nav button.active { background: var(--acc-green-soft); color: var(--acc-green-dark); }
+.accounting-sidebar nav button em { min-width: 20px; margin-left: auto; padding: 2px 5px; border-radius: 10px; background: #d77a16; color: #fff; font-size: 9px; font-style: normal; text-align: center; }
+.accounting-sidebar-footer { display: grid; gap: 12px; margin-top: auto; padding-top: 16px; border-top: 1px solid #e7ece9; }
+.accounting-sidebar-footer > div { display: flex; align-items: center; gap: 9px; padding: 0 8px; }
+
+.accounting-avatar { display: grid; flex: 0 0 auto; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: #cfe9de; color: var(--acc-green-dark); font-size: 10px; font-weight: 800; }
+.accounting-main { min-width: 0; min-height: 100dvh; padding-bottom: 44px; }
+.accounting-topbar { position: sticky; top: 0; z-index: 10; display: flex; justify-content: space-between; align-items: center; min-height: 66px; padding: 0 28px; border-bottom: 1px solid var(--acc-border); background: rgba(255,255,255,.97); }
+.accounting-mobile-heading { display: flex; align-items: center; gap: 10px; }
+.accounting-mobile-heading span { color: var(--acc-muted); font-size: 10px; font-weight: 700; }
+.accounting-mobile-heading h1 { margin: 2px 0 0; font-size: 18px; line-height: 1.1; }
+.accounting-mobile-menu { display: none; }
+.accounting-top-actions { display: flex; align-items: center; gap: 10px; }
+.accounting-global-search { display: flex; align-items: center; gap: 8px; width: min(32vw, 330px); min-height: 35px; padding: 0 10px; border: 1px solid var(--acc-border); border-radius: 5px; background: #f9fbfa; color: #6e817a; }
+.accounting-global-search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--acc-text); font-size: 11px; }
+.accounting-icon-button { display: grid; place-items: center; width: 35px; height: 35px; padding: 0; border: 1px solid var(--acc-border); border-radius: 5px; background: #fff; color: #52665f; }
+
+.accounting-page { width: min(100%, 1440px); margin: 0 auto; padding: 25px 28px 42px; }
+.accounting-page-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 21px; }
+.accounting-page-heading.compact { align-items: center; }
+.accounting-page-heading h2 { margin: 4px 0 5px; font-size: 24px; line-height: 1.2; }
+.accounting-page-heading p { max-width: 740px; margin: 0; color: var(--acc-muted); font-size: 12px; line-height: 1.6; }
+.accounting-eyebrow { color: var(--acc-green); font-size: 9px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+
+.accounting-primary,
+.accounting-secondary,
+.accounting-danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 13px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.accounting-primary { border: 1px solid var(--acc-green-dark); background: var(--acc-green); color: #fff; }
+.accounting-primary:hover { background: var(--acc-green-dark); }
+.accounting-secondary { border: 1px solid #cbd8d3; background: #fff; color: #3c554d; }
+.accounting-danger-button { min-height: 30px; padding: 0 9px; border: 1px solid #dfaa9e; background: #fff; color: #a23c27; }
+
+.accounting-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.accounting-metric-grid article { display: grid; gap: 7px; min-width: 0; padding: 16px 17px; border: 1px solid var(--acc-border); border-radius: 6px; background: #fff; }
+.accounting-metric-grid span { color: var(--acc-muted); font-size: 10px; font-weight: 700; }
+.accounting-metric-grid strong { overflow: hidden; font-size: 20px; text-overflow: ellipsis; }
+.accounting-metric-grid small { color: #687c75; font-size: 10px; }
+.accounting-metric-grid small.negative,
+.accounting-report dd.negative { color: #b3452e; }
+.accounting-progress { overflow: hidden; height: 5px; border-radius: 4px; background: #e5ece9; }
+.accounting-progress i { display: block; height: 100%; background: var(--acc-green); transition: width .2s ease; }
+
+.accounting-panel { border: 1px solid var(--acc-border); border-radius: 6px; background: #fff; }
+.accounting-overview-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, .8fr); gap: 14px; }
+.accounting-close-plan > header,
+.accounting-attention > header,
+.accounting-panel-title { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 17px 18px; border-bottom: 1px solid #e4ebe8; }
+.accounting-panel h3,
+.accounting-panel-title h3,
+.accounting-close-plan header h3,
+.accounting-attention header h3 { margin: 0; font-size: 14px; }
+.accounting-panel-title p,
+.accounting-close-plan header p { margin: 4px 0 0; color: var(--acc-muted); font-size: 10px; }
+.accounting-close-plan header > span,
+.accounting-attention header > span,
+.accounting-panel-title > span { color: var(--acc-green); font-size: 11px; font-weight: 800; }
+.accounting-close-plan > button { display: grid; grid-template-columns: 24px minmax(0, 1fr) 18px; align-items: center; gap: 10px; width: 100%; min-height: 58px; padding: 9px 18px; border: 0; border-bottom: 1px solid #edf1ef; background: #fff; color: var(--acc-text); text-align: left; }
+.accounting-close-plan > button:hover { background: #f8fbf9; }
+.accounting-close-plan > button > span:first-child { display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid #b9c9c3; border-radius: 50%; color: #fff; }
+.accounting-close-plan > button > span:first-child.done { border-color: var(--acc-green); background: var(--acc-green); }
+.accounting-close-plan > button > span:nth-child(2) { display: grid; gap: 3px; }
+.accounting-close-plan > button strong { font-size: 11px; }
+.accounting-close-plan > button small { color: var(--acc-muted); font-size: 10px; }
+.accounting-close-plan > button > svg { color: #80918b; transform: rotate(-90deg); }
+.accounting-attention > button { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-height: 68px; padding: 14px 17px; border: 0; border-bottom: 1px solid #edf1ef; background: #fff; color: #a75220; text-align: left; }
+.accounting-attention > button:hover { background: #fdf9f5; }
+.accounting-attention > button span { display: grid; gap: 4px; }
+.accounting-attention > button strong { color: var(--acc-text); font-size: 11px; }
+.accounting-attention > button small { color: var(--acc-muted); font-size: 10px; line-height: 1.4; }
+
+.accounting-reconcile-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.accounting-reconcile-summary article { display: grid; gap: 5px; padding: 14px 16px; border: 1px solid var(--acc-border); border-radius: 6px; background: #fff; }
+.accounting-reconcile-summary span { color: var(--acc-muted); font-size: 9px; font-weight: 700; }
+.accounting-reconcile-summary strong { font-size: 17px; }
+.accounting-reconcile-summary small { color: #758780; font-size: 9px; }
+.accounting-balance-status span { display: inline-flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid #e5b88d; border-radius: 5px; background: #fff7ee; color: #a35c1f; font-size: 10px; font-weight: 750; }
+.accounting-balance-status.balanced span { border-color: #9ed1b9; background: var(--acc-green-soft); color: var(--acc-green-dark); }
+
+.accounting-table-scroll { overflow: auto; }
+.accounting-data-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 10px; }
+.accounting-data-table th { height: 39px; padding: 0 13px; border-bottom: 1px solid var(--acc-border); background: #f8faf9; color: #657870; font-size: 9px; font-weight: 800; text-align: left; white-space: nowrap; }
+.accounting-data-table td { padding: 11px 13px; border-bottom: 1px solid #edf1ef; color: #51645d; vertical-align: middle; }
+.accounting-data-table tbody tr:hover { background: #fbfdfc; }
+.accounting-data-table td strong { color: var(--acc-text); }
+.accounting-data-table td small { display: block; max-width: 360px; margin-top: 3px; color: #798a84; font-size: 9px; line-height: 1.35; }
+.accounting-data-table .numeric { text-align: right; }
+.accounting-data-table select,
+.accounting-data-table input { min-height: 31px; padding: 0 8px; border: 1px solid #c8d6d1; border-radius: 4px; background: #fff; color: #29423a; font-size: 10px; }
+.accounting-data-table.reconciliation select { width: 115px; }
+.accounting-data-table tr.risk { background: #fff8f5; }
+.accounting-data-table.register { min-width: 920px; }
+.accounting-data-table.register td:last-child { background: #fbfdfc; }
+.accounting-table-toolbar { display: flex; justify-content: space-between; gap: 10px; padding: 12px 15px; border-bottom: 1px solid var(--acc-border); }
+.accounting-table-toolbar > div { display: flex; align-items: center; gap: 7px; width: min(100%, 360px); min-height: 33px; padding: 0 9px; border: 1px solid #cbd7d2; border-radius: 4px; color: #75867f; }
+.accounting-table-toolbar input { width: 100%; border: 0; outline: 0; font-size: 10px; }
+.accounting-table-toolbar > select { min-height: 33px; border: 1px solid #cbd7d2; border-radius: 4px; background: #fff; color: #415a51; font-size: 10px; }
+.accounting-type { color: #3d6255; font-weight: 700; }
+.accounting-status { display: inline-flex; padding: 3px 6px; border-radius: 3px; font-size: 8px; font-weight: 800; }
+.accounting-status.cleared,
+.accounting-status.matched { background: #e3f3eb; color: #08704e; }
+.accounting-status.open { background: #eaf0f7; color: #426581; }
+.accounting-status.overdue,
+.accounting-status.past.due { background: #fff0e7; color: #a55020; }
+.accounting-status.unreviewed { background: #f2eee2; color: #7e6a29; }
+
+.accounting-receivable-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, .65fr); gap: 14px; }
+.accounting-tie-out { align-self: start; padding: 18px; }
+.accounting-tie-out h3 { margin-bottom: 15px; }
+.accounting-tie-out dl { margin: 0 0 18px; }
+.accounting-tie-out dl div { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid #e9eeec; font-size: 10px; }
+.accounting-tie-out dt { color: var(--acc-muted); }
+.accounting-tie-out dd { margin: 0; font-weight: 750; }
+.accounting-tie-out dl .difference { color: #a64d20; font-weight: 750; }
+.accounting-tie-out label { display: grid; gap: 6px; color: #3e554e; font-size: 10px; font-weight: 750; }
+.accounting-money-input { display: flex; align-items: center; min-height: 37px; border: 1px solid #bdcec7; border-radius: 4px; background: #fff; }
+.accounting-money-input span { padding: 0 9px; color: #6b7e77; }
+.accounting-money-input input { width: 100%; min-height: 35px; border: 0; outline: 0; }
+.accounting-tie-out > p { margin: 10px 0 0; color: var(--acc-muted); font-size: 9px; line-height: 1.5; }
+.accounting-risk-label { display: inline-flex; align-items: center; gap: 5px; color: #a44b24 !important; }
+.accounting-evidence { display: inline-flex; align-items: center; gap: 4px; }
+.accounting-evidence.good { color: #08714f; }
+.accounting-evidence.bad { color: #a3452e; }
+.accounting-link-button { padding: 0; border: 0; background: transparent; color: var(--acc-green); font-size: 9px; font-weight: 800; }
+.accounting-resolved-row { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 5px; color: var(--acc-green); }
+
+.accounting-journal-layout { display: grid; grid-template-columns: minmax(230px, .55fr) minmax(0, 1.45fr); gap: 14px; }
+.accounting-journal-tasks { align-self: start; padding: 12px; }
+.accounting-journal-tasks h3 { padding: 5px 5px 12px; }
+.accounting-journal-tasks button { display: flex; align-items: flex-start; gap: 9px; width: 100%; min-height: 55px; padding: 11px 8px; border: 0; border-top: 1px solid #e9eeec; background: #fff; color: var(--acc-green); text-align: left; }
+.accounting-journal-tasks button:hover { background: #f7fbf9; }
+.accounting-journal-tasks button span { display: grid; gap: 3px; }
+.accounting-journal-tasks button strong { color: var(--acc-text); font-size: 10px; }
+.accounting-journal-tasks button small { color: var(--acc-muted); font-size: 9px; }
+.accounting-journal-header { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 11px; padding: 15px 17px; }
+.accounting-journal-header label { display: grid; gap: 5px; color: #51665e; font-size: 9px; font-weight: 750; }
+.accounting-journal-header input { min-height: 34px; padding: 0 9px; border: 1px solid #c7d5d0; border-radius: 4px; }
+.accounting-data-table.journal td:nth-child(2),
+.accounting-data-table.journal td:nth-child(3) { width: 145px; }
+.accounting-data-table.journal select,
+.accounting-data-table.journal input { width: 100%; text-align: right; }
+.accounting-data-table.journal select { text-align: left; }
+.accounting-data-table.journal tfoot td { padding: 11px 13px; border-top: 1px solid #cad8d3; background: #f8faf9; font-weight: 800; }
+.accounting-journal-form > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 17px; border-top: 1px solid #e4ebe8; }
+.accounting-form-error { display: flex; align-items: center; gap: 6px; margin: 10px 17px 0; padding: 9px 10px; border-left: 3px solid #c05a35; background: #fff4ef; color: #963c24; font-size: 9px; }
+.accounting-posted-entries { margin-top: 14px; }
+.accounting-posted-entries > div:not(.accounting-panel-title) { display: grid; grid-template-columns: 70px minmax(0, 1fr) 100px 28px; align-items: center; gap: 10px; min-height: 55px; padding: 9px 17px; border-top: 1px solid #edf1ef; font-size: 10px; }
+.accounting-posted-entries > div > span:nth-child(2) { display: grid; gap: 3px; }
+.accounting-posted-entries small { color: var(--acc-muted); font-size: 8px; }
+.accounting-entry-id { color: var(--acc-green); font-weight: 800; }
+.accounting-posted-entries button { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; background: transparent; color: #71827c; }
+
+.accounting-report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.accounting-report { padding: 18px; }
+.accounting-report header { display: flex; justify-content: space-between; color: var(--acc-green); }
+.accounting-report header p { margin: 4px 0 0; color: var(--acc-muted); font-size: 9px; }
+.accounting-report dl { margin: 18px 0; }
+.accounting-report dl div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid #e9eeec; font-size: 10px; }
+.accounting-report dt { color: #586c64; }
+.accounting-report dd { margin: 0; color: var(--acc-text); font-weight: 800; }
+.accounting-report dd.positive { color: var(--acc-green); }
+.accounting-report footer { display: flex; justify-content: space-between; padding: 11px 12px; background: #f3f8f5; color: #486158; font-size: 10px; }
+.accounting-register-balance { display: grid; justify-items: end; gap: 3px; }
+.accounting-register-balance small { color: var(--acc-muted); font-size: 9px; font-weight: 700; }
+.accounting-register-balance strong { color: var(--acc-green-dark); font-size: 18px; }
+.accounting-audit-log { overflow: hidden; }
+.accounting-audit-log > article { display: grid; grid-template-columns: 28px minmax(0, 1fr) 125px; align-items: center; gap: 10px; min-height: 62px; padding: 10px 17px; border-top: 1px solid #e8eeeb; }
+.accounting-audit-log > article:first-of-type { border-top: 0; }
+.accounting-audit-icon { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; background: #e9f4ef; color: var(--acc-green); }
+.accounting-audit-log article > div { display: grid; gap: 4px; }
+.accounting-audit-log article strong { color: #263e36; font-size: 10px; text-transform: capitalize; }
+.accounting-audit-log article p { margin: 0; color: var(--acc-muted); font-size: 9px; line-height: 1.45; }
+.accounting-audit-log article time { color: #71847c; font-size: 8px; text-align: right; }
+
+.accounting-review-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 14px; }
+.accounting-output-review > div:not(.accounting-panel-title) { display: grid; grid-template-columns: 22px minmax(0, 1fr) 130px; align-items: center; min-height: 48px; padding: 8px 17px; border-top: 1px solid #edf1ef; font-size: 10px; }
+.accounting-output-review > div > span:first-child { display: grid; place-items: center; width: 17px; height: 17px; border: 1px solid #bccbc5; border-radius: 50%; }
+.accounting-output-review > div > span:first-child.complete { border-color: var(--acc-green); background: var(--acc-green); color: #fff; }
+.accounting-output-review > div strong { text-align: right; }
+.accounting-flag-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 14px 17px; }
+.accounting-flag-list label { min-height: 44px; padding: 9px 10px; border: 1px solid #d7e1dd; border-radius: 5px; background: #fff; color: #6d7e78; font-size: 9px; font-weight: 700; cursor: pointer; }
+.accounting-flag-list label.selected { border-color: #85bfa6; background: #eff8f4; color: var(--acc-green-dark); }
+.accounting-flag-list input { position: absolute; opacity: 0; pointer-events: none; }
+.accounting-flag-list span { display: flex; align-items: center; gap: 7px; height: 100%; }
+.accounting-notes { display: grid; gap: 6px; padding: 0 17px 17px; color: #4f645c; font-size: 9px; font-weight: 750; }
+.accounting-notes textarea { resize: vertical; padding: 9px; border: 1px solid #c9d6d1; border-radius: 4px; color: var(--acc-text); font-size: 10px; line-height: 1.5; }
+.accounting-submit-bar { position: sticky; bottom: 48px; display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 14px; padding: 13px 15px; border: 1px solid #b9cfc5; border-radius: 6px; background: rgba(255,255,255,.97); box-shadow: 0 -8px 24px rgba(32,67,54,.08); }
+.accounting-submit-bar > div { display: grid; gap: 3px; }
+.accounting-submit-bar strong { font-size: 10px; }
+.accounting-submit-bar span { color: var(--acc-muted); font-size: 9px; }
+.accounting-primary.submit { min-height: 39px; }
+.accounting-saved-notice { position: fixed; right: 22px; bottom: 55px; z-index: 100; display: flex; align-items: center; gap: 7px; padding: 10px 13px; border-radius: 5px; background: #123e30; color: #fff; font-size: 10px; font-weight: 750; box-shadow: 0 12px 28px rgba(22,60,47,.22); }
+.accounting-modal-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 18px; background: rgba(22,43,36,.48); }
+.accounting-modal { width: min(100%, 580px); overflow: hidden; border: 1px solid #c4d2cd; border-radius: 7px; background: #fff; box-shadow: 0 24px 70px rgba(20,47,38,.24); }
+.accounting-modal > header { display: flex; justify-content: space-between; gap: 18px; padding: 20px 22px 16px; border-bottom: 1px solid var(--acc-border); }
+.accounting-modal > header h2 { margin: 4px 0; font-size: 18px; }
+.accounting-modal > header p { margin: 0; color: var(--acc-muted); font-size: 10px; }
+.accounting-modal > header button { display: grid; place-items: center; width: 31px; height: 31px; padding: 0; border: 1px solid #d2deda; border-radius: 4px; background: #fff; color: #52675f; }
+.accounting-modal-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; padding: 18px 22px; }
+.accounting-modal-fields label { display: grid; gap: 5px; color: #4a6058; font-size: 9px; font-weight: 750; }
+.accounting-modal-fields label.wide { grid-column: 1 / -1; }
+.accounting-modal-fields input,
+.accounting-modal-fields select { min-height: 36px; padding: 0 9px; border: 1px solid #c5d3ce; border-radius: 4px; background: #fff; color: var(--acc-text); font-size: 10px; }
+.accounting-modal-fields .accounting-money-input input { min-height: 34px; border: 0; }
+.accounting-modal > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 13px 22px; border-top: 1px solid var(--acc-border); background: #fafcfb; }
+
+@media (max-width: 1050px) {
+  .accounting-app { grid-template-columns: 204px minmax(0, 1fr); }
+  .accounting-metric-grid,
+  .accounting-reconcile-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .accounting-page { padding-inline: 20px; }
+  .accounting-flag-list { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .accounting-app { display: block; }
+  .accounting-sidebar { position: fixed; inset: 0 auto 0 0; width: 236px; transform: translateX(-101%); box-shadow: 12px 0 30px rgba(25,49,41,.16); transition: transform .2s ease; }
+  .accounting-sidebar.open { transform: translateX(0); }
+  .accounting-mobile-menu { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--acc-border); border-radius: 5px; background: #fff; color: var(--acc-green); }
+  .accounting-topbar { padding: 0 14px; }
+  .accounting-global-search,
+  .accounting-top-actions .accounting-icon-button { display: none; }
+  .accounting-page { padding: 18px 14px 32px; }
+  .accounting-page-heading { align-items: flex-start; flex-direction: column; }
+  .accounting-register-balance { justify-items: start; }
+  .accounting-overview-grid,
+  .accounting-receivable-layout,
+  .accounting-journal-layout,
+  .accounting-report-grid,
+  .accounting-review-grid { grid-template-columns: 1fr; }
+  .accounting-journal-header { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 480px) {
+  .accounting-metric-grid,
+  .accounting-reconcile-summary { grid-template-columns: 1fr; }
+  .accounting-page-heading h2 { font-size: 21px; }
+  .accounting-submit-bar { align-items: stretch; flex-direction: column; }
+  .accounting-modal-fields { grid-template-columns: 1fr; }
+  .accounting-modal-fields label.wide { grid-column: auto; }
+  .accounting-audit-log > article { grid-template-columns: 28px minmax(0, 1fr); }
+  .accounting-audit-log article time { grid-column: 2; text-align: left; }
+}
