@@ -42,7 +42,12 @@ from app.models.entities import (
     UserRole,
 )
 from app.services.supabase_auth import invite_supabase_user
-from app.services.organization_branding import normalize_organization_logo, organization_logo_url
+from app.services.organization_branding import (
+    member_avatar_url,
+    normalize_member_avatar,
+    normalize_organization_logo,
+    organization_logo_url,
+)
 
 router = APIRouter(prefix="/hiring", tags=["hiring-workspace"])
 
@@ -109,7 +114,13 @@ class OrganizationCreate(BaseModel):
 
 class OrganizationProfileUpdate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
-    logo_data_url: str = Field(default="", max_length=400000)
+    logo_data_url: str = Field(default="", max_length=800000)
+
+
+class CurrentUserProfileUpdate(BaseModel):
+    full_name: str = Field(min_length=2, max_length=200)
+    avatar_data_url: str = Field(default="", max_length=800000)
+    remove_avatar: bool = False
 
 
 class MembershipCreate(BaseModel):
@@ -566,9 +577,10 @@ def hiring_workspace(
         "current_user": {
             "full_name": current_user.full_name or current_user.email.split("@", 1)[0],
             "email": current_user.email,
+            "avatar_url": member_avatar_url(organization.settings_json, current_user.id),
         },
-        "permissions": sorted(_membership_permissions(current_user, membership)),
-        "permission_catalog": sorted(_PERMISSIONS),
+        "permissions": sorted(_membership_permissions(current_user, membership) - {"sso.manage"}),
+        "permission_catalog": sorted(_PERMISSIONS - {"sso.manage"}),
         "pipeline_stages": _PIPELINE_STAGES,
         "metrics": {"open_jobs": int(active_jobs), "applications": int(app_count), "scheduled_interviews": int(interview_count)},
         "pipeline": {stage: int(count) for stage, count in stage_rows},
@@ -610,6 +622,46 @@ def update_organization_profile(
         "id": organization.id,
         "name": organization.name,
         "logo_url": organization_logo_url(organization.settings_json),
+    }
+
+
+@router.patch("/profile")
+def update_current_user_profile(
+    payload: CurrentUserProfileUpdate,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, _ = _organization_context(db, current_user, organization_id)
+    avatar = normalize_member_avatar(payload.avatar_data_url)
+    current_user.full_name = payload.full_name.strip()
+    settings_json = dict(organization.settings_json or {})
+    profiles = dict(settings_json.get("member_profiles") or {})
+    profile = dict(profiles.get(str(current_user.id)) or {})
+    if payload.remove_avatar:
+        profile.pop("avatar_data_url", None)
+    elif avatar:
+        profile["avatar_data_url"] = avatar
+    if profile:
+        profiles[str(current_user.id)] = profile
+    else:
+        profiles.pop(str(current_user.id), None)
+    settings_json["member_profiles"] = profiles
+    organization.settings_json = settings_json
+    _write_audit(
+        db,
+        organization.id,
+        current_user.id,
+        "user_profile_updated",
+        "user",
+        current_user.id,
+        {"avatar_changed": bool(avatar) or payload.remove_avatar},
+    )
+    db.commit()
+    return {
+        "full_name": current_user.full_name,
+        "email": current_user.email,
+        "avatar_url": member_avatar_url(organization.settings_json, current_user.id),
     }
 
 

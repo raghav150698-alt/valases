@@ -19,6 +19,8 @@ export default defineConfig(({ mode }) => {
       "/provider": apiTarget,
       "/exams": apiTarget,
       "/admin": apiTarget,
+      "/hiring": apiTarget,
+      "/desktop-sessions": apiTarget,
       "/proctoring": apiTarget,
       "/tools": apiTarget,
     },

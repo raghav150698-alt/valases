@@ -71,7 +71,7 @@ class AdminCompanyCreate(BaseModel):
     business_name: str = Field(min_length=2, max_length=200)
     email: EmailStr
     password: str = Field(min_length=12, max_length=128)
-    logo_data_url: str = Field(default="", max_length=400000)
+    logo_data_url: str = Field(default="", max_length=800000)
 
 
 class BillingAccountUpdate(BaseModel):

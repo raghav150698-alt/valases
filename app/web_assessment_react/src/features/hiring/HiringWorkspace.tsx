@@ -1,18 +1,52 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowRight,
+  BriefcaseBusiness,
+  CalendarDays,
+  CalendarPlus,
+  ClipboardCheck,
+  LayoutDashboard,
+  LogOut,
+  Pause,
+  Play,
+  Plug,
+  Plus,
+  Search,
+  Settings,
+  Trash2,
+  Upload,
+  UserPlus,
+  UserRound,
+  Users,
+  Workflow,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { api } from "../../lib/api";
 import { BrandLogo } from "../../components/BrandLogo";
 import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
-import { readCompanyLogo } from "../../lib/imageFile";
+import { readCompanyLogo, readProfileImage } from "../../lib/imageFile";
 import "./HiringWorkspace.css";
 
 const ProviderAssessments = lazy(() => import("../provider/ProviderAssessments").then((module) => ({ default: module.ProviderAssessments })));
 
+const defaultOrganizationLogo = `${import.meta.env.BASE_URL}assets/brand/valases-logo.png`;
+
+function organizationLogoUrl(value?: string) {
+  const logoUrl = String(value || "").trim();
+  if (!logoUrl) return defaultOrganizationLogo;
+  if (logoUrl.startsWith("/assets/")) {
+    return `${import.meta.env.BASE_URL}${logoUrl.slice(1)}`;
+  }
+  return logoUrl;
+}
+
 type Workspace = {
   organization: { id: number; name: string; slug: string; plan_code: string; logo_url: string };
-  current_user: { full_name: string; email: string };
+  current_user: { full_name: string; email: string; avatar_url: string };
   membership_role: string;
   permissions: string[];
   permission_catalog: string[];
@@ -143,41 +177,13 @@ type Member = {
   is_current_user: boolean;
 };
 
-type SsoConfiguration = {
-  provider: string;
-  domains: string[];
-  idp_metadata_url: string;
-  initial_admin_email: string;
-  enabled: boolean;
-  enforce_for_members: boolean;
-  connection_status: string;
-  status: string;
-};
-
-type DesktopApplicationReadiness = {
-  enabled: boolean;
-  broker_mode: string;
-  broker_ready: boolean;
-  gateway_origin_configured: boolean;
-  ready: boolean;
-  apps: Array<{
-    assessment_type: string;
-    app_key: string;
-    display_name: string;
-    application_configured: boolean;
-    license_approved: boolean;
-    license_reference?: string;
-    ready: boolean;
-  }>;
-};
-
 type Tab = "overview" | "jobs" | "candidates" | "pipeline" | "interviews" | "assessments" | "integrations" | "team" | "settings";
 
 const stageLabel = (stage: string) => stage.replace(/_/g, " ").replace(/\b\w/g, (value) => value.toUpperCase());
 const splitList = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
 
-function SearchIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" /><path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
+function initials(value?: string) {
+  return String(value || "User").split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase();
 }
 
 function apiError(error: unknown, fallback: string) {
@@ -189,7 +195,7 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
   return (
     <div className="hiring-modal-backdrop" role="dialog" aria-modal="true" aria-label={title}>
       <section className="hiring-modal">
-        <header><h2>{title}</h2><button className="hiring-icon-button" type="button" aria-label="Close" onClick={onClose}>x</button></header>
+        <header><h2>{title}</h2><button className="hiring-icon-button" type="button" aria-label="Close" onClick={onClose}><X size={17} /></button></header>
         {children}
       </section>
     </div>
@@ -218,12 +224,6 @@ export function HiringWorkspace() {
   const interviewsQuery = useQuery({ queryKey: ["hiring", "interviews"], queryFn: async () => (await api.get<Interview[]>("/hiring/interviews")).data, enabled: can("interviews.view") });
   const integrationsQuery = useQuery({ queryKey: ["hiring", "integrations"], queryFn: async () => (await api.get<Integration[]>("/hiring/integrations")).data, enabled: can("integrations.view") });
   const membersQuery = useQuery({ queryKey: ["hiring", "members"], queryFn: async () => (await api.get<Member[]>("/hiring/members")).data, enabled: can("members.manage") });
-  const ssoQuery = useQuery({ queryKey: ["hiring", "sso"], queryFn: async () => (await api.get<SsoConfiguration>("/hiring/sso")).data, enabled: can("sso.manage") });
-  const desktopReadinessQuery = useQuery({
-    queryKey: ["hiring", "desktop-app-readiness"],
-    queryFn: async () => (await api.get<DesktopApplicationReadiness>("/desktop-sessions/readiness")).data,
-    enabled: can("organization.manage"),
-  });
   const applicationDetailQuery = useQuery({
     queryKey: ["hiring", "application-detail", selectedApplication?.id],
     queryFn: async () => (await api.get<ApplicationDetail>(`/hiring/applications/${selectedApplication?.id}`)).data,
@@ -247,7 +247,7 @@ export function HiringWorkspace() {
 
   const screenMutation = useMutation({
     mutationFn: async (applicationId: number) => (await api.post(`/hiring/applications/${applicationId}/screen`)).data,
-    onSuccess: (data) => { setNotice(`Screening complete: ${data.match_score}% evidence match. Human review is still required.`); refresh(); },
+    onSuccess: (data) => { setNotice(`Screening complete: ${data.match_score}% evidence match.`); refresh(); },
     onError: (error) => setNotice(apiError(error, "Could not screen this application.")),
   });
   const stageMutation = useMutation({
@@ -291,16 +291,16 @@ export function HiringWorkspace() {
 
   const selectedDetails = useMemo(() => applications.find((item) => item.id === selectedApplication?.id) || selectedApplication, [applications, selectedApplication]);
   const navigation = ([
-    ["overview", "Overview", "pipeline.view"],
-    ["jobs", "Jobs", "jobs.view"],
-    ["candidates", "Candidates", "candidates.view"],
-    ["pipeline", "Pipeline", "pipeline.view"],
-    ["interviews", "Interviews", "interviews.view"],
-    ["assessments", "Assessments", "assessments.view"],
-    ["integrations", "Integrations", "integrations.view"],
-    ["team", "Team", "members.manage"],
-    ["settings", "Settings", ""],
-  ] as Array<[Tab, string, string]>).filter(([, , permission]) => !permission || can(permission));
+    ["overview", "Overview", "pipeline.view", LayoutDashboard],
+    ["jobs", "Jobs", "jobs.view", BriefcaseBusiness],
+    ["candidates", "Candidates", "candidates.view", UserRound],
+    ["pipeline", "Pipeline", "pipeline.view", Workflow],
+    ["interviews", "Interviews", "interviews.view", CalendarDays],
+    ["assessments", "Assessments", "assessments.view", ClipboardCheck],
+    ["integrations", "Integrations", "integrations.view", Plug],
+    ["team", "Team", "members.manage", Users],
+    ["settings", "Settings", "", Settings],
+  ] as Array<[Tab, string, string, LucideIcon]>).filter(([, , permission]) => !permission || can(permission));
 
   const connectIntegration = async (integration: Integration) => {
     setNotice("");
@@ -319,11 +319,14 @@ export function HiringWorkspace() {
   return (
     <div className="hiring-shell">
       <aside className="hiring-sidebar">
-        <div className="hiring-brand"><img className="hiring-company-logo" src={workspace?.organization.logo_url || "/assets/brand/valases-logo.png"} alt="" /><span>{workspace?.organization.name || "Your organization"}</span></div>
-        <div className="hiring-user-name">{workspace?.current_user?.full_name || "Recruiter"}</div>
+        <div className="hiring-brand"><img className="hiring-company-logo" src={organizationLogoUrl(workspace?.organization.logo_url)} alt="" /><span>{workspace?.organization.name || "Your organization"}</span></div>
+        <div className="hiring-user">
+          {workspace?.current_user?.avatar_url ? <img src={workspace.current_user.avatar_url} alt="" /> : <span aria-hidden="true">{initials(workspace?.current_user?.full_name)}</span>}
+          <div><strong>{workspace?.current_user?.full_name || "Recruiter"}</strong><small>{stageLabel(workspace?.membership_role || "recruiter")}</small></div>
+        </div>
         <nav aria-label="Hiring navigation">
-          {navigation.map(([id, label]) => (
-            <button type="button" className={tab === id ? "active" : ""} key={id} onClick={() => setTab(id)}>{label}</button>
+          {navigation.map(([id, label, , Icon]) => (
+            <button type="button" className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} key={id} onClick={() => setTab(id)}><Icon size={17} /><span>{label}</span></button>
           ))}
         </nav>
         <div className="hiring-sidebar-foot"><BrandLogo className="hiring-footer-logo" /><span>Valases</span></div>
@@ -331,9 +334,9 @@ export function HiringWorkspace() {
 
       <main className="hiring-main">
         <header className="hiring-topbar">
-          <div><p>{tab === "overview" ? "Hiring command center" : stageLabel(tab)}</p><h1>{tab === "overview" ? "Build a stronger hiring signal" : stageLabel(tab)}</h1></div>
+          <h1>{stageLabel(tab)}</h1>
           <div className="hiring-topbar-actions">
-            {["jobs", "candidates", "pipeline", "interviews", "integrations"].includes(tab) && <label className="hiring-search"><SearchIcon /><input value={workspaceSearch} onChange={(event) => setWorkspaceSearch(event.target.value)} placeholder={`Search ${stageLabel(tab).toLowerCase()}`} aria-label={`Search ${tab}`} /></label>}
+            {["jobs", "candidates", "pipeline", "interviews", "integrations"].includes(tab) && <label className="hiring-search"><Search size={17} aria-hidden="true" /><input value={workspaceSearch} onChange={(event) => setWorkspaceSearch(event.target.value)} placeholder={`Search ${stageLabel(tab).toLowerCase()}`} aria-label={`Search ${tab}`} /></label>}
           </div>
         </header>
 
@@ -347,7 +350,7 @@ export function HiringWorkspace() {
         {tab === "assessments" && <Suspense fallback={<div className="hiring-section-empty">Loading assessment workspace...</div>}><ProviderAssessments embedded /></Suspense>}
         {tab === "integrations" && <IntegrationsView integrations={filteredIntegrations} canManage={can("integrations.manage")} onConnect={(integration) => void connectIntegration(integration)} onConfigure={(integration) => { setSelectedIntegration(integration); setDialog("integration"); }} />}
         {tab === "team" && <TeamView members={membersQuery.data || []} onAddMember={() => setDialog("member")} onRefresh={refresh} />}
-        {tab === "settings" && <SettingsView organization={workspace?.organization} role={workspace?.membership_role || "recruiter"} permissions={workspace?.permissions || []} sso={ssoQuery.data} desktopReadiness={desktopReadinessQuery.data} onRefresh={refresh} onSignOut={async () => { try { if (supabase) await supabase.auth.signOut(); } finally { clearSession(); } }} />}
+        {tab === "settings" && <SettingsView organization={workspace?.organization} currentUser={workspace?.current_user} role={workspace?.membership_role || "recruiter"} permissions={workspace?.permissions || []} onRefresh={refresh} onSignOut={async () => { try { if (supabase) await supabase.auth.signOut(); } finally { clearSession(); } }} />}
       </main>
 
       {selectedDetails && <ApplicationDrawer key={selectedDetails.id} application={selectedDetails} detail={applicationDetailQuery.data} loading={applicationDetailQuery.isLoading} transitionError={stageError} stages={pipelineStages} onClose={() => { setStageError(""); setSelectedApplication(null); }} onScreen={() => screenMutation.mutate(selectedDetails.id)} onCompliance={() => complianceMutation.mutate(selectedDetails.id)} onOpenInterviews={() => { setSelectedApplication(null); setTab("interviews"); }} onAddScorecard={() => {
@@ -385,7 +388,7 @@ function Overview({ workspace, jobs, applications, interviews, onTab, onNewJob, 
       <div className="hiring-panel hiring-pipeline-snapshot"><div className="hiring-panel-header"><div><h2>Pipeline health</h2><p>Move candidates with evidence, not just momentum.</p></div><button type="button" onClick={() => onTab("pipeline")}>Open pipeline</button></div><div className="hiring-stage-summary">{(workspace?.pipeline_stages || []).slice(0, 6).map((stage) => <div key={stage}><span>{stageLabel(stage)}</span><strong>{workspace?.pipeline?.[stage] || 0}</strong></div>)}</div></div>
       <div className="hiring-panel hiring-upcoming"><div className="hiring-panel-header"><div><h2>Upcoming interviews</h2><p>Structured scorecards keep decisions comparable.</p></div><button type="button" onClick={() => onTab("interviews")}>View all</button></div>{interviews.slice(0, 3).map((interview) => <div className="hiring-upcoming-row" key={interview.id}><span>{interview.scheduled_at ? new Date(interview.scheduled_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "Unscheduled"}</span><div><strong>{interview.candidate_name}</strong><small>{interview.job_title} · {stageLabel(interview.interview_type)}</small></div></div>)}{!interviews.length && <Empty text="No interviews scheduled yet." />}</div>
     </section>
-    <section className="hiring-panel"><div className="hiring-panel-header"><div><h2>Active requisitions</h2><p>Start from a well-defined role, then attach assessments and interview plans.</p></div><button type="button" onClick={onNewJob}>New job</button></div>{jobs.length ? <div className="hiring-table"><div className="hiring-table-head"><span>Role</span><span>Department</span><span>Status</span><span>Candidates</span><span></span></div>{jobs.slice(0, 5).map((job) => <div className="hiring-table-row" key={job.id}><div><strong>{job.title}</strong><small>{job.job_code} · {job.location}</small></div><span>{job.department}</span><span><StatusPill status={job.status} /></span><span>{applications.filter((application) => application.job_id === job.id).length}</span><button type="button" onClick={onNewApplication}>Add candidate</button></div>)}</div> : <Empty text="Create your first role to start building a structured hiring process." action="Create job" onClick={onNewJob} />}</section>
+    <section className="hiring-panel"><div className="hiring-panel-header"><div><h2>Active requisitions</h2><p>Start from a well-defined role, then attach assessments and interview plans.</p></div><button type="button" className="hiring-button primary" onClick={onNewJob}><Plus size={16} />New job</button></div>{jobs.length ? <div className="hiring-table"><div className="hiring-table-head"><span>Role</span><span>Department</span><span>Status</span><span>Candidates</span><span></span></div>{jobs.slice(0, 5).map((job) => <div className="hiring-table-row" key={job.id}><div><strong>{job.title}</strong><small>{job.job_code} | {job.location}</small></div><span>{job.department}</span><span><StatusPill status={job.status} /></span><span>{applications.filter((application) => application.job_id === job.id).length}</span><button type="button" className="hiring-row-command" onClick={onNewApplication}><UserPlus size={15} />Add candidate</button></div>)}</div> : <Empty text="Create your first role to start building a structured hiring process." action="Create job" onClick={onNewJob} />}</section>
   </>;
 }
 
@@ -395,7 +398,7 @@ function Empty({ text, action, onClick }: { text: string; action?: string; onCli
 
 function JobsView({ jobs, applications, onNewJob, onCreateApplication, onStatusChange }: { jobs: Job[]; applications: Application[]; onNewJob: () => void; onCreateApplication: () => void; onStatusChange: (id: number, status: string) => void }) {
   return <section className="hiring-panel hiring-full-panel">
-    <div className="hiring-panel-header"><div><h2>Requisitions</h2><p>Define the role, publish it, and manage candidate intake from one place.</p></div><button type="button" className="hiring-button primary" onClick={onNewJob}>New job</button></div>
+    <div className="hiring-panel-header"><div><h2>Requisitions</h2><p>Define the role, publish it, and manage candidate intake from one place.</p></div><button type="button" className="hiring-button primary" onClick={onNewJob}><Plus size={16} />New job</button></div>
     {jobs.length ? <div className="hiring-table">
       <div className="hiring-table-head jobs"><span>Role</span><span>Work setup</span><span>Skills</span><span>Pipeline</span><span>Status</span><span>Actions</span></div>
       {jobs.map((job) => <div className="hiring-table-row jobs" key={job.id}>
@@ -405,17 +408,17 @@ function JobsView({ jobs, applications, onNewJob, onCreateApplication, onStatusC
         <span>{applications.filter((item) => item.job_id === job.id).length} candidates</span>
         <StatusPill status={job.status} />
         <div className="hiring-row-actions">
-          {job.status !== "open" && job.status !== "closed" && <button type="button" onClick={() => onStatusChange(job.id, "open")}>Publish</button>}
-          {job.status === "open" && <button type="button" onClick={() => onStatusChange(job.id, "paused")}>Pause</button>}
-          {job.status !== "closed" && <button type="button" onClick={onCreateApplication}>Add</button>}
-          {job.status !== "closed" && <button type="button" className="danger" onClick={() => onStatusChange(job.id, "closed")}>Close</button>}
+          {job.status !== "open" && job.status !== "closed" && <button type="button" className="hiring-row-command" onClick={() => onStatusChange(job.id, "open")}><Play size={14} />Publish</button>}
+          {job.status === "open" && <button type="button" className="hiring-row-command" onClick={() => onStatusChange(job.id, "paused")}><Pause size={14} />Pause</button>}
+          {job.status !== "closed" && <button type="button" className="hiring-row-command" onClick={onCreateApplication}><UserPlus size={14} />Add</button>}
+          {job.status !== "closed" && <button type="button" className="hiring-row-command danger" onClick={() => onStatusChange(job.id, "closed")}><X size={14} />Close</button>}
         </div>
       </div>)}
     </div> : <Empty text="No jobs created yet." action="Create job" onClick={onNewJob} />}
   </section>;
 }
 
-function CandidatesView({ candidates, applications, onNewCandidate, onCreateApplication }: { candidates: Candidate[]; applications: Application[]; onNewCandidate: () => void; onCreateApplication: () => void }) { return <section className="hiring-panel hiring-full-panel"><div className="hiring-panel-header"><div><h2>Candidate directory</h2><p>Keep candidate information, consent and skills visible to the hiring team.</p></div><button type="button" className="hiring-button primary" onClick={onNewCandidate}>Add candidate</button></div>{candidates.length ? <div className="hiring-table"><div className="hiring-table-head candidates"><span>Candidate</span><span>Skills</span><span>Experience</span><span>Consent</span><span>Applications</span><span></span></div>{candidates.map((candidate) => <div className="hiring-table-row candidates" key={candidate.id}><div><strong>{candidate.full_name}</strong><small>{candidate.headline || candidate.email}</small></div><div className="hiring-skills">{candidate.skills.length ? candidate.skills.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>) : <small>No skills added</small>}</div><span>{candidate.experience_years ?? "-"}{candidate.experience_years !== null ? " yrs" : ""}</span><StatusPill status={candidate.consent_status} /><span>{applications.filter((application) => application.candidate.id === candidate.id).length}</span><button type="button" onClick={onCreateApplication}>Add to role</button></div>)}</div> : <Empty text="Add candidates manually or through an ATS connection." action="Add candidate" onClick={onNewCandidate} />}</section>; }
+function CandidatesView({ candidates, applications, onNewCandidate, onCreateApplication }: { candidates: Candidate[]; applications: Application[]; onNewCandidate: () => void; onCreateApplication: () => void }) { return <section className="hiring-panel hiring-full-panel"><div className="hiring-panel-header"><div><h2>Candidate directory</h2><p>Keep candidate information, consent and skills visible to the hiring team.</p></div><button type="button" className="hiring-button primary" onClick={onNewCandidate}><UserPlus size={16} />Add candidate</button></div>{candidates.length ? <div className="hiring-table"><div className="hiring-table-head candidates"><span>Candidate</span><span>Skills</span><span>Experience</span><span>Consent</span><span>Applications</span><span></span></div>{candidates.map((candidate) => <div className="hiring-table-row candidates" key={candidate.id}><div><strong>{candidate.full_name}</strong><small>{candidate.headline || candidate.email}</small></div><div className="hiring-skills">{candidate.skills.length ? candidate.skills.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>) : <small>No skills added</small>}</div><span>{candidate.experience_years ?? "-"}{candidate.experience_years !== null ? " yrs" : ""}</span><StatusPill status={candidate.consent_status} /><span>{applications.filter((application) => application.candidate.id === candidate.id).length}</span><button type="button" className="hiring-row-command" onClick={onCreateApplication}><ArrowRight size={15} />Add to role</button></div>)}</div> : <Empty text="Add candidates manually or through an ATS connection." action="Add candidate" onClick={onNewCandidate} />}</section>; }
 
 function PipelineView({ stages, applications, movingId, onSelect, onMove, onOpenAssessments }: { stages: string[]; applications: Application[]; movingId?: number; onSelect: (application: Application) => void; onMove: (id: number, stage: string) => void; onOpenAssessments: () => void }) {
   const visibleStages = stages.slice(0, 6);
@@ -452,7 +455,7 @@ function InterviewsView({ interviews, applications, onSchedule, onScorecard }: {
     .filter((application) => application.stage === "interview" && application.status === "active")
     .sort((left, right) => right.ranking.average_score - left.ranking.average_score);
   return <section className="hiring-panel hiring-full-panel">
-    <div className="hiring-panel-header"><div><h2>Interview plan</h2><p>Schedule structured conversations and capture comparable evidence before a decision.</p></div><button type="button" className="hiring-button primary" disabled={!applications.length} onClick={onSchedule}>Schedule interview</button></div>
+    <div className="hiring-panel-header"><div><h2>Interview plan</h2><p>Schedule structured conversations and capture comparable evidence before a decision.</p></div><button type="button" className="hiring-button primary" disabled={!applications.length} onClick={onSchedule}><CalendarPlus size={16} />Schedule interview</button></div>
     {ranked.length > 0 && <div className="hiring-shortlist">
       <div className="hiring-shortlist-head"><div><h3>Recommended interview order</h3><p>Ranked by the average of relevant skills, experience, and finalized assessment score.</p></div></div>
       {ranked.slice(0, 5).map((application, index) => <div className="hiring-shortlist-row" key={application.id}><strong>{index + 1}</strong><div><b>{application.candidate.full_name}</b><small>{application.job_title}</small></div><span>Skills <b>{application.ranking.skills_score.toFixed(0)}%</b></span><span>Experience <b>{application.ranking.experience_score.toFixed(0)}%</b></span><span>Assessment <b>{application.ranking.assessment_score !== null ? `${application.ranking.assessment_score.toFixed(0)}%` : "--"}</b></span><em>{application.ranking.average_score.toFixed(0)}</em></div>)}
@@ -484,59 +487,27 @@ function IntegrationsView({ integrations, canManage, onConnect, onConfigure }: {
   </section>;
 }
 
-function SettingsView({ organization, role, permissions, sso, desktopReadiness, onRefresh, onSignOut }: {
+function SettingsView({ organization, currentUser, role, permissions, onRefresh, onSignOut }: {
   organization?: Workspace["organization"];
+  currentUser?: Workspace["current_user"];
   role: string;
   permissions: string[];
-  sso?: SsoConfiguration;
-  desktopReadiness?: DesktopApplicationReadiness;
   onRefresh: () => void;
   onSignOut: () => Promise<void>;
 }) {
-  const [section, setSection] = useState<"profile" | "applications">("profile");
-  const canManageSso = permissions.includes("sso.manage");
   const canManageOrganization = permissions.includes("organization.manage");
-  return <div className="hiring-settings-layout">
-    <aside className="hiring-settings-nav" aria-label="Workspace settings">
-      <button type="button" className={section === "profile" ? "active" : ""} onClick={() => setSection("profile")}>Workspace</button>
-      {canManageOrganization && <button type="button" className={section === "applications" ? "active" : ""} onClick={() => setSection("applications")}>Assessment apps</button>}
-    </aside>
-    <section className="hiring-panel hiring-full-panel hiring-settings">
-      {section === "profile" && <>
-        <div className="hiring-panel-header"><div><h2>Company profile</h2><p>The identity shown to your hiring team across Valases.</p></div></div>
-        {organization && canManageOrganization ? <OrganizationProfileForm organization={organization} onSaved={onRefresh} /> : <div className="hiring-settings-row"><div><strong>Company</strong><span>{organization?.name || "Your organization"}</span></div></div>}
-        <div className="hiring-settings-row"><div><strong>Access role</strong><span>{stageLabel(role)}</span></div><small>{permissions.length} permissions</small></div>
-        {canManageSso && <SsoForm value={sso} onSaved={onRefresh} />}
-        <div className="hiring-settings-row danger"><div><strong>Sign out</strong><span>End this browser session on this device.</span></div><button type="button" className="hiring-button secondary" onClick={() => void onSignOut()}>Sign out</button></div>
-      </>}
-      {section === "applications" && <DesktopApplicationSettings readiness={desktopReadiness} />}
-    </section>
-  </div>;
-}
-
-function DesktopApplicationSettings({ readiness }: { readiness?: DesktopApplicationReadiness }) {
-  if (!readiness) {
-    return <div className="hiring-settings-loading" role="status">Checking application hosting...</div>;
-  }
-  return <>
-    <div className="hiring-panel-header">
-      <div><h2>Assessment applications</h2><p>Availability of isolated application sessions used by candidates.</p></div>
-      <StatusPill status={readiness.ready ? "ready" : readiness.enabled ? "setup_required" : "disabled"} />
+  return <section className="hiring-panel hiring-full-panel hiring-settings">
+    <div className="hiring-settings-section">
+      <div className="hiring-panel-header"><div><h2>Personal profile</h2><p>Your identity in this organization.</p></div></div>
+      {currentUser && <CurrentUserProfileForm currentUser={currentUser} onSaved={onRefresh} />}
     </div>
-    <div className="hiring-application-summary">
-      <span><b>Session service</b>{readiness.broker_ready ? "Ready" : "Not ready"}</span>
-      <span><b>Secure gateway</b>{readiness.gateway_origin_configured ? "Ready" : "Not configured"}</span>
+    <div className="hiring-settings-section">
+      <div className="hiring-panel-header"><div><h2>Company profile</h2><p>The identity shown to your hiring team across Valases.</p></div></div>
+      {organization && canManageOrganization ? <OrganizationProfileForm organization={organization} onSaved={onRefresh} /> : <div className="hiring-settings-row"><div><strong>Company</strong><span>{organization?.name || "Your organization"}</span></div></div>}
     </div>
-    <div className="hiring-application-readiness">
-      {readiness.apps.map((app) => <div className="hiring-application-row" key={`${app.assessment_type}:${app.app_key}`}>
-        <div><strong>{app.display_name}</strong><small>{stageLabel(app.assessment_type)} assessment</small></div>
-        <span className={app.application_configured ? "complete" : ""}>{app.application_configured ? "Application mapped" : "Application not mapped"}</span>
-        <span className={app.license_approved ? "complete" : ""}>{app.license_approved ? "License approved" : "License approval required"}</span>
-        <StatusPill status={app.ready ? "ready" : "setup_required"} />
-      </div>)}
-    </div>
-    {!readiness.enabled && <p className="hiring-application-note">Candidate desktop sessions remain disabled until the licensed Windows environment is connected.</p>}
-  </>;
+    <div className="hiring-settings-row"><div><strong>Access role</strong><span>{stageLabel(role)}</span></div><small>{permissions.length} permissions</small></div>
+    <div className="hiring-settings-row danger"><div><strong>Sign out</strong><span>End this browser session on this device.</span></div><button type="button" className="hiring-button secondary" onClick={() => void onSignOut()}><LogOut size={16} />Sign out</button></div>
+  </section>;
 }
 
 function TeamView({ members, onAddMember, onRefresh }: { members: Member[]; onAddMember: () => void; onRefresh: () => void }) {
@@ -546,13 +517,91 @@ function TeamView({ members, onAddMember, onRefresh }: { members: Member[]; onAd
     onRefresh();
   };
   return <section className="hiring-panel hiring-full-panel">
-    <div className="hiring-panel-header"><div><h2>Team access</h2><p>Add recruiters and assign organization-wide or custom permissions.</p></div><button type="button" className="hiring-button primary" onClick={onAddMember}>Add team member</button></div>
+    <div className="hiring-panel-header"><div><h2>Team access</h2><p>Add recruiters and assign organization-wide or custom permissions.</p></div><button type="button" className="hiring-button primary" onClick={onAddMember}><UserPlus size={16} />Add team member</button></div>
     <div className="hiring-member-table">
       <div className="hiring-member-head"><span>Member</span><span>Role</span><span>Status</span><span>Access</span></div>
       {members.map((member) => <div className="hiring-member-row" key={member.id}><div><strong>{member.full_name}</strong><small>{member.email}</small></div><span>{stageLabel(member.role)}</span><StatusPill status={member.status} /><button type="button" disabled={member.role === "owner" || member.is_current_user} onClick={() => void removeMember(member)}>Remove</button></div>)}
     </div>
     {!members.length && <Empty text="No organization members have been added yet." action="Add team member" onClick={onAddMember} />}
   </section>;
+}
+
+function ImagePicker({ image, label, fallback, round = false, onPick, onRemove }: {
+  image: string;
+  label: string;
+  fallback: string;
+  round?: boolean;
+  onPick: (file: File) => Promise<void>;
+  onRemove?: () => void;
+}) {
+  return <div className={`hiring-image-picker${round ? " round" : ""}`}>
+    <div className="hiring-image-preview">{image ? <img src={image} alt="" /> : <span aria-hidden="true">{fallback}</span>}</div>
+    <div>
+      <strong>{label}</strong>
+      <small>PNG, JPEG, or WebP up to 12 MB. The image is resized before upload.</small>
+      <div className="hiring-image-actions">
+        <label className="hiring-upload-button"><Upload size={15} /><span>Choose image</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) await onPick(file);
+        }} /></label>
+        {image && onRemove && <button type="button" className="hiring-button quiet-danger" onClick={onRemove}><Trash2 size={15} />Remove</button>}
+      </div>
+    </div>
+  </div>;
+}
+
+function CurrentUserProfileForm({ currentUser, onSaved }: { currentUser: Workspace["current_user"]; onSaved: () => void }) {
+  const [fullName, setFullName] = useState(currentUser.full_name);
+  const [avatar, setAvatar] = useState(currentUser.avatar_url);
+  const [newAvatar, setNewAvatar] = useState("");
+  const [removeAvatar, setRemoveAvatar] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    setFullName(currentUser.full_name);
+    setAvatar(currentUser.avatar_url);
+  }, [currentUser.avatar_url, currentUser.full_name]);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+    try {
+      const { data } = await api.patch<Workspace["current_user"]>("/hiring/profile", {
+        full_name: fullName.trim(),
+        avatar_data_url: newAvatar,
+        remove_avatar: removeAvatar,
+      });
+      setAvatar(data.avatar_url);
+      setNewAvatar("");
+      setRemoveAvatar(false);
+      setMessage("Personal profile updated.");
+      onSaved();
+    } catch (reason) {
+      setMessage(apiError(reason, "Personal profile could not be updated."));
+    } finally {
+      setLoading(false);
+    }
+  };
+  const preview = removeAvatar ? "" : newAvatar || avatar;
+  return <form className="hiring-organization-profile" onSubmit={submit}>
+    <ImagePicker image={preview} label="Profile photo" fallback={initials(fullName)} round onPick={async (file) => {
+      try {
+        setNewAvatar(await readProfileImage(file));
+        setRemoveAvatar(false);
+        setMessage("Photo ready. Save changes to apply it.");
+      } catch (reason) {
+        setMessage(reason instanceof Error ? reason.message : "The photo could not be used.");
+      }
+    }} onRemove={() => {
+      setNewAvatar("");
+      setRemoveAvatar(true);
+      setMessage("Photo will be removed when you save.");
+    }} />
+    <label>Full name<input required minLength={2} maxLength={200} value={fullName} onChange={(event) => setFullName(event.target.value)} /></label>
+    <label>Email<input value={currentUser.email} disabled /></label>
+    <div><button type="submit" className="hiring-button primary" disabled={loading || fullName.trim().length < 2}>{loading ? "Saving..." : "Save changes"}</button>{message && <span role="status">{message}</span>}</div>
+  </form>;
 }
 
 function OrganizationProfileForm({ organization, onSaved }: { organization: Workspace["organization"]; onSaved: () => void }) {
@@ -570,7 +619,8 @@ function OrganizationProfileForm({ organization, onSaved }: { organization: Work
     setLoading(true);
     setMessage("");
     try {
-      await api.patch("/hiring/organization/profile", { name: name.trim(), logo_data_url: newLogo });
+      const { data } = await api.patch<Workspace["organization"]>("/hiring/organization/profile", { name: name.trim(), logo_data_url: newLogo });
+      setLogo(data.logo_url);
       setNewLogo("");
       setMessage("Company profile updated.");
       onSaved();
@@ -581,85 +631,16 @@ function OrganizationProfileForm({ organization, onSaved }: { organization: Work
     }
   };
   return <form className="hiring-organization-profile" onSubmit={submit}>
-    <label className="hiring-organization-logo">
-      <img src={newLogo || logo} alt="Company logo" />
-      <span><strong>Company logo</strong><input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        try {
-          setNewLogo(await readCompanyLogo(file));
-          setMessage("");
-        } catch (reason) {
-          setMessage(reason instanceof Error ? reason.message : "The logo could not be used.");
-        }
-      }} /><small>PNG, JPEG, or WebP. Maximum 256 KB.</small></span>
-    </label>
+    <ImagePicker image={newLogo || organizationLogoUrl(logo)} label="Company logo" fallback={initials(name)} onPick={async (file) => {
+      try {
+        setNewLogo(await readCompanyLogo(file));
+        setMessage("Logo ready. Save changes to apply it.");
+      } catch (reason) {
+        setMessage(reason instanceof Error ? reason.message : "The logo could not be used.");
+      }
+    }} />
     <label>Company profile name<input required minLength={2} maxLength={200} value={name} onChange={(event) => setName(event.target.value)} /></label>
-    <div><button type="submit" className="hiring-button primary" disabled={loading || name.trim().length < 2}>{loading ? "Saving..." : "Save profile"}</button>{message && <span role="status">{message}</span>}</div>
-  </form>;
-}
-
-function SsoForm({ value, onSaved }: { value?: SsoConfiguration; onSaved: () => void }) {
-  const [form, setForm] = useState({
-    provider: value?.provider || "microsoft_entra",
-    domains: (value?.domains || []).join(", "),
-    idp_metadata_url: value?.idp_metadata_url || "",
-    initial_admin_email: value?.initial_admin_email || "",
-    enabled: Boolean(value?.enabled),
-    enforce_for_members: Boolean(value?.enforce_for_members),
-  });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const verified = value?.connection_status === "verified";
-  useEffect(() => {
-    setForm({
-      provider: value?.provider || "microsoft_entra",
-      domains: (value?.domains || []).join(", "),
-      idp_metadata_url: value?.idp_metadata_url || "",
-      initial_admin_email: value?.initial_admin_email || "",
-      enabled: Boolean(value?.enabled),
-      enforce_for_members: Boolean(value?.enforce_for_members),
-    });
-  }, [value]);
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setLoading(true);
-    setError("");
-    try {
-      await api.put("/hiring/sso", { ...form, domains: splitList(form.domains) });
-      onSaved();
-    } catch (reason) {
-      setError(apiError(reason, "Could not save the SSO configuration."));
-    } finally {
-      setLoading(false);
-    }
-  };
-  return <form className="hiring-form hiring-sso-form" onSubmit={submit}>
-    <div className="hiring-panel-header"><div><h2>Single sign-on</h2><p>Submit your organization identity settings and control member access after verification.</p></div><StatusPill status={value?.status || "not_configured"} /></div>
-    <div className="hiring-sso-client-grid">
-      <label>Identity provider<select value={form.provider} onChange={(event) => setForm({ ...form, provider: event.target.value })}>
-        <option value="microsoft_entra">Microsoft Entra ID</option>
-        <option value="okta">Okta</option>
-        <option value="google_workspace">Google Workspace</option>
-        <option value="ping_identity">Ping Identity</option>
-        <option value="onelogin">OneLogin</option>
-        <option value="wso2">WSO2</option>
-        <option value="other_saml">Other SAML 2.0 provider</option>
-      </select></label>
-      <label>Company domains<input required value={form.domains} onChange={(event) => setForm({ ...form, domains: event.target.value })} placeholder="company.com" /></label>
-      <label>IT administrator<input required type="email" value={form.initial_admin_email} onChange={(event) => setForm({ ...form, initial_admin_email: event.target.value })} placeholder="it-admin@company.com" /></label>
-      <label className="hiring-sso-wide">Identity-provider metadata URL<input required type="url" value={form.idp_metadata_url} onChange={(event) => setForm({ ...form, idp_metadata_url: event.target.value })} placeholder="https://idp.company.com/saml/metadata" /></label>
-    </div>
-    <div className="hiring-sso-status-row">
-      <div><strong>Connection status</strong><span>{stageLabel(value?.connection_status || "not_configured")}</span></div>
-      <p>{verified ? "A successful SAML login has verified this connection." : "Your IT administrator will receive the service-provider details required to complete setup."}</p>
-    </div>
-    {verified && <div className="hiring-sso-access">
-      <label className="hiring-checkbox"><input type="checkbox" checked={form.enabled} disabled={!verified} onChange={(event) => setForm({ ...form, enabled: event.target.checked, enforce_for_members: event.target.checked ? form.enforce_for_members : false })} />Enable SSO for these domains</label>
-      <label className="hiring-checkbox"><input type="checkbox" checked={form.enforce_for_members} disabled={!verified || !form.enabled} onChange={(event) => setForm({ ...form, enforce_for_members: event.target.checked })} />Require organization members to use SSO</label>
-    </div>}
-    {error && <p className="hiring-form-error">{error}</p>}
-    <footer><button type="submit" className="hiring-button primary" disabled={loading}>{loading ? "Saving..." : verified ? "Save SSO settings" : "Submit SSO configuration"}</button></footer>
+    <div><button type="submit" className="hiring-button primary" disabled={loading || name.trim().length < 2}>{loading ? "Saving..." : "Save changes"}</button>{message && <span role="status">{message}</span>}</div>
   </form>;
 }
 
@@ -787,7 +768,6 @@ const permissionDescription: Record<string, string> = {
   "members.manage": "Invite and remove organization members",
   "organization.manage": "Manage organization settings",
   "billing.manage": "Manage billing",
-  "sso.manage": "Configure single sign-on",
 };
 
 function MemberForm({ permissionCatalog, onClose, onSaved }: { permissionCatalog: string[]; onClose: () => void; onSaved: (message: string) => void }) {

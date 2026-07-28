@@ -85,6 +85,7 @@ type ScreeningApplication = {
 };
 
 type WorkspaceTab = "dashboard" | "assessments" | "publish" | "results";
+type AssessmentToolFilter = "all" | "spreadsheet" | "coding" | "accounting" | "tax_simulator";
 
 type AccountContext = {
   full_name: string;
@@ -132,6 +133,17 @@ function PlusIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8">
       <path d="M10 4v12M4 10h12" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ToolGridIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <rect x="3" y="3" width="5" height="5" rx="1" />
+      <rect x="12" y="3" width="5" height="5" rx="1" />
+      <rect x="3" y="12" width="5" height="5" rx="1" />
+      <rect x="12" y="12" width="5" height="5" rx="1" />
     </svg>
   );
 }
@@ -192,6 +204,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   const clearSession = useSessionStore((state) => state.clear);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("dashboard");
   const [searchQuery, setSearchQuery] = useState("");
+  const [toolFilter, setToolFilter] = useState<AssessmentToolFilter>("all");
   const [selectedExamId, setSelectedExamId] = useState<number | null>(null);
   const [issueExamId, setIssueExamId] = useState<number | null>(null);
   const [candidateApplicationId, setCandidateApplicationId] = useState<number | null>(null);
@@ -542,13 +555,17 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   const issuedRows = issued.data || [];
   const searchToken = searchQuery.trim().toLowerCase();
   const filteredAssessments = useMemo(
-    () =>
-      searchToken
-        ? assessmentRows.filter((row) =>
-            [row.title, row.status, row.assessment_type].some((value) => String(value).toLowerCase().includes(searchToken)),
-          )
-        : assessmentRows,
-    [assessmentRows, searchToken],
+    () => assessmentRows.filter((row) => {
+      const matchesTool = toolFilter === "all" || row.assessment_type === toolFilter;
+      const matchesSearch = !searchToken
+        || [row.title, row.status, row.assessment_type].some((value) => String(value).toLowerCase().includes(searchToken));
+      return matchesTool && matchesSearch;
+    }),
+    [assessmentRows, searchToken, toolFilter],
+  );
+  const filteredDefaultAssessments = useMemo(
+    () => (defaultAssessments.data || []).filter((row) => toolFilter === "all" || row.assessment_type === toolFilter),
+    [defaultAssessments.data, toolFilter],
   );
   const filteredIssued = useMemo(
     () =>
@@ -669,7 +686,28 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
           </div>
         </div>
         <div className="workspace-appbar-right">
-          <span className="workspace-tools-mark" title="Assessment library"><NavIcon type="assessments" /></span>
+          <details className="workspace-tool-menu">
+            <summary className={`workspace-tools-mark${toolFilter !== "all" ? " active" : ""}`} title="Filter by assessment tool" aria-label="Filter by assessment tool">
+              <ToolGridIcon />
+            </summary>
+            <div className="workspace-tool-menu-panel" role="menu" aria-label="Assessment tools">
+              <button type="button" role="menuitem" className={toolFilter === "all" ? "active" : ""} onClick={(event) => { setToolFilter("all"); event.currentTarget.closest("details")?.removeAttribute("open"); }}>
+                <span className="workspace-tool-menu-glyph"><ToolGridIcon /></span>
+                <span><strong>All tools</strong><small>Show every assessment</small></span>
+              </button>
+              {([
+                ["spreadsheet", "Microsoft Excel"],
+                ["coding", "Visual Studio Code"],
+                ["accounting", "QuickBooks"],
+                ["tax_simulator", "Drake Tax"],
+              ] as Array<[Exclude<AssessmentToolFilter, "all">, string]>).map(([assessmentType, label]) => (
+                <button type="button" role="menuitem" key={assessmentType} className={toolFilter === assessmentType ? "active" : ""} onClick={(event) => { setToolFilter(assessmentType); setActiveTab("assessments"); event.currentTarget.closest("details")?.removeAttribute("open"); }}>
+                  <AssessmentToolIcon assessmentType={assessmentType} />
+                  <span><strong>{label}</strong><small>Filter assessment library</small></span>
+                </button>
+              ))}
+            </div>
+          </details>
           <label className="workspace-search">
             <SearchIcon />
             <input
@@ -807,7 +845,6 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
             <section className="workspace-surface">
               <div className="workspace-surface-head">
                 <div><h3>Assessment library</h3><p>Open an assessment to edit, publish, or send it.</p></div>
-                <button type="button" className="workspace-new-inline" onClick={() => { setShowBuilder(true); setBuilderStep(1); }}>New assessment</button>
               </div>
               <div className="assessment-library-list">
                 {filteredAssessments.map((assessment) => (
@@ -831,7 +868,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
             <section className="workspace-surface default-library">
               <div className="workspace-surface-head"><div><h3>Default assessments</h3><p>Challenging templates with answer keys and deterministic scoring checkpoints.</p></div></div>
               <div className="default-assessment-list">
-                {(defaultAssessments.data || []).map((template) => (
+                {filteredDefaultAssessments.map((template) => (
                   <article className={`default-assessment-row${previewDefaultId === template.id ? " active" : ""}`} key={template.id}>
                     <button type="button" className="default-assessment-main" onClick={() => setPreviewDefaultId((current) => current === template.id ? null : template.id)}>
                       <AssessmentToolIcon assessmentType={template.assessment_type} title={template.title} />
@@ -1048,15 +1085,17 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
               <div className="workspace-form-grid compact">
                 <div className="field-stack">
                   <span>Published assessment</span>
-                  <div className="issue-assessment-picker" role="listbox" aria-label="Published assessment">
-                    {assessmentRows.filter((x) => x.status === "published").map((x) => (
-                      <button type="button" role="option" aria-selected={issueExamId === x.exam_id} className={issueExamId === x.exam_id ? "active" : ""} key={x.exam_id} onClick={() => setIssueExamId(x.exam_id)}>
-                        <AssessmentToolIcon assessmentType={x.assessment_type} title={x.title} />
-                        <span><strong>{x.title}</strong><small>{x.duration_minutes} min</small></span>
-                      </button>
-                    ))}
+                  <div className="assessment-select-with-icon issue-assessment-select">
+                    {issueSelectedExam
+                      ? <AssessmentToolIcon assessmentType={issueSelectedExam.assessment_type} title={issueSelectedExam.title} />
+                      : <span className="issue-assessment-placeholder-icon"><ToolGridIcon /></span>}
+                    <select aria-label="Published assessment" value={issueExamId ?? ""} onChange={(event) => setIssueExamId(event.target.value ? Number(event.target.value) : null)}>
+                      <option value="">Select published assessment</option>
+                      {assessmentRows.filter((x) => x.status === "published").map((x) => (
+                        <option value={x.exam_id} key={x.exam_id}>{x.title} | {x.duration_minutes} min</option>
+                      ))}
+                    </select>
                   </div>
-                  {issueSelectedExam && <small className="issue-selected-note">Selected: {issueSelectedExam.title}</small>}
                 </div>
                 <label className="field-stack">
                   <span>Screening candidate</span>

@@ -18,15 +18,17 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error?.response?.status === 401) {
+    if (error && error.response && error.response.status === 401) {
       const recruiterToken = useSessionStore.getState().token;
-      const requestAuthorization = String(error?.config?.headers?.Authorization || "");
+      const requestAuthorization = String(
+        error.config && error.config.headers ? error.config.headers.Authorization || "" : "",
+      );
       if (recruiterToken && requestAuthorization === `Bearer ${recruiterToken}`) {
         useSessionStore.getState().clear();
         // Keep the app store and Supabase browser session in sync. Leaving a
         // rejected Supabase session behind remounts AuthPanel and creates a
         // repeated sign-in/redirect loop after a 401 response.
-        void supabase?.auth.signOut({ scope: "local" });
+        if (supabase) void supabase.auth.signOut({ scope: "local" });
       }
     }
     return Promise.reject(error);

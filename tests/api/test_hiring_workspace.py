@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.api.routes.hiring import (
     ApplicationCreate,
     CandidateCreate,
+    CurrentUserProfileUpdate,
     IntegrationUpdate,
     MembershipCreate,
     OrganizationProfileUpdate,
@@ -32,6 +33,7 @@ from app.api.routes.hiring import (
     screen_application,
     submit_scorecard,
     update_application_stage,
+    update_current_user_profile,
     update_organization_profile,
     update_sso_configuration,
 )
@@ -87,6 +89,8 @@ class HiringWorkspaceTest(unittest.TestCase):
         workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)
         organization_id = workspace["organization"]["id"]
         self.assertEqual(workspace["organization"]["logo_url"], "/assets/brand/valases-logo.png")
+        self.assertNotIn("sso.manage", workspace["permissions"])
+        self.assertNotIn("sso.manage", workspace["permission_catalog"])
 
         logo = "data:image/png;base64,iVBORw0KGgo="
         updated = update_organization_profile(
@@ -110,6 +114,33 @@ class HiringWorkspaceTest(unittest.TestCase):
                 current_user=self.recruiter,
             )
         self.assertEqual(invalid_logo.exception.status_code, 422)
+
+    def test_member_can_update_and_remove_their_profile_photo(self) -> None:
+        workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)
+        organization_id = workspace["organization"]["id"]
+        self.assertEqual(workspace["current_user"]["avatar_url"], "")
+
+        avatar = "data:image/png;base64,iVBORw0KGgo="
+        updated = update_current_user_profile(
+            CurrentUserProfileUpdate(full_name="Riya Sharma", avatar_data_url=avatar),
+            organization_id=organization_id,
+            db=self.db,
+            current_user=self.recruiter,
+        )
+        self.assertEqual(updated["full_name"], "Riya Sharma")
+        self.assertEqual(updated["avatar_url"], avatar)
+
+        refreshed = hiring_workspace(organization_id=organization_id, db=self.db, current_user=self.recruiter)
+        self.assertEqual(refreshed["current_user"]["full_name"], "Riya Sharma")
+        self.assertEqual(refreshed["current_user"]["avatar_url"], avatar)
+
+        removed = update_current_user_profile(
+            CurrentUserProfileUpdate(full_name="Riya Sharma", remove_avatar=True),
+            organization_id=organization_id,
+            db=self.db,
+            current_user=self.recruiter,
+        )
+        self.assertEqual(removed["avatar_url"], "")
 
     def test_recruiting_workflow_remains_organization_scoped_and_human_reviewed(self) -> None:
         workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)

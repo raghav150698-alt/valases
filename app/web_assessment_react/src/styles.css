@@ -889,6 +889,10 @@ body { margin: 0; background: #f6f8fb; }
   gap: 10px;
   min-width: 0;
 }
+.workspace-tool-menu {
+  position: relative;
+  flex: none;
+}
 .workspace-tools-mark {
   width: 42px;
   height: 42px;
@@ -899,9 +903,54 @@ body { margin: 0; background: #f6f8fb; }
   border-radius: 6px;
   background: #ffffff;
   color: #14785f;
+  cursor: pointer;
+  list-style: none;
 }
+.workspace-tools-mark::-webkit-details-marker { display: none; }
+.workspace-tools-mark:hover,
+.workspace-tools-mark.active,
+.workspace-tool-menu[open] .workspace-tools-mark { border-color: #9ec5b8; background: #f1f8f5; color: #12634f; }
 .workspace-tools-mark .assessment-tool-icon,
 .workspace-tools-mark > svg { width: 22px; height: 22px; }
+.workspace-tool-menu-panel {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 7px);
+  left: 0;
+  width: 276px;
+  overflow: hidden;
+  padding: 5px;
+  border: 1px solid #d4dfda;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(22, 50, 41, .16);
+}
+.workspace-tool-menu-panel button {
+  width: 100%;
+  min-height: 50px;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #38554b;
+  text-align: left;
+}
+.workspace-tool-menu-panel button:hover,
+.workspace-tool-menu-panel button.active { background: #edf6f2; color: #145b48; }
+.workspace-tool-menu-panel .assessment-tool-icon,
+.workspace-tool-menu-glyph { width: 24px; height: 24px; }
+.workspace-tool-menu-panel .assessment-tool-icon-drake-tax { width: 44px; height: 20px; }
+.workspace-tool-menu-glyph { display: grid; place-items: center; }
+.workspace-tool-menu-glyph svg { width: 20px; height: 20px; }
+.workspace-tool-menu-panel button > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.workspace-tool-menu-panel strong,
+.workspace-tool-menu-panel small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-tool-menu-panel strong { font-size: 12px; }
+.workspace-tool-menu-panel small { color: #73837d; font-size: 10px; font-weight: 500; }
 .workspace-search {
   width: min(32vw, 360px);
   min-width: 240px;
@@ -971,15 +1020,6 @@ body { margin: 0; background: #f6f8fb; }
   display: grid;
   gap: 18px;
 }
-.workspace-new-inline {
-  min-height: 36px;
-  padding: 0 13px;
-  border: 1px solid #176b57;
-  border-radius: 5px;
-  background: #176b57;
-  color: #fff;
-  font-weight: 700;
-}
 .assessment-library-list,
 .default-assessment-list,
 .published-activity-list {
@@ -988,11 +1028,17 @@ body { margin: 0; background: #f6f8fb; }
 .assessment-library-row {
   min-height: 66px;
   display: grid;
-  grid-template-columns: 36px minmax(220px, 1fr) 130px auto auto auto;
+  grid-template-columns: 46px minmax(220px, 1fr) 130px auto auto auto;
   align-items: center;
   gap: 12px;
   border-top: 1px solid #e4ebe7;
 }
+.assessment-library-row > .assessment-tool-icon,
+.default-assessment-main > .assessment-tool-icon,
+.published-activity-row > .assessment-tool-icon { width: 26px; height: 26px; }
+.assessment-library-row > .assessment-tool-icon-drake-tax,
+.default-assessment-main > .assessment-tool-icon-drake-tax,
+.published-activity-row > .assessment-tool-icon-drake-tax { width: 44px; height: 20px; }
 .assessment-library-row:first-child,
 .default-assessment-row:first-child,
 .published-activity-row:first-child { border-top: 0; }
@@ -1048,7 +1094,7 @@ body { margin: 0; background: #f6f8fb; }
   border: 0;
   background: transparent;
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
+  grid-template-columns: 46px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   text-align: left;
@@ -1061,7 +1107,7 @@ body { margin: 0; background: #f6f8fb; }
 .published-activity-row {
   min-height: 66px;
   display: grid;
-  grid-template-columns: 36px minmax(220px, 1fr) 100px auto auto;
+  grid-template-columns: 46px minmax(220px, 1fr) 100px auto auto;
   align-items: center;
   gap: 12px;
   border-top: 1px solid #e4ebe7;
@@ -1582,14 +1628,13 @@ body { margin: 0; background: #f6f8fb; }
 .assessment-select-with-icon { min-height: 42px; display: flex; align-items: center; gap: 9px; padding: 0 8px; border: 1px solid #d6dee8; border-radius: 5px; background: #fff; }
 .assessment-select-with-icon .assessment-tool-icon { width: 27px; height: 27px; }
 .assessment-select-with-icon select { min-width: 0; border: 0; padding-inline: 0; box-shadow: none; }
-.issue-assessment-picker { max-height: 190px; overflow-y: auto; display: grid; gap: 6px; padding: 5px; border: 1px solid #d6dee8; border-radius: 6px; background: #f8fafc; }
-.issue-assessment-picker button { min-height: 48px; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid transparent; border-radius: 5px; background: #fff; color: #26364a; text-align: left; }
-.issue-assessment-picker button:hover { border-color: #a9c9bc; }
-.issue-assessment-picker button.active { border-color: #158064; background: #eaf6f1; box-shadow: inset 3px 0 #158064; }
-.issue-assessment-picker .assessment-tool-icon { width: 28px; height: 28px; }
-.issue-assessment-picker button > span { display: grid; gap: 2px; min-width: 0; }
-.issue-assessment-picker button strong, .issue-assessment-picker button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.issue-selected-note { color: #426b5d; }
+.issue-assessment-select { padding-left: 10px; }
+.issue-assessment-select .assessment-tool-icon,
+.issue-assessment-placeholder-icon { width: 20px; height: 20px; }
+.issue-assessment-select .assessment-tool-icon-drake-tax { width: 40px; height: 18px; }
+.issue-assessment-placeholder-icon { display: grid; place-items: center; color: #6e7d77; }
+.issue-assessment-placeholder-icon svg { width: 18px; height: 18px; }
+.issue-assessment-select select { width: 100%; min-height: 40px; color: #26364a; }
 .hrms-tools-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -2263,9 +2308,9 @@ select { min-height: 42px; padding: 9px 12px; border-radius: 6px; border: 1px so
   .workspace-rail-footer > button { justify-content: center; padding: 0; }
   .workspace-user-chip { justify-content: center; padding-inline: 0; }
   .workspace-product-main { padding-inline: 18px; }
-  .workspace-appbar,
-  .workspace-appbar-left,
-  .workspace-appbar-right,
+  .provider-workspace:not(.provider-embedded) .workspace-appbar,
+  .provider-workspace:not(.provider-embedded) .workspace-appbar-left,
+  .provider-workspace:not(.provider-embedded) .workspace-appbar-right,
   .launch-header,
   .candidate-entry-shell,
   .workspace-section-head,
@@ -2321,6 +2366,24 @@ select { min-height: 42px; padding: 9px 12px; border-radius: 6px; border: 1px so
     padding-left: 18px;
     padding-right: 18px;
   }
+  .provider-embedded .workspace-appbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .provider-embedded .workspace-appbar-right {
+    width: 100%;
+    align-items: center;
+    flex-direction: row;
+  }
+  .provider-embedded .workspace-search {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .provider-embedded .workspace-kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -2348,6 +2411,7 @@ select { min-height: 42px; padding: 9px 12px; border-radius: 6px; border: 1px so
   .workspace-new-btn span { display: none; }
   .workspace-new-btn { width: 42px; padding: 0; justify-content: center; }
   .workspace-kpi-grid { grid-template-columns: 1fr; }
+  .provider-embedded .workspace-kpi-grid { grid-template-columns: 1fr; }
   .result-detail-summary { grid-template-columns: repeat(2, 1fr); }
   .result-detail-summary > div:nth-child(2) { border-right: 0; }
   .result-detail-summary > div { border-bottom: 1px solid #e1e7ea; }

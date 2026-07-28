@@ -87,7 +87,7 @@ def _candidate_session(authorization: str | None, db: Session) -> tuple[Assessme
 
 @router.get("/readiness")
 def get_desktop_session_readiness(
-    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
 ):
     return desktop_session_readiness()
 

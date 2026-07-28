@@ -5,7 +5,7 @@ from fastapi import HTTPException
 
 
 DEFAULT_ORGANIZATION_LOGO_URL = "/assets/brand/valases-logo.png"
-MAX_ORGANIZATION_LOGO_BYTES = 256 * 1024
+MAX_ORGANIZATION_IMAGE_BYTES = 512 * 1024
 _ALLOWED_LOGO_PREFIXES = {
     "data:image/png;base64,": b"\x89PNG\r\n\x1a\n",
     "data:image/jpeg;base64,": b"\xff\xd8\xff",
@@ -13,28 +13,42 @@ _ALLOWED_LOGO_PREFIXES = {
 }
 
 
-def normalize_organization_logo(value: str | None, *, required: bool = False) -> str:
-    logo = str(value or "").strip()
-    if not logo:
+def _normalize_image(value: str | None, *, label: str, required: bool = False) -> str:
+    image = str(value or "").strip()
+    if not image:
         if required:
-            raise HTTPException(status_code=422, detail="Upload a PNG, JPEG, or WebP company logo")
+            raise HTTPException(status_code=422, detail=f"Upload a PNG, JPEG, or WebP {label.lower()}")
         return ""
-    prefix = next((item for item in _ALLOWED_LOGO_PREFIXES if logo.startswith(item)), "")
+    prefix = next((item for item in _ALLOWED_LOGO_PREFIXES if image.startswith(item)), "")
     if not prefix:
-        raise HTTPException(status_code=422, detail="Company logo must be a PNG, JPEG, or WebP image")
+        raise HTTPException(status_code=422, detail=f"{label} must be a PNG, JPEG, or WebP image")
     try:
-        content = base64.b64decode(logo[len(prefix):], validate=True)
+        content = base64.b64decode(image[len(prefix):], validate=True)
     except (ValueError, binascii.Error) as exc:
-        raise HTTPException(status_code=422, detail="Company logo data is invalid") from exc
-    if not content or len(content) > MAX_ORGANIZATION_LOGO_BYTES:
-        raise HTTPException(status_code=422, detail="Company logo must be smaller than 256 KB")
+        raise HTTPException(status_code=422, detail=f"{label} data is invalid") from exc
+    if not content or len(content) > MAX_ORGANIZATION_IMAGE_BYTES:
+        raise HTTPException(status_code=422, detail=f"{label} must be smaller than 512 KB")
     if not content.startswith(_ALLOWED_LOGO_PREFIXES[prefix]):
-        raise HTTPException(status_code=422, detail="Company logo content does not match its image type")
+        raise HTTPException(status_code=422, detail=f"{label} content does not match its image type")
     if prefix.startswith("data:image/webp") and content[8:12] != b"WEBP":
-        raise HTTPException(status_code=422, detail="Company logo content does not match its image type")
-    return logo
+        raise HTTPException(status_code=422, detail=f"{label} content does not match its image type")
+    return image
+
+
+def normalize_organization_logo(value: str | None, *, required: bool = False) -> str:
+    return _normalize_image(value, label="Company logo", required=required)
+
+
+def normalize_member_avatar(value: str | None) -> str:
+    return _normalize_image(value, label="Profile photo")
 
 
 def organization_logo_url(settings_json: dict | None) -> str:
     branding = dict((settings_json or {}).get("branding") or {})
     return str(branding.get("logo_data_url") or DEFAULT_ORGANIZATION_LOGO_URL)
+
+
+def member_avatar_url(settings_json: dict | None, user_id: int) -> str:
+    profiles = dict((settings_json or {}).get("member_profiles") or {})
+    profile = dict(profiles.get(str(user_id)) or {})
+    return str(profile.get("avatar_data_url") or "")

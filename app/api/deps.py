@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.models.entities import ApprovalStatus, BannedIdentity, Organization, OrganizationAuditEvent, OrganizationMembership, ProviderProfile, User, UserApproval, UserRole
 from app.services.account_rules import is_configured_admin_email, resolve_identity_role
@@ -151,6 +152,26 @@ def get_current_user(
     if settings.is_production and settings.auth_mode.lower() == "dummy":
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Dummy auth mode is disabled in production.")
     if settings.auth_mode.lower() == "dummy":
+        has_explicit_dummy_identity = any(
+            value is not None
+            for value in (x_dummy_user_id, x_dummy_role, x_dummy_email, x_dummy_name)
+        )
+        if token and not has_explicit_dummy_identity:
+            try:
+                payload = decode_access_token(token)
+                user_id = int(payload.get("sub") or 0)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Could not validate development credentials",
+                ) from exc
+            user = db.get(User, user_id)
+            if not user:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Development account no longer exists",
+                )
+            return user
         return _dummy_user(db, x_dummy_user_id, x_dummy_role, x_dummy_email, x_dummy_name)
 
     credentials_exception = HTTPException(

@@ -3,13 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
 import { BrandLogo } from "../../components/BrandLogo";
+import { AssessmentToolIcon } from "../../components/AssessmentToolIcon";
 import { api } from "../../lib/api";
 import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
 import { readCompanyLogo } from "../../lib/imageFile";
 import "./AdminConsole.css";
 
-type AdminTab = "overview" | "companies" | "users" | "usage" | "billing" | "sso" | "governance" | "requests" | "audit" | "settings";
+type AdminTab = "overview" | "companies" | "users" | "usage" | "billing" | "applications" | "sso" | "governance" | "requests" | "audit" | "settings";
 
 type AccountContext = {
   email: string;
@@ -128,6 +129,23 @@ type SsoOperation = {
     name_id_format: string;
     required_email_claim: string;
   };
+};
+
+type DesktopApplicationReadiness = {
+  enabled: boolean;
+  broker_mode: string;
+  broker_ready: boolean;
+  gateway_origin_configured: boolean;
+  ready: boolean;
+  apps: Array<{
+    assessment_type: string;
+    app_key: string;
+    display_name: string;
+    application_configured: boolean;
+    license_approved: boolean;
+    license_reference?: string;
+    ready: boolean;
+  }>;
 };
 
 type AuditEvent = {
@@ -259,6 +277,11 @@ export function AdminConsole() {
     queryKey: ["admin-sso-connections"],
     queryFn: async () => (await api.get<{ items: SsoOperation[] }>("/admin/workspace/sso-connections")).data.items,
     enabled: tab === "sso",
+  });
+  const desktopReadiness = useQuery({
+    queryKey: ["admin-desktop-app-readiness"],
+    queryFn: async () => (await api.get<DesktopApplicationReadiness>("/desktop-sessions/readiness")).data,
+    enabled: tab === "applications",
   });
   const auditEvents = useQuery({
     queryKey: ["admin-audit-events", auditProviderId, auditAction],
@@ -445,6 +468,7 @@ export function AdminConsole() {
     users: ["Users", "Provision recruiter accounts and control access."],
     usage: ["Usage", "Track assessment delivery and completion by company."],
     billing: ["Billing", "Maintain plans, allowances, pricing, and billing periods."],
+    applications: ["Assessment applications", "Monitor Valases-managed licenses, mappings, and session infrastructure."],
     sso: ["SSO operations", "Provision and monitor organization SAML connections by region."],
     governance: ["Data governance", "Configure retention schedules and organization-wide legal holds."],
     requests: ["Data requests", "Verify and complete candidate access, export, and deletion requests."],
@@ -459,7 +483,7 @@ export function AdminConsole() {
       <aside className="admin-rail">
         <div className="admin-brand"><BrandLogo className="workspace-brand-logo" /><div><strong>Valases</strong><small>Administration</small></div></div>
         <nav aria-label="Administration">
-          {(["overview", "companies", "users", "usage", "billing", "sso", "governance", "requests", "audit", "settings"] as AdminTab[]).map((item) => (
+          {(["overview", "companies", "users", "usage", "billing", "applications", "sso", "governance", "requests", "audit", "settings"] as AdminTab[]).map((item) => (
             <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item === "sso" ? "SSO" : item[0].toUpperCase() + item.slice(1)}</button>
           ))}
         </nav>
@@ -548,6 +572,36 @@ export function AdminConsole() {
               </div>
               <div className="admin-form-actions"><button className="admin-primary" type="submit" disabled={saveBilling.isPending || !selectedProviderId}>{saveBilling.isPending ? "Saving..." : "Save billing"}</button>{saveBilling.isSuccess && <span>Billing account updated.</span>}{saveBilling.isError && <span className="admin-error-inline">{apiMessage(saveBilling.error, "Billing could not be updated.")}</span>}</div>
             </form>
+          </section>
+        )}
+
+        {tab === "applications" && (
+          <section className="admin-section admin-applications">
+            <div className="admin-section-head">
+              <div>
+                <h2>Hosted assessment applications</h2>
+                <p>Valases owns this infrastructure. Customer administrators do not configure licenses, hosts, or candidate session capacity.</p>
+              </div>
+              {desktopReadiness.data && <span className={`admin-state state-${desktopReadiness.data.ready ? "ready" : desktopReadiness.data.enabled ? "setup_required" : "disabled"}`}>{desktopReadiness.data.ready ? "Ready" : desktopReadiness.data.enabled ? "Setup required" : "Disabled"}</span>}
+            </div>
+            {desktopReadiness.isLoading && <div className="admin-empty-row">Checking application infrastructure...</div>}
+            {desktopReadiness.isError && <div className="admin-error admin-form-alert">{apiMessage(desktopReadiness.error, "Application readiness could not be loaded.")}</div>}
+            {desktopReadiness.data && <>
+              <div className="admin-app-infrastructure">
+                <div><span>Session broker</span><strong>{desktopReadiness.data.broker_ready ? "Ready" : "Not ready"}</strong><small>{desktopReadiness.data.broker_mode.replace(/_/g, " ")}</small></div>
+                <div><span>Secure gateway</span><strong>{desktopReadiness.data.gateway_origin_configured ? "Configured" : "Not configured"}</strong><small>Candidate workspace entry point</small></div>
+                <div><span>Application pool</span><strong>{desktopReadiness.data.apps.filter((app) => app.ready).length} / {desktopReadiness.data.apps.length} ready</strong><small>Licensed tools available for allocation</small></div>
+              </div>
+              <div className="admin-app-list">
+                {desktopReadiness.data.apps.map((app) => <article key={`${app.assessment_type}:${app.app_key}`}>
+                  <AssessmentToolIcon assessmentType={app.assessment_type} toolName={app.display_name} />
+                  <div><strong>{app.display_name}</strong><small>{app.assessment_type.replace(/_/g, " ")} | {app.app_key}</small></div>
+                  <span className={app.application_configured ? "complete" : ""}>{app.application_configured ? "Mapped" : "Mapping required"}</span>
+                  <span className={app.license_approved ? "complete" : ""}>{app.license_approved ? "License approved" : "License approval required"}</span>
+                  <span className={`admin-state state-${app.ready ? "ready" : "setup_required"}`}>{app.ready ? "Ready" : "Setup required"}</span>
+                </article>)}
+              </div>
+            </>}
           </section>
         )}
 

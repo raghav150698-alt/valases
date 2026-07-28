@@ -115,6 +115,28 @@ class ProvisioningAndApprovalTest(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
+    @patch("app.api.deps.decode_access_token")
+    @patch("app.api.deps.get_settings")
+    def test_dummy_auth_uses_the_signed_session_identity(self, settings_mock, decode_mock) -> None:
+        settings_mock.return_value = Settings(_env_file=None, auth_mode="dummy")
+        user = User(
+            email="recruiter@example.com",
+            full_name="Recruiter",
+            password_hash="dummy",
+            role=UserRole.PROVIDER,
+            is_active=True,
+        )
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        decode_mock.return_value = {"sub": str(user.id), "role": UserRole.PROVIDER.value}
+
+        authenticated = get_current_user("signed-token", self.db, None, None, None, None)
+
+        self.assertEqual(authenticated.id, user.id)
+        self.assertEqual(authenticated.role, UserRole.PROVIDER)
+        decode_mock.assert_called_once_with("signed-token")
+
     @patch("app.api.deps.verify_supabase_token")
     @patch("app.api.deps.get_settings")
     def test_unknown_supabase_identity_is_not_auto_provisioned(self, settings_mock, verify_mock) -> None:
