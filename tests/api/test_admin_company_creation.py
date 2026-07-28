@@ -13,12 +13,15 @@ from app.api.routes.admin import (
     DataSubjectRequestCreate,
     DataSubjectRequestExecute,
     GovernanceSettingsUpdate,
+    SsoOperationUpdate,
     _create_company_account,
+    admin_workspace_sso_connections,
     admin_workspace_governance,
     admin_workspace_create_data_request,
     admin_workspace_execute_data_request,
     admin_workspace_update_data_request,
     admin_workspace_update_governance,
+    admin_workspace_update_sso,
 )
 from app.models.entities import (
     AuditLog,
@@ -66,6 +69,58 @@ class AdminCompanyCreationTest(unittest.TestCase):
                 email="owner@example.com",
                 password="short",
             )
+
+    @patch("app.api.routes.admin.ensure_supabase_user")
+    def test_sso_provisioning_is_managed_by_platform_admin(self, ensure_user) -> None:
+        ensure_user.return_value = {"configured": True, "created": True, "user_id": "auth-sso-owner"}
+        company = _create_company_account(
+            business_name="SAML Customer",
+            email_address="owner@saml-customer.com",
+            password="A-secure-password-2026",
+            account_name=None,
+            db=self.db,
+            current_user=self.admin,
+        )
+        provider = self.db.get(ProviderProfile, company["provider_id"])
+        organization = self.db.get(Organization, company["organization_id"])
+        organization.settings_json = {
+            **dict(organization.settings_json or {}),
+            "sso": {
+                "provider": "microsoft_entra",
+                "domains": ["saml-customer.com"],
+                "idp_metadata_url": "https://login.example.com/saml/metadata",
+                "initial_admin_email": "owner@saml-customer.com",
+                "connection_status": "ready_for_registration",
+            },
+        }
+        self.db.commit()
+
+        listed = admin_workspace_sso_connections(db=self.db, current_user=self.admin)
+        record = next(item for item in listed["items"] if item["provider_id"] == provider.id)
+        self.assertEqual(record["organization_name"], "SAML Customer")
+        self.assertIn("service_provider", record)
+
+        with self.assertRaises(HTTPException) as missing_connection:
+            admin_workspace_update_sso(
+                provider.id,
+                SsoOperationUpdate(connection_status="registered"),
+                db=self.db,
+                current_user=self.admin,
+            )
+        self.assertEqual(missing_connection.exception.status_code, 422)
+
+        updated = admin_workspace_update_sso(
+            provider.id,
+            SsoOperationUpdate(
+                connection_status="registered",
+                connection_id="sso-connection-123",
+                operator_notes="Registered in the regional identity project.",
+            ),
+            db=self.db,
+            current_user=self.admin,
+        )
+        self.assertEqual(updated["connection_status"], "registered")
+        self.assertEqual(updated["connection_id"], "sso-connection-123")
 
     @patch("app.api.routes.admin.ensure_supabase_user")
     def test_company_creation_provisions_login_and_workspace(self, ensure_user) -> None:

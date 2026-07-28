@@ -86,6 +86,7 @@
 .admin-state.state-active { border-color: #a9cebe; background: #f0f8f4; color: #176247; }
 .admin-state.state-frozen, .admin-state.state-banned { border-color: #e4bbb5; background: #fff6f4; color: #9f3428; }
 .admin-billing-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; }
+.admin-sso-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; }
 .admin-governance-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; }
 .admin-company-list { align-self: start; display: grid; gap: 4px; padding: 12px; border: 1px solid #d9e0e6; border-radius: 6px; background: #fff; }
 .admin-company-list label { display: none; }
@@ -93,7 +94,19 @@
 .admin-company-list button.active { border-left-color: #176b57; background: #f0f6f3; }
 .admin-company-list small { color: #74808a; }
 .admin-billing-form { align-self: start; }
+.admin-sso-form { align-self: start; }
 .admin-governance-form { align-self: start; }
+.admin-sso-request { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid #e2e7eb; }
+.admin-sso-request > div { min-width: 0; display: grid; gap: 5px; padding: 16px 20px; }
+.admin-sso-request > div + div { border-left: 1px solid #e2e7eb; }
+.admin-sso-request span, .admin-sso-request small { color: #6d7983; font-size: 11px; }
+.admin-sso-request strong { overflow: hidden; color: #1e2a34; font-size: 13px; text-overflow: ellipsis; text-transform: capitalize; }
+.admin-sso-values { margin: 20px; border: 1px solid #d9e0e6; }
+.admin-sso-values > div { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 42px; border-top: 1px solid #e2e7eb; }
+.admin-sso-values > div:first-child { border-top: 0; }
+.admin-sso-values dt, .admin-sso-values dd { margin: 0; padding: 10px 12px; overflow-wrap: anywhere; font-size: 12px; }
+.admin-sso-values dt { background: #f7f8fa; color: #52616d; font-weight: 700; }
+.admin-sso-values dd { color: #1e2a34; font-family: Consolas, monospace; }
 .admin-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 20px; }
 .admin-form-grid label, .admin-user-form label { display: grid; gap: 7px; color: #3c4a55; font-size: 12px; font-weight: 700; }
 .admin-span-2 { grid-column: 1 / -1; }
@@ -152,6 +165,7 @@
   .admin-metric-band { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .admin-metric-band > div { border-bottom: 1px solid #e2e7eb; }
   .admin-billing-layout { grid-template-columns: 1fr; }
+  .admin-sso-layout { grid-template-columns: 1fr; }
   .admin-governance-layout { grid-template-columns: 1fr; }
   .admin-company-list button { display: none; }
   .admin-company-list label { display: grid; gap: 7px; }
@@ -167,6 +181,9 @@
   .admin-metric-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-form-grid { grid-template-columns: 1fr; }
   .admin-retention-preview { grid-template-columns: 1fr; }
+  .admin-sso-request { grid-template-columns: 1fr; }
+  .admin-sso-request > div + div { border-left: 0; border-top: 1px solid #e2e7eb; }
+  .admin-sso-values > div { grid-template-columns: 1fr; }
   .admin-retention-preview > div + div { border-left: 0; border-top: 1px solid #dbe7e1; }
   .admin-span-2 { grid-column: auto; }
   .admin-settings-account { align-items: flex-start; flex-direction: column; }

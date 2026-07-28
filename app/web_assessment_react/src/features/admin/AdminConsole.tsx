@@ -9,7 +9,7 @@ import { supabase } from "../../lib/supabase";
 import { readCompanyLogo } from "../../lib/imageFile";
 import "./AdminConsole.css";
 
-type AdminTab = "overview" | "companies" | "users" | "usage" | "billing" | "governance" | "requests" | "audit" | "settings";
+type AdminTab = "overview" | "companies" | "users" | "usage" | "billing" | "sso" | "governance" | "requests" | "audit" | "settings";
 
 type AccountContext = {
   email: string;
@@ -103,6 +103,33 @@ type Governance = {
   };
 };
 
+type SsoOperation = {
+  provider_id: number;
+  organization_id: number;
+  organization_name: string;
+  region: string;
+  provider: string;
+  domains: string[];
+  idp_metadata_url: string;
+  initial_admin_email: string;
+  enabled: boolean;
+  enforce_for_members: boolean;
+  connection_status: string;
+  connection_id: string;
+  operator_notes: string;
+  last_error: string;
+  registered_at: string | null;
+  verified_at: string | null;
+  verified_by_email: string | null;
+  service_provider: {
+    entity_id: string;
+    metadata_url: string;
+    acs_url: string;
+    name_id_format: string;
+    required_email_claim: string;
+  };
+};
+
 type AuditEvent = {
   id: number;
   organization_id: number;
@@ -155,6 +182,13 @@ const emptyBilling: Billing = {
   notes: "",
 };
 
+const emptySsoOperation = {
+  connection_status: "not_configured",
+  connection_id: "",
+  operator_notes: "",
+  last_error: "",
+};
+
 function formatDate(value: string | null | undefined) {
   if (!value) return "--";
   const date = new Date(value);
@@ -188,6 +222,7 @@ export function AdminConsole() {
   const [companyLogoError, setCompanyLogoError] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null);
   const [billingForm, setBillingForm] = useState<Billing>(emptyBilling);
+  const [ssoForm, setSsoForm] = useState(emptySsoOperation);
   const [governanceForm, setGovernanceForm] = useState(emptyGovernance);
   const [auditAction, setAuditAction] = useState("");
   const [auditProviderId, setAuditProviderId] = useState<number | null>(null);
@@ -220,6 +255,11 @@ export function AdminConsole() {
     queryFn: async () => (await api.get<Governance>(`/admin/workspace/companies/${selectedProviderId}/governance`)).data,
     enabled: Boolean(selectedProviderId) && tab === "governance",
   });
+  const ssoConnections = useQuery({
+    queryKey: ["admin-sso-connections"],
+    queryFn: async () => (await api.get<{ items: SsoOperation[] }>("/admin/workspace/sso-connections")).data.items,
+    enabled: tab === "sso",
+  });
   const auditEvents = useQuery({
     queryKey: ["admin-audit-events", auditProviderId, auditAction],
     queryFn: async () => {
@@ -246,6 +286,10 @@ export function AdminConsole() {
     if (!needle) return users.data || [];
     return (users.data || []).filter((user) => `${user.full_name} ${user.email} ${user.company_name}`.toLowerCase().includes(needle));
   }, [search, users.data]);
+  const selectedSso = useMemo(
+    () => ssoConnections.data?.find((item) => item.provider_id === selectedProviderId),
+    [selectedProviderId, ssoConnections.data],
+  );
 
   useEffect(() => {
     if (!selectedProviderId && companies.data?.length) setSelectedProviderId(companies.data[0].provider_id);
@@ -266,6 +310,14 @@ export function AdminConsole() {
     const company = companies.data?.find((item) => item.provider_id === selectedProviderId);
     if (company) setBillingForm({ ...company.billing, billing_email: company.billing.billing_email || company.owner_email, notes: company.billing.notes || "" });
   }, [companies.data, selectedProviderId]);
+  useEffect(() => {
+    setSsoForm(selectedSso ? {
+      connection_status: selectedSso.connection_status,
+      connection_id: selectedSso.connection_id,
+      operator_notes: selectedSso.operator_notes,
+      last_error: selectedSso.last_error,
+    } : emptySsoOperation);
+  }, [selectedSso]);
 
   const createCompany = useMutation({
     mutationFn: async () => (await api.post("/admin/workspace/companies", newCompany)).data as { business_name: string; email: string },
@@ -326,6 +378,18 @@ export function AdminConsole() {
       ]);
     },
   });
+  const saveSsoOperation = useMutation({
+    mutationFn: async () => {
+      if (!selectedProviderId) throw new Error("Select a company.");
+      return (await api.put<SsoOperation>(`/admin/workspace/companies/${selectedProviderId}/sso`, ssoForm)).data;
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["admin-sso-connections"] }),
+        qc.invalidateQueries({ queryKey: ["admin-audit-events"] }),
+      ]);
+    },
+  });
   const createDataRequest = useMutation({
     mutationFn: async () => (await api.post("/admin/workspace/data-requests", { ...newRequest, provider_id: Number(newRequest.provider_id) })).data,
     onSuccess: async () => {
@@ -381,6 +445,7 @@ export function AdminConsole() {
     users: ["Users", "Provision recruiter accounts and control access."],
     usage: ["Usage", "Track assessment delivery and completion by company."],
     billing: ["Billing", "Maintain plans, allowances, pricing, and billing periods."],
+    sso: ["SSO operations", "Provision and monitor organization SAML connections by region."],
     governance: ["Data governance", "Configure retention schedules and organization-wide legal holds."],
     requests: ["Data requests", "Verify and complete candidate access, export, and deletion requests."],
     audit: ["Audit trail", "Search tenant actions without impersonating customer users."],
@@ -394,8 +459,8 @@ export function AdminConsole() {
       <aside className="admin-rail">
         <div className="admin-brand"><BrandLogo className="workspace-brand-logo" /><div><strong>Valases</strong><small>Administration</small></div></div>
         <nav aria-label="Administration">
-          {(["overview", "companies", "users", "usage", "billing", "governance", "requests", "audit", "settings"] as AdminTab[]).map((item) => (
-            <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>
+          {(["overview", "companies", "users", "usage", "billing", "sso", "governance", "requests", "audit", "settings"] as AdminTab[]).map((item) => (
+            <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item === "sso" ? "SSO" : item[0].toUpperCase() + item.slice(1)}</button>
           ))}
         </nav>
         <div className="admin-account">
@@ -482,6 +547,46 @@ export function AdminConsole() {
                 <label className="admin-span-2">Internal notes<textarea rows={4} value={billingForm.notes || ""} onChange={(event) => setBillingForm((value) => ({ ...value, notes: event.target.value }))} /></label>
               </div>
               <div className="admin-form-actions"><button className="admin-primary" type="submit" disabled={saveBilling.isPending || !selectedProviderId}>{saveBilling.isPending ? "Saving..." : "Save billing"}</button>{saveBilling.isSuccess && <span>Billing account updated.</span>}{saveBilling.isError && <span className="admin-error-inline">{apiMessage(saveBilling.error, "Billing could not be updated.")}</span>}</div>
+            </form>
+          </section>
+        )}
+
+        {tab === "sso" && (
+          <section className="admin-sso-layout">
+            <aside className="admin-company-list">
+              <label>Company<select value={selectedProviderId || ""} onChange={(event) => setSelectedProviderId(Number(event.target.value))}>{(ssoConnections.data || []).map((item) => <option key={item.provider_id} value={item.provider_id}>{item.organization_name}</option>)}</select></label>
+              {(ssoConnections.data || []).map((item) => <button type="button" key={item.provider_id} className={selectedProviderId === item.provider_id ? "active" : ""} onClick={() => setSelectedProviderId(item.provider_id)}><strong>{item.organization_name}</strong><small>{item.region} | {item.connection_status.replace(/_/g, " ")}</small></button>)}
+            </aside>
+            <form className="admin-section admin-sso-form" onSubmit={(event) => { event.preventDefault(); saveSsoOperation.mutate(); }}>
+              <div className="admin-section-head"><div><h2>Connection provisioning</h2><p>Internal SAML registration and regional service-provider details.</p></div>{selectedSso && <span className={`admin-state state-${selectedSso.connection_status}`}>{selectedSso.connection_status.replace(/_/g, " ")}</span>}</div>
+              {!selectedSso && !ssoConnections.isLoading && <div className="admin-empty-row">No provisioned company is available.</div>}
+              {selectedSso && <>
+                <div className="admin-sso-request">
+                  <div><span>Organization</span><strong>{selectedSso.organization_name}</strong><small>{selectedSso.region} region</small></div>
+                  <div><span>Identity provider</span><strong>{selectedSso.provider ? selectedSso.provider.replace(/_/g, " ") : "Not submitted"}</strong><small>{selectedSso.domains.join(", ") || "No domains submitted"}</small></div>
+                  <div><span>IT administrator</span><strong>{selectedSso.initial_admin_email || "Not submitted"}</strong><small>{selectedSso.idp_metadata_url ? "Metadata received" : "Metadata required"}</small></div>
+                </div>
+                <dl className="admin-sso-values">
+                  <div><dt>Entity ID</dt><dd>{selectedSso.service_provider.entity_id || "Regional Supabase project is not configured"}</dd></div>
+                  <div><dt>ACS / Reply URL</dt><dd>{selectedSso.service_provider.acs_url || "Regional Supabase project is not configured"}</dd></div>
+                  <div><dt>Metadata URL</dt><dd>{selectedSso.service_provider.metadata_url || "Regional Supabase project is not configured"}</dd></div>
+                  <div><dt>Identity-provider metadata</dt><dd>{selectedSso.idp_metadata_url || "Awaiting customer submission"}</dd></div>
+                  <div><dt>NameID / claim</dt><dd>{selectedSso.service_provider.name_id_format} | {selectedSso.service_provider.required_email_claim}</dd></div>
+                </dl>
+                <div className="admin-form-grid">
+                  <label>Provisioning status<select value={ssoForm.connection_status} onChange={(event) => setSsoForm((value) => ({ ...value, connection_status: event.target.value }))}>
+                    <option value="not_configured">Not configured</option>
+                    <option value="registration_pending">Registration pending</option>
+                    <option value="registered">Registered</option>
+                    {selectedSso.connection_status === "verified" && <option value="verified">Verified by SAML login</option>}
+                    <option value="error">Provisioning error</option>
+                  </select></label>
+                  <label>Supabase connection ID<input value={ssoForm.connection_id} onChange={(event) => setSsoForm((value) => ({ ...value, connection_id: event.target.value }))} placeholder="SSO connection identifier" /></label>
+                  <label className="admin-span-2">Operator notes<textarea rows={3} value={ssoForm.operator_notes} onChange={(event) => setSsoForm((value) => ({ ...value, operator_notes: event.target.value }))} placeholder="Registration, customer handoff, and verification notes" /></label>
+                  {ssoForm.connection_status === "error" && <label className="admin-span-2">Provisioning error<textarea required rows={3} value={ssoForm.last_error} onChange={(event) => setSsoForm((value) => ({ ...value, last_error: event.target.value }))} /></label>}
+                </div>
+                <div className="admin-form-actions"><button className="admin-primary" type="submit" disabled={saveSsoOperation.isPending}>{saveSsoOperation.isPending ? "Saving..." : "Save provisioning status"}</button>{saveSsoOperation.isSuccess && <span>SSO operations record updated.</span>}{saveSsoOperation.isError && <span className="admin-error-inline">{apiMessage(saveSsoOperation.error, "SSO provisioning could not be updated.")}</span>}</div>
+              </>}
             </form>
           </section>
         )}

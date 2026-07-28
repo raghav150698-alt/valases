@@ -355,6 +355,7 @@ class HiringWorkspaceTest(unittest.TestCase):
         )
         self.assertEqual(sso["provider"], "wso2")
         self.assertEqual(sso["initial_admin_email"], "founders@edutripindia.com")
+        self.assertNotIn("service_provider", sso)
 
     def test_passing_linked_assessment_advances_candidate_to_interview(self) -> None:
         workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)

@@ -1407,8 +1407,6 @@ def get_sso_configuration(
     organization, membership = _organization_context(db, current_user, organization_id)
     _require_permission(current_user, membership, "sso.manage")
     sso = dict((organization.settings_json or {}).get("sso") or {})
-    supabase_url = str(get_settings().supabase_url or "").strip().rstrip("/")
-    metadata_url = f"{supabase_url}/auth/v1/sso/saml/metadata" if supabase_url.startswith("https://") else ""
     connection_status = str(sso.get("connection_status") or "not_configured")
     provider = {"azure_ad": "microsoft_entra", "generic_saml": "other_saml"}.get(
         str(sso.get("provider") or ""),
@@ -1423,14 +1421,6 @@ def get_sso_configuration(
         "enforce_for_members": bool(sso.get("enforce_for_members")),
         "connection_status": connection_status,
         "status": "active" if sso.get("enabled") else connection_status,
-        "service_provider": {
-            "entity_id": metadata_url,
-            "metadata_url": metadata_url,
-            "metadata_download_url": f"{metadata_url}?download=true" if metadata_url else "",
-            "acs_url": f"{supabase_url}/auth/v1/sso/saml/acs" if supabase_url.startswith("https://") else "",
-            "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
-            "required_email_claim": "email",
-        },
     }
 
 
@@ -1465,19 +1455,34 @@ def update_sso_configuration(
         str(existing_sso.get("provider") or ""),
         str(existing_sso.get("provider") or ""),
     )
-    verified = (
-        existing_sso.get("connection_status") == "verified"
-        and existing_provider == payload.provider
+    configuration_unchanged = (
+        existing_provider == payload.provider
         and sorted(str(domain).strip().lower() for domain in existing_sso.get("domains") or []) == domains
         and str(existing_sso.get("idp_metadata_url") or "").strip() == metadata_url
     )
+    verified = existing_sso.get("connection_status") == "verified" and configuration_unchanged
     if payload.enabled and not verified:
         raise HTTPException(status_code=409, detail="Complete a successful SAML test login before enabling SSO")
     if payload.enforce_for_members and not payload.enabled:
         raise HTTPException(status_code=422, detail="Enable SSO before requiring it for organization members")
-    connection_status = "verified" if verified else ("ready_for_registration" if metadata_url else "metadata_required")
+    previous_status = str(existing_sso.get("connection_status") or "")
+    connection_status = (
+        "verified"
+        if verified
+        else previous_status
+        if configuration_unchanged and previous_status in {"registration_pending", "registered", "error"}
+        else "ready_for_registration"
+        if metadata_url
+        else "metadata_required"
+    )
+    operator_state = {
+        key: existing_sso.get(key)
+        for key in ("connection_id", "operator_notes", "last_error", "registered_at", "registered_by_user_id")
+        if configuration_unchanged and existing_sso.get(key) is not None
+    }
     settings_json = dict(organization.settings_json or {})
     settings_json["sso"] = {
+        **operator_state,
         "provider": payload.provider,
         "domains": domains,
         "idp_metadata_url": metadata_url,

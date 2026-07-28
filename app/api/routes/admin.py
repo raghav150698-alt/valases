@@ -96,6 +96,13 @@ class GovernanceSettingsUpdate(BaseModel):
     legal_hold_reason: str = Field(default="", max_length=2000)
 
 
+class SsoOperationUpdate(BaseModel):
+    connection_status: Literal["not_configured", "registration_pending", "registered", "verified", "error"]
+    connection_id: str = Field(default="", max_length=240)
+    operator_notes: str = Field(default="", max_length=5000)
+    last_error: str = Field(default="", max_length=5000)
+
+
 class DataSubjectRequestCreate(BaseModel):
     provider_id: int = Field(gt=0)
     request_type: Literal["access", "export", "delete"]
@@ -194,6 +201,39 @@ def _governance_payload(organization: Organization) -> dict:
     settings = dict(organization.settings_json or {})
     governance = {**_DEFAULT_GOVERNANCE_SETTINGS, **dict(settings.get("governance") or {})}
     return {"organization_id": organization.id, "organization_name": organization.name, **governance}
+
+
+def _sso_operation_payload(provider: ProviderProfile, organization: Organization) -> dict:
+    sso = dict((organization.settings_json or {}).get("sso") or {})
+    settings = get_settings()
+    supabase_url = str(settings.supabase_url or "").strip().rstrip("/")
+    metadata_url = f"{supabase_url}/auth/v1/sso/saml/metadata" if supabase_url.startswith("https://") else ""
+    return {
+        "provider_id": provider.id,
+        "organization_id": organization.id,
+        "organization_name": organization.name,
+        "region": settings.deployment_region,
+        "provider": str(sso.get("provider") or ""),
+        "domains": list(sso.get("domains") or []),
+        "idp_metadata_url": str(sso.get("idp_metadata_url") or ""),
+        "initial_admin_email": str(sso.get("initial_admin_email") or ""),
+        "enabled": bool(sso.get("enabled")),
+        "enforce_for_members": bool(sso.get("enforce_for_members")),
+        "connection_status": str(sso.get("connection_status") or "not_configured"),
+        "connection_id": str(sso.get("connection_id") or ""),
+        "operator_notes": str(sso.get("operator_notes") or ""),
+        "last_error": str(sso.get("last_error") or ""),
+        "registered_at": sso.get("registered_at"),
+        "verified_at": sso.get("verified_at"),
+        "verified_by_email": sso.get("verified_by_email"),
+        "service_provider": {
+            "entity_id": metadata_url,
+            "metadata_url": metadata_url,
+            "acs_url": f"{supabase_url}/auth/v1/sso/saml/acs" if supabase_url.startswith("https://") else "",
+            "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+            "required_email_claim": "email",
+        },
+    }
 
 
 def _data_subject_request_payload(item: DataSubjectRequest, organization_name: str) -> dict:
@@ -429,6 +469,85 @@ def admin_workspace_companies(
             "billing": _billing_payload(billing, provider),
         })
     return {"items": items, "total": len(items)}
+
+
+@router.get("/workspace/sso-connections")
+def admin_workspace_sso_connections(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    del current_user
+    rows = db.execute(
+        select(ProviderProfile, User)
+        .join(User, User.id == ProviderProfile.user_id)
+        .order_by(ProviderProfile.created_at.desc()),
+    ).all()
+    items = []
+    for provider, owner in rows:
+        organization = _organization_for_owner(db, owner)
+        if organization:
+            items.append(_sso_operation_payload(provider, organization))
+    return {"items": items, "total": len(items)}
+
+
+@router.put("/workspace/companies/{provider_id}/sso")
+def admin_workspace_update_sso(
+    provider_id: int,
+    payload: SsoOperationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    provider = db.get(ProviderProfile, provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Company not found")
+    owner = db.get(User, provider.user_id)
+    organization = _organization_for_owner(db, owner) if owner else None
+    if not organization:
+        raise HTTPException(status_code=409, detail="Company organization is not provisioned. Run the organization backfill command.")
+    settings_json = dict(organization.settings_json or {})
+    sso = dict(settings_json.get("sso") or {})
+    connection_id = payload.connection_id.strip()
+    operator_notes = payload.operator_notes.strip()
+    last_error = payload.last_error.strip()
+    if payload.connection_status in {"registration_pending", "registered"} and not sso.get("idp_metadata_url"):
+        raise HTTPException(status_code=409, detail="The customer must submit identity-provider metadata before registration")
+    if payload.connection_status == "registered" and not connection_id:
+        raise HTTPException(status_code=422, detail="Record the Supabase SSO connection ID before marking registration complete")
+    if payload.connection_status == "error" and not last_error:
+        raise HTTPException(status_code=422, detail="Record the provisioning error before marking the connection as failed")
+    if payload.connection_status == "verified" and sso.get("connection_status") != "verified":
+        raise HTTPException(status_code=409, detail="Only a successful customer SAML login can verify the connection")
+    sso.update({
+        "connection_status": payload.connection_status,
+        "connection_id": connection_id,
+        "operator_notes": operator_notes,
+        "last_error": last_error if payload.connection_status == "error" else "",
+        "registered_at": (
+            sso.get("registered_at") or datetime.now(timezone.utc).isoformat()
+            if payload.connection_status in {"registered", "verified"}
+            else sso.get("registered_at")
+        ),
+        "registered_by_user_id": current_user.id,
+        "operator_updated_at": datetime.now(timezone.utc).isoformat(),
+    })
+    settings_json["sso"] = sso
+    organization.settings_json = settings_json
+    db.add(
+        OrganizationAuditEvent(
+            organization_id=organization.id,
+            actor_user_id=current_user.id,
+            action="sso_operator_status_updated",
+            target_type="organization",
+            target_id=organization.id,
+            details_json={
+                "provider_id": provider.id,
+                "connection_status": payload.connection_status,
+                "connection_id_recorded": bool(connection_id),
+            },
+        ),
+    )
+    db.commit()
+    return _sso_operation_payload(provider, organization)
 
 
 @router.get("/workspace/companies/{provider_id}/governance")
