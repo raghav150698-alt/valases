@@ -43,12 +43,12 @@ class DesktopSessionTest(unittest.TestCase):
             enable_desktop_app_sessions=True,
             desktop_session_broker_mode="mock",
             desktop_session_gateway_origin="http://127.0.0.1:16080",
-            desktop_app_assignments_json='{"accounting":"quickbooks"}',
+            desktop_app_assignments_json='{"accounting":"ledgebook"}',
             desktop_app_catalog_json=(
-                '{"quickbooks":{"display_name":"QuickBooks Desktop",'
-                '"provider_application_id":"quickbooks-remoteapp","enabled":true}}'
+                '{"ledgebook":{"display_name":"LedgeBook",'
+                '"provider_application_id":"ledgebook-remoteapp","enabled":true}}'
             ),
-            desktop_license_attestations_json='{"quickbooks":{"approved":true,"reference":"test-license"}}',
+            desktop_license_attestations_json='{"ledgebook":{"approved":true,"reference":"test-license"}}',
         )
         issuer = User(
             email="provider@example.com",
@@ -71,7 +71,7 @@ class DesktopSessionTest(unittest.TestCase):
         self.db.flush()
         exam = Exam(
             course_id=course.id,
-            title="QuickBooks assessment",
+            title="LedgeBook assessment",
             assessment_type=AssessmentType.ACCOUNTING.value,
             duration_minutes=60,
             status=ExamStatus.PUBLISHED,
@@ -127,7 +127,7 @@ class DesktopSessionTest(unittest.TestCase):
 
         self.assertEqual(first["session_id"], first_reconnect["session_id"])
         self.assertNotEqual(first["session_id"], second["session_id"])
-        self.assertEqual(first["app_key"], "quickbooks")
+        self.assertEqual(first["app_key"], "ledgebook")
         sessions = list(self.db.scalars(select(DesktopAppSession).order_by(DesktopAppSession.issue_id)).all())
         self.assertEqual(len(sessions), 2)
         self.assertEqual({item.issue_id for item in sessions}, {self.issue_one.id, self.issue_two.id})

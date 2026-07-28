@@ -78,6 +78,7 @@ export function IssuedCandidatePanel() {
   const [completion, setCompletion] = useState<{ title: string; message: string } | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isAcceptingConsent, setIsAcceptingConsent] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [welcomeCompleted, setWelcomeCompleted] = useState(false);
   const [briefingState, setBriefingState] = useState<"idle" | "playing" | "completed" | "error">("idle");
   const [briefingError, setBriefingError] = useState("");
@@ -288,12 +289,27 @@ export function IssuedCandidatePanel() {
 
   const finishCandidateSession = useCallback((title: string, message: string) => {
     submittingRef.current = true;
+    setIsSubmitting(false);
     setPolicyWarning(null);
     stopGazeProctor();
     setCompletion({ title, message });
     setPaper(null);
     if (document.fullscreenElement) void document.exitFullscreen();
   }, [stopGazeProctor]);
+
+  const beginSubmission = () => {
+    if (submittingRef.current) return false;
+    submittingRef.current = true;
+    setStatus("");
+    setIsSubmitting(true);
+    return true;
+  };
+
+  const failSubmission = () => {
+    submittingRef.current = false;
+    setIsSubmitting(false);
+    setStatus("Submission failed. Check your connection and try again.");
+  };
 
   const buildSubmittedData = useCallback((): Record<string, unknown> => {
     if (!paper) return {};
@@ -347,8 +363,7 @@ export function IssuedCandidatePanel() {
   }, [accountingSubmission, corporateTaxSubmission, desktopSession.sessionId, excelSubmission, paper, taskFileLink, taskResponse, taxSubmission]);
 
   const submit = async (endReason: "fullscreen" | "policy" | "manual" | null = null) => {
-    if (!paper || submittingRef.current) return;
-    submittingRef.current = true;
+    if (!paper || !beginSubmission()) return;
     const submittedData = buildSubmittedData();
     try {
       const response = await issuedApi<{ status: string; message: string }>("POST", "/exams/issued/submit", {
@@ -380,8 +395,7 @@ export function IssuedCandidatePanel() {
             : "This session is now closed. Your recorded work and integrity activity will be reviewed.",
         );
       } else {
-        submittingRef.current = false;
-        setStatus("Submission failed. Check your connection and try again.");
+        failSubmission();
       }
     }
   };
@@ -490,7 +504,17 @@ export function IssuedCandidatePanel() {
   }
 
   return (
-    <section className={paper && consentAccepted ? "issued-assessment-runtime" : paper ? "candidate-entry-container" : "candidate-login-surface"}>
+    <section
+      className={paper && consentAccepted ? "issued-assessment-runtime" : paper ? "candidate-entry-container" : "candidate-login-surface"}
+      aria-busy={isSubmitting}
+    >
+      {isSubmitting && (
+        <div className="assessment-submit-overlay" role="status" aria-live="assertive">
+          <span className="assessment-submit-spinner" aria-hidden="true" />
+          <strong>Submitting assessment</strong>
+          <span>Saving your work. Please keep this window open.</span>
+        </div>
+      )}
       {!paper ? (
         <div className="candidate-login-layout">
           <div className="candidate-login-intro">
@@ -677,8 +701,7 @@ export function IssuedCandidatePanel() {
                 onAutosave={(submission) => setExcelSubmission(submission)}
                 onSubmit={async (submission) => {
                   if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
-                  if (submittingRef.current) return;
-                  submittingRef.current = true;
+                  if (!beginSubmission()) return;
                   setExcelSubmission(submission);
                   try {
                     await issuedApi<{ status: string }>("POST", "/exams/issued/submit", {
@@ -690,8 +713,7 @@ export function IssuedCandidatePanel() {
                     });
                     finishCandidateSession("Assessment submitted", "Thank you. Your assessment was submitted successfully for recruiter review.");
                   } catch {
-                    submittingRef.current = false;
-                    setStatus("Submission failed. Check your connection and try again.");
+                    failSubmission();
                   }
                 }}
               />
@@ -710,8 +732,7 @@ export function IssuedCandidatePanel() {
                   onAutosave={setAccountingSubmission}
                   onSubmit={async (submission) => {
                     if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
-                    if (submittingRef.current) return;
-                    submittingRef.current = true;
+                    if (!beginSubmission()) return;
                     setAccountingSubmission(submission);
                     try {
                       const response = await issuedApi<{ status: string; message?: string }>("POST", "/exams/issued/submit", {
@@ -726,8 +747,7 @@ export function IssuedCandidatePanel() {
                       });
                       finishCandidateSession("Assessment submitted", response.message || "Thank you. Your assessment was submitted successfully for recruiter review.");
                     } catch {
-                      submittingRef.current = false;
-                      setStatus("Submission failed. Check your connection and try again.");
+                      failSubmission();
                     }
                   }}
                 />
@@ -747,8 +767,7 @@ export function IssuedCandidatePanel() {
                   onAutosave={setTaxSubmission}
                   onSubmit={async (submission) => {
                     if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
-                    if (submittingRef.current) return;
-                    submittingRef.current = true;
+                    if (!beginSubmission()) return;
                     setTaxSubmission(submission);
                     try {
                       const response = await issuedApi<{ status: string; message?: string }>("POST", "/exams/issued/submit", {
@@ -763,8 +782,7 @@ export function IssuedCandidatePanel() {
                       });
                       finishCandidateSession("Assessment submitted", response.message || "Thank you. Your assessment was submitted successfully for recruiter review.");
                     } catch {
-                      submittingRef.current = false;
-                      setStatus("Submission failed. Check your connection and try again.");
+                      failSubmission();
                     }
                   }}
                 />
@@ -784,8 +802,7 @@ export function IssuedCandidatePanel() {
                   onAutosave={setCorporateTaxSubmission}
                   onSubmit={async (submission) => {
                     if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
-                    if (submittingRef.current) return;
-                    submittingRef.current = true;
+                    if (!beginSubmission()) return;
                     setCorporateTaxSubmission(submission);
                     try {
                       const response = await issuedApi<{ status: string; message?: string }>("POST", "/exams/issued/submit", {
@@ -800,8 +817,7 @@ export function IssuedCandidatePanel() {
                       });
                       finishCandidateSession("Assessment submitted", response.message || "Thank you. Your assessment was submitted successfully for recruiter review.");
                     } catch {
-                      submittingRef.current = false;
-                      setStatus("Submission failed. Check your connection and try again.");
+                      failSubmission();
                     }
                   }}
                 />

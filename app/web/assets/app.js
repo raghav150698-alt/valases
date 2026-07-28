@@ -12112,7 +12112,7 @@ function renderAccountsSimMain(tab = "Dashboard") {
       <div class="sim-workflow-grid">
         <section class="sim-card">
           <div class="sim-card-head"><strong>Invoice</strong><span>#INV-1048</span></div>
-          <div class="qb-invoice">
+          <div class="accounting-invoice">
             <label>Customer<input data-account-field="customer" value="${escapeHtmlAttr(d.customer)}" /></label>
             <label>Service<input data-account-field="invoiceService" value="${escapeHtmlAttr(d.invoiceService)}" /></label>
             <label>Amount<input data-account-field="invoiceAmount" value="${d.invoiceAmount}" /></label>

@@ -12,7 +12,7 @@ import httpx
 from app.core.config import Settings, get_settings
 
 
-SUPPORTED_DESKTOP_APPS = {"excel", "quickbooks", "drake_tax"}
+SUPPORTED_DESKTOP_APPS = {"excel", "ledgebook", "drake_tax"}
 
 
 class DesktopSessionBrokerError(RuntimeError):

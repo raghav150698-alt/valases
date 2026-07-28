@@ -1,3 +1,5 @@
+import { BookOpenCheck } from "lucide-react";
+
 type AssessmentToolIconProps = {
   assessmentType?: string;
   title?: string;
@@ -12,7 +14,7 @@ function toolKind({ assessmentType = "", title = "", toolName = "" }: Assessment
   if (value.includes("tax_simulator") || value.includes("1040") || value.includes("individual tax")) return "tax-1040";
   if (value.includes("tax")) return "tax-1040";
   if (value.includes("coding") || value.includes("code") || value.includes("developer")) return "vscode";
-  if (value.includes("account") || value.includes("bookkeep") || value.includes("gnucash")) return "quickbooks";
+  if (value.includes("account") || value.includes("bookkeep") || value.includes("gnucash") || value.includes("ledgebook")) return "ledgebook";
   return "tools";
 }
 
@@ -25,10 +27,12 @@ export function AssessmentToolIcon(props: AssessmentToolIconProps) {
   if (kind === "tax-1040" || kind === "tax-1120") {
     return <span className={className} role="img" aria-label={kind === "tax-1040" ? "1040 Individual Tax" : "1120 Corporate Tax"}><span>{kind === "tax-1040" ? "1040" : "1120"}</span></span>;
   }
-  const labels: Record<string, string> = { excel: "Microsoft Excel", quickbooks: "QuickBooks", vscode: "Visual Studio Code" };
+  if (kind === "ledgebook") {
+    return <span className={className} role="img" aria-label="LedgeBook"><BookOpenCheck aria-hidden="true" /></span>;
+  }
+  const labels: Record<string, string> = { excel: "Microsoft Excel", vscode: "Visual Studio Code" };
   const assets: Record<string, string> = {
     excel: "excel-official.svg",
-    quickbooks: "quickbooks-official.svg",
     vscode: "vscode.png",
   };
   const base = String(import.meta.env.BASE_URL || "/").replace(/\/?$/, "/");

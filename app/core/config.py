@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     desktop_session_timeout_seconds: int = 10800
     desktop_session_heartbeat_seconds: int = 30
     desktop_session_broker_timeout_seconds: int = 20
-    desktop_app_assignments_json: str = '{"spreadsheet":"excel","accounting":"quickbooks","tax_simulator":"drake_tax"}'
+    desktop_app_assignments_json: str = '{"spreadsheet":"excel","accounting":"ledgebook","tax_simulator":"drake_tax"}'
     desktop_app_catalog_json: str = "{}"
     desktop_license_attestations_json: str = "{}"
     enforce_production_security: bool = True

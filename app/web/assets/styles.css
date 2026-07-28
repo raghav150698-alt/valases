@@ -3773,13 +3773,13 @@ body.sim-workspace-open {
   color: #047857;
 }
 .tax-input-grid,
-.qb-invoice {
+.accounting-invoice {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 .tax-input-grid label,
-.qb-invoice label {
+.accounting-invoice label {
   display: grid;
   gap: 6px;
   border: 1px solid #d9e5f1;
@@ -3793,7 +3793,7 @@ body.sim-workspace-open {
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.035);
 }
 .tax-input-grid input,
-.qb-invoice input {
+.accounting-invoice input {
   width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 7px;
@@ -3804,7 +3804,7 @@ body.sim-workspace-open {
   font-weight: 600;
 }
 .tax-input-grid input:focus,
-.qb-invoice input:focus {
+.accounting-invoice input:focus {
   outline: none;
   border-color: #78a9d4;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
@@ -4214,7 +4214,7 @@ body.sim-workspace-open {
   .sim-workflow-grid,
   .sim-shell-grid,
   .tax-input-grid,
-  .qb-invoice {
+  .accounting-invoice {
     grid-template-columns: 1fr;
   }
   .sim-client-bar {

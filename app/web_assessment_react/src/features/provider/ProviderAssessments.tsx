@@ -698,7 +698,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
               {([
                 ["spreadsheet", "Microsoft Excel"],
                 ["coding", "Visual Studio Code"],
-                ["accounting", "QuickBooks"],
+                ["accounting", "LedgeBook"],
                 ["tax_simulator", "1040 Individual Tax"],
                 ["tax_1120", "1120 Corporate Tax"],
               ] as Array<[Exclude<AssessmentToolFilter, "all">, string]>).map(([assessmentType, label]) => (
