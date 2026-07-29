@@ -1017,6 +1017,15 @@ body { margin: 0; background: #f6f8fb; }
   white-space: nowrap;
 }
 .workspace-new-btn svg { width: 17px; height: 17px; }
+.workspace-button-spinner {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: workspace-spin .72s linear infinite;
+}
 .workspace-dashboard,
 .workspace-custom-grid,
 .workspace-assessment-grid,
@@ -1184,6 +1193,47 @@ body { margin: 0; background: #f6f8fb; }
 .issued-list-panel {
   display: grid;
   gap: 10px;
+}
+.workspace-skeleton {
+  display: grid;
+  gap: 10px;
+}
+.workspace-skeleton-row {
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 82px 74px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 2px;
+  border-top: 1px solid #edf2f5;
+}
+.workspace-skeleton-row:first-child { border-top: 0; }
+.workspace-skeleton-row span,
+.workspace-skeleton-row i {
+  display: block;
+  overflow: hidden;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #eef3f1 0%, #f8fbfa 42%, #e7efec 78%);
+  background-size: 220% 100%;
+  animation: workspace-skeleton-shimmer 1.1s ease-in-out infinite;
+}
+.workspace-skeleton-row .workspace-skeleton-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+.workspace-skeleton-row div {
+  display: grid;
+  gap: 8px;
+}
+.workspace-skeleton-row i:first-child { width: min(260px, 80%); height: 13px; }
+.workspace-skeleton-row i:last-child { width: min(190px, 65%); height: 10px; }
+.workspace-skeleton-row > span:not(.workspace-skeleton-icon) {
+  width: 100%;
+  height: 18px;
+}
+.workspace-skeleton-cards {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 .assessment-table-row,
 .issued-list-row {
@@ -1443,6 +1493,10 @@ body { margin: 0; background: #f6f8fb; }
 }
 .issued-list-actions button {
   min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 0 10px;
   font-size: 12px;
 }
@@ -1453,6 +1507,8 @@ body { margin: 0; background: #f6f8fb; }
   color: #9f3028;
   font-weight: 700;
 }
+@keyframes workspace-spin { to { transform: rotate(360deg); } }
+@keyframes workspace-skeleton-shimmer { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
 .workspace-overview {
   display: grid;
   gap: 18px;

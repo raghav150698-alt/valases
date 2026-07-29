@@ -785,7 +785,7 @@ async def upload_evidence(
     settings = get_settings()
     if settings.is_production and not settings.enable_proctor_evidence_upload:
         raise HTTPException(status_code=503, detail="Proctor evidence uploads are disabled")
-    if settings.is_production and settings.resolved_object_storage_backend != "s3":
+    if settings.is_production and settings.resolved_object_storage_backend not in {"supabase", "s3"}:
         raise HTTPException(status_code=503, detail="Private evidence storage is not configured")
     max_bytes = max(1024, int(settings.max_proctor_evidence_bytes))
     raw = await file.read(max_bytes + 1)

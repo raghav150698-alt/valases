@@ -187,6 +187,25 @@ function EmptyState({ title, detail, action }: { title: string; detail: string; 
   );
 }
 
+function ButtonBusyLabel({ label }: { label: string }) {
+  return <><span className="workspace-button-spinner" aria-hidden="true" /><span>{label}</span></>;
+}
+
+function WorkspaceSkeleton({ rows = 4, variant = "list" }: { rows?: number; variant?: "list" | "cards" }) {
+  return (
+    <div className={`workspace-skeleton workspace-skeleton-${variant}`} role="status" aria-live="polite" aria-label="Loading content">
+      {Array.from({ length: rows }).map((_, index) => (
+        <div className="workspace-skeleton-row" key={`skeleton-${index}`}>
+          <span className="workspace-skeleton-icon" />
+          <div><i /><i /></div>
+          <span />
+          <span />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function formatDuration(seconds?: number | null) {
   if (!seconds || seconds < 1) return "--";
   const hours = Math.floor(seconds / 3600);
@@ -597,6 +616,8 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   const passRate = scoredResults.length ? (passedResults.length / scoredResults.length) * 100 : 0;
   const pendingReviewCount = issuedRows.filter((row) => row.status === "review_pending").length;
   const activeIssuedRows = filteredIssued.filter((row) => !["review_pending", "reviewed", "completed"].includes(row.status) && row.passed == null);
+  const revokingIssuedId = revokeInvitation.isPending ? revokeInvitation.variables : null;
+  const resendingIssuedId = resendInvitation.isPending ? resendInvitation.variables : null;
   const resultRows = issuedRows.filter((row) => {
     if (!["review_pending", "reviewed", "completed"].includes(row.status) && row.passed == null) return false;
     const assessmentMatches = resultAssessmentFilter === "all" || String(row.exam_id) === resultAssessmentFilter;
@@ -771,7 +792,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 </div>
               </div>
               <div className="assessment-table">
-                {exams.isLoading && <div className="workspace-loading">Loading assessments...</div>}
+                {exams.isLoading && <WorkspaceSkeleton rows={5} />}
                 {exams.isError && <div className="workspace-error">Assessments could not be loaded. Check the service connection and retry.</div>}
                 {filteredAssessments.slice(0, 6).map((assessment) => (
                   <button
@@ -805,6 +826,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 </div>
               </div>
               <div className="issued-list-panel">
+                {issued.isLoading && <WorkspaceSkeleton rows={5} />}
                 {filteredIssued.slice(0, 6).map((row) => (
                   <article key={`${row.internal_id}-${row.candidate_email}`} className="issued-list-row">
                     <div>
@@ -820,7 +842,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                           disabled={resendInvitation.isPending}
                           onClick={() => void resendInvitation.mutate(row.issued_id)}
                         >
-                          Resend
+                          {resendingIssuedId === row.issued_id ? <ButtonBusyLabel label="Sending..." /> : "Resend"}
                         </button>
                       )}
                       {["issued", "started"].includes(row.status) && (
@@ -834,7 +856,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                             }
                           }}
                         >
-                          Revoke
+                          {revokingIssuedId === row.issued_id ? <ButtonBusyLabel label="Revoking..." /> : "Revoke"}
                         </button>
                       )}
                     </div>
@@ -855,6 +877,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 <div><h3>Assessment library</h3><p>Open an assessment to edit, publish, or send it.</p></div>
               </div>
               <div className="assessment-library-list">
+                {exams.isLoading && <WorkspaceSkeleton rows={6} />}
                 {filteredAssessments.map((assessment) => (
                   <article className="assessment-library-row" key={assessment.exam_id}>
                     <AssessmentToolIcon assessmentType={assessment.assessment_type} title={assessment.title} />
@@ -876,6 +899,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
             <section className="workspace-surface default-library">
               <div className="workspace-surface-head"><div><h3>Default assessments</h3><p>Challenging templates with answer keys and deterministic scoring checkpoints.</p></div></div>
               <div className="default-assessment-list">
+                {defaultAssessments.isLoading && <WorkspaceSkeleton rows={4} />}
                 {filteredDefaultAssessments.map((template) => (
                   <article className={`default-assessment-row${previewDefaultId === template.id ? " active" : ""}`} key={template.id}>
                     <button type="button" className="default-assessment-main" onClick={() => setPreviewDefaultId((current) => current === template.id ? null : template.id)}>
@@ -884,7 +908,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                     </button>
                     <span>{template.duration_minutes} min</span>
                     <span>{template.question_count ? `${template.question_count} questions` : `${template.checkpoint_count} checkpoints`}</span>
-                    <button type="button" onClick={() => installDefault.mutate(template.id)} disabled={installDefault.isPending}>Add</button>
+                    <button type="button" onClick={() => installDefault.mutate(template.id)} disabled={installDefault.isPending}>{installDefault.isPending && installDefault.variables === template.id ? <ButtonBusyLabel label="Adding..." /> : "Add"}</button>
                   </article>
                 ))}
               </div>
@@ -892,7 +916,6 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 {(defaultAssessmentDetail.data.scoring?.checkpoints || []).length > 0 && <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.scoring?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>Minimum checkpoint score: {checkpoint.threshold}%</small></div>)}</div>}
                 {defaultAssessmentDetail.data.questions ? <ol>{defaultAssessmentDetail.data.questions.map((question, questionIndex) => <li key={`${question.question_text}-${questionIndex}`}><strong>{question.question_text}</strong><span>{question.options.find((option) => option.is_correct)?.option_text || "No answer configured"}</span>{question.competency && <small>{question.competency}{question.difficulty ? ` | ${question.difficulty}` : ""}</small>}</li>)}</ol> : <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.task?.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>{checkpoint.source} = {JSON.stringify(checkpoint.expected)}</small></div>)}</div>}
               </div>}
-              {defaultAssessments.isLoading && <div className="workspace-loading">Loading default assessments...</div>}
               {installDefault.isError && <div className="workspace-error">{apiErrorMessage(installDefault.error, "The default assessment could not be added.")}</div>}
             </section>
 
@@ -948,7 +971,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 <details className="builder-advanced"><summary>Advanced settings</summary><div className="workspace-form-grid compact"><label className="field-stack"><span>Pass score</span><input type="number" min="70" max="100" value={form.pass_score} onChange={(e) => setForm((p) => ({ ...p, pass_score: Number(e.target.value) }))} /></label><label className="field-stack"><span>Maximum attempts</span><input type="number" min="1" max="3" value={form.max_attempts} onChange={(e) => setForm((p) => ({ ...p, max_attempts: Number(e.target.value) }))} /></label></div></details>
               </div>}
 
-              <div className="workspace-form-footer builder-footer">{builderStep < 4 ? <button type="button" onClick={() => setBuilderStep((step) => Math.min(4, step + 1))}>Next</button> : <button onClick={() => createAssessment.mutate()} disabled={createAssessment.isPending || !canCreateAssessment}>{createAssessment.isPending ? "Creating..." : "Create draft"}</button>}</div>
+              <div className="workspace-form-footer builder-footer">{builderStep < 4 ? <button type="button" onClick={() => setBuilderStep((step) => Math.min(4, step + 1))}>Next</button> : <button onClick={() => createAssessment.mutate()} disabled={createAssessment.isPending || !canCreateAssessment}>{createAssessment.isPending ? <ButtonBusyLabel label="Creating..." /> : "Create draft"}</button>}</div>
               {!canCreateAssessment && builderStep === 4 && <div className="workspace-form-note">Complete the required fields{isMcqForm ? "." : " and make checkpoint weights total 100%."}</div>}
               {createAssessment.isError && <div className="workspace-error">{apiErrorMessage(createAssessment.error, "The assessment could not be created. Review the fields and try again.")}</div>}
             </section>}
@@ -1050,10 +1073,10 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   </div>
                   <div className="workspace-form-footer">
                     <button onClick={() => addQuestion.mutate()} disabled={addQuestion.isPending || !canAddQuestion}>
-                      {addQuestion.isPending ? "Adding..." : "Add question"}
+                      {addQuestion.isPending ? <ButtonBusyLabel label="Adding..." /> : "Add question"}
                     </button>
                     <button onClick={() => publish.mutate()} disabled={publish.isPending}>
-                      {publish.isPending ? "Publishing..." : "Publish assessment"}
+                      {publish.isPending ? <ButtonBusyLabel label="Publishing..." /> : "Publish assessment"}
                     </button>
                   </div>
                   {!canAddQuestion && <div className="workspace-form-note">Add a question, at least two options, and mark one correct answer.</div>}
@@ -1067,7 +1090,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   <span>Non-MCQ assessments use their dedicated task workspace. Publish once the setup is ready.</span>
                   <div className="workspace-inline-actions">
                     <button onClick={() => publish.mutate()} disabled={publish.isPending}>
-                      {publish.isPending ? "Publishing..." : "Publish assessment"}
+                      {publish.isPending ? <ButtonBusyLabel label="Publishing..." /> : "Publish assessment"}
                     </button>
                   </div>
                 </div>
@@ -1109,6 +1132,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   <span>Screening candidate</span>
                   <select
                     value={candidateApplicationId ?? ""}
+                    disabled={screeningApplications.isLoading}
                     onChange={(event) => {
                       const application = (screeningApplications.data || []).find((item) => item.id === Number(event.target.value));
                       setCandidateApplicationId(application?.id || null);
@@ -1125,9 +1149,10 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   </select>
                 </label>
               </div>
+              {screeningApplications.isLoading && <WorkspaceSkeleton rows={2} />}
               <div className="workspace-form-footer">
                 <button onClick={() => issueMutation.mutate()} disabled={issueMutation.isPending || !canIssueAssessment}>
-                  {issueMutation.isPending ? "Sending..." : "Send invite"}
+                  {issueMutation.isPending ? <ButtonBusyLabel label="Sending..." /> : "Send invite"}
                 </button>
               </div>
               {!screeningApplications.isLoading && !(screeningApplications.data || []).length && (
@@ -1141,6 +1166,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
             <section className="workspace-surface">
               <div className="workspace-surface-head"><div><h3>Published activity</h3><p>Invitations and assessments that are not yet complete.</p></div></div>
               <div className="published-activity-list">
+                {issued.isLoading && <WorkspaceSkeleton rows={4} />}
                 {activeIssuedRows.map((row) => (
                   <article className="published-activity-row" key={row.issued_id}>
                     <AssessmentToolIcon assessmentType={row.assessment_type} title={row.assessment_title} />
@@ -1148,10 +1174,10 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                     <span>{formatResultDate(row.issued_at)}</span>
                     <StatusBadge value={row.status} />
                     <div className="issued-list-actions">
-                      {["issued", "revoked"].includes(row.status) && <button type="button" className="secondary-btn" disabled={resendInvitation.isPending} onClick={() => void resendInvitation.mutate(row.issued_id)}>Resend</button>}
+                      {["issued", "revoked"].includes(row.status) && <button type="button" className="secondary-btn" disabled={resendInvitation.isPending} onClick={() => void resendInvitation.mutate(row.issued_id)}>{resendingIssuedId === row.issued_id ? <ButtonBusyLabel label="Sending..." /> : "Resend"}</button>}
                       {["issued", "started"].includes(row.status) && <button type="button" className="issued-revoke-btn" disabled={revokeInvitation.isPending} onClick={() => {
                         if (window.confirm("Revoke this invitation and close any active candidate session?")) revokeInvitation.mutate(row.issued_id);
-                      }}>Revoke</button>}
+                      }}>{revokingIssuedId === row.issued_id ? <ButtonBusyLabel label="Revoking..." /> : "Revoke"}</button>}
                     </div>
                   </article>
                 ))}
@@ -1219,7 +1245,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
 
           {reviewIssueId && (
             <div className="result-review-backdrop" role="presentation" onMouseDown={() => setReviewIssueId(null)}>
-            {review.isLoading ? <section className="result-review-drawer workspace-loading" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>Loading candidate result...</section> : review.data ? (
+            {review.isLoading ? <section className="result-review-drawer workspace-loading" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><WorkspaceSkeleton rows={6} /></section> : review.data ? (
             <section className="workspace-surface result-detail-panel result-review-drawer" role="dialog" aria-modal="true" aria-labelledby="candidate-result-title" onMouseDown={(event) => event.stopPropagation()}>
               <div className="workspace-surface-head"><div><h3 id="candidate-result-title">{review.data.candidate_name || review.data.candidate_email}</h3><p>{review.data.assessment_title} | Candidate result detail</p></div><button type="button" className="workspace-icon-btn" aria-label="Close result detail" onClick={() => setReviewIssueId(null)}><X size={17} /></button></div>
               <div className="result-detail-summary">

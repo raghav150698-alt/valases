@@ -16,6 +16,14 @@ class LaunchCheck:
 
 def _storage_configured(settings: Settings) -> bool:
     backend = settings.resolved_object_storage_backend
+    if backend == "supabase":
+        return all(
+            (
+                settings.supabase_url,
+                settings.supabase_secret_key,
+                settings.supabase_storage_bucket,
+            ),
+        )
     if backend == "s3":
         return all(
             (

@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     supabase_url: str = Field(default="", validation_alias=AliasChoices("SUPABASE_URL", "VITE_SUPABASE_URL"))
     supabase_publishable_key: str = Field(default="", validation_alias=AliasChoices("SUPABASE_PUBLISHABLE_KEY", "VITE_SUPABASE_PUBLISHABLE_KEY"))
     supabase_secret_key: str = ""
+    supabase_storage_bucket: str = "candidate-documents"
+    supabase_storage_signed_url_ttl_seconds: int = 3600
     billing_provider: str = "disabled"  # disabled | cashfree
     billing_plan_catalog_json: str = (
         '{"launch":{"name":"Launch","monthly_amount_minor":99900,"currency":"INR",'
@@ -67,7 +69,7 @@ class Settings(BaseSettings):
     cashfree_api_version: str = "2025-01-01"
     integration_oauth_config_json: str = ""
     integration_token_encryption_key: str = ""
-    object_storage_backend: str = "s3"  # s3 | firebase | bunny | local | auto
+    object_storage_backend: str = "s3"  # supabase | s3 | firebase | bunny | local | auto
     aws_region: str = ""
     aws_s3_bucket_name: str = ""
     aws_access_key_id: str = ""
@@ -226,8 +228,11 @@ class Settings(BaseSettings):
     @property
     def resolved_object_storage_backend(self) -> str:
         raw = (self.object_storage_backend or "auto").strip().lower()
-        if raw in {"s3", "firebase", "bunny", "local"}:
+        if raw in {"supabase", "s3", "firebase", "bunny", "local"}:
             return raw
+        has_supabase_storage = bool(self.supabase_url and self.supabase_secret_key and self.supabase_storage_bucket)
+        if has_supabase_storage:
+            return "supabase"
         has_bunny = bool(self.bunny_storage_zone and self.bunny_storage_access_key and self.bunny_storage_pull_zone)
         if has_bunny:
             return "bunny"
@@ -309,8 +314,8 @@ class Settings(BaseSettings):
             errors.append("ENABLE_SERVER_CODE_EXECUTION must be false in the API trust boundary")
         if self.enable_shared_graph_excel:
             errors.append("ENABLE_SHARED_GRAPH_EXCEL must be false until credentials are tenant-scoped")
-        if self.enable_proctor_evidence_upload and self.resolved_object_storage_backend != "s3":
-            errors.append("Proctor evidence uploads require private S3 storage in production")
+        if self.enable_proctor_evidence_upload and self.resolved_object_storage_backend not in {"supabase", "s3"}:
+            errors.append("Proctor evidence uploads require private Supabase Storage or S3 storage in production")
         if self.enable_startup_database_management:
             errors.append("ENABLE_STARTUP_DATABASE_MANAGEMENT must be false in production")
         if self.enable_desktop_app_sessions:

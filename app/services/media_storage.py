@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import http.client
+import json
 import mimetypes
 from pathlib import Path
 import re
@@ -48,6 +49,134 @@ def _s3_client():
         aws_access_key_id=settings.aws_access_key_id,
         aws_secret_access_key=settings.aws_secret_access_key,
     )
+
+
+def _supabase_storage_settings() -> tuple[str, str, str]:
+    settings = get_settings()
+    base_url = str(settings.supabase_url or "").strip().rstrip("/")
+    secret = str(settings.supabase_secret_key or "").strip()
+    bucket = str(settings.supabase_storage_bucket or "").strip()
+    if not (base_url.startswith("https://") and secret and bucket):
+        raise RuntimeError("Supabase Storage settings are incomplete.")
+    return base_url, secret, bucket
+
+
+def _supabase_storage_headers(*, content_type: str = "application/json") -> dict[str, str]:
+    _, secret, _ = _supabase_storage_settings()
+    return {
+        "apikey": secret,
+        "Authorization": f"Bearer {secret}",
+        "Accept": "application/json",
+        "Content-Type": content_type,
+    }
+
+
+def _upload_file_to_supabase_storage(
+    local_path: Path,
+    *,
+    object_path: str,
+    content_type: str | None = None,
+) -> str:
+    if not local_path.exists():
+        raise RuntimeError(f"Local file not found for upload: {local_path}")
+    base_url, _, bucket = _supabase_storage_settings()
+    key = object_path.lstrip("/")
+    ctype = content_type or mimetypes.guess_type(str(local_path))[0] or "application/octet-stream"
+    encoded_key = quote(key, safe="/")
+    parsed = urlparse(base_url)
+    content_length = int(local_path.stat().st_size)
+    conn = http.client.HTTPSConnection(parsed.netloc, timeout=120, context=ssl.create_default_context())
+    try:
+        conn.putrequest("POST", f"/storage/v1/object/{quote(bucket, safe='')}/{encoded_key}")
+        for header, value in _supabase_storage_headers(content_type=ctype).items():
+            conn.putheader(header, value)
+        conn.putheader("x-upsert", "true")
+        conn.putheader("Content-Length", str(content_length))
+        conn.endheaders()
+        with local_path.open("rb") as fh:
+            while True:
+                chunk = fh.read(1024 * 1024)
+                if not chunk:
+                    break
+                conn.send(chunk)
+        resp = conn.getresponse()
+        status = int(getattr(resp, "status", 0) or 0)
+        body_text = (resp.read() or b"").decode("utf-8", errors="ignore")
+        if status not in {200, 201}:
+            raise RuntimeError(f"Supabase Storage upload failed with HTTP {status}: {body_text[:400]}")
+    finally:
+        conn.close()
+    return f"supabase://{bucket}/{key}"
+
+
+def _parse_supabase_ref(storage_ref: str) -> tuple[str, str] | None:
+    raw = str(storage_ref or "").strip()
+    if not raw.startswith("supabase://"):
+        return None
+    ref = raw[len("supabase://"):]
+    parts = ref.split("/", 1)
+    if len(parts) != 2:
+        return None
+    bucket = parts[0].strip()
+    key = parts[1].lstrip("/")
+    if not bucket or not key:
+        return None
+    return bucket, key
+
+
+def _delete_supabase_object(storage_ref: str) -> bool:
+    parsed = _parse_supabase_ref(storage_ref)
+    if not parsed:
+        return False
+    bucket, key = parsed
+    base_url, _, _ = _supabase_storage_settings()
+    payload = json.dumps({"prefixes": [key]}).encode("utf-8")
+    req = request.Request(
+        f"{base_url}/storage/v1/object/{quote(bucket, safe='')}",
+        data=payload,
+        method="DELETE",
+        headers=_supabase_storage_headers(),
+    )
+    try:
+        with request.urlopen(req, timeout=60) as resp:
+            status = int(getattr(resp, "status", 0) or 0)
+            return status in {200, 201, 202, 204}
+    except error.HTTPError as exc:
+        if int(getattr(exc, "code", 0) or 0) == 404:
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def _resolve_supabase_media_url(storage_ref: str, *, expires_in_seconds: int) -> str | None:
+    parsed = _parse_supabase_ref(storage_ref)
+    if not parsed:
+        return None
+    bucket, key = parsed
+    base_url, _, _ = _supabase_storage_settings()
+    settings = get_settings()
+    ttl = max(60, min(int(expires_in_seconds or settings.supabase_storage_signed_url_ttl_seconds), 7 * 24 * 3600))
+    payload = json.dumps({"expiresIn": ttl}).encode("utf-8")
+    req = request.Request(
+        f"{base_url}/storage/v1/object/sign/{quote(bucket, safe='')}/{quote(key, safe='/')}",
+        data=payload,
+        method="POST",
+        headers=_supabase_storage_headers(),
+    )
+    try:
+        with request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        signed_url = str(body.get("signedURL") or body.get("signedUrl") or "").strip()
+        if not signed_url:
+            return None
+        if signed_url.startswith("http://") or signed_url.startswith("https://"):
+            return signed_url
+        if signed_url.startswith("/storage/v1/"):
+            return f"{base_url}{signed_url}"
+        return f"{base_url}/storage/v1{signed_url if signed_url.startswith('/') else '/' + signed_url}"
+    except Exception:
+        return None
 
 
 def _upload_file_to_firebase_storage(
@@ -192,6 +321,8 @@ def upload_file_to_cloud_storage(
     content_type: str | None = None,
 ) -> str:
     backend = get_settings().resolved_object_storage_backend
+    if backend == "supabase":
+        return _upload_file_to_supabase_storage(local_path, object_path=object_path, content_type=content_type)
     if backend == "bunny":
         return _upload_file_to_bunny_storage(local_path, object_path=object_path, content_type=content_type)
     if backend == "s3":
@@ -206,6 +337,8 @@ def delete_storage_reference(value: str | None) -> bool:
     if not raw:
         return False
     try:
+        if raw.startswith("supabase://"):
+            return _delete_supabase_object(raw)
         if raw.startswith("bunny://"):
             return _delete_bunny_object(raw)
         if raw.startswith("s3://"):
@@ -311,6 +444,8 @@ def resolve_media_url(value: str | None, *, expires_in_seconds: int = 3600) -> s
                 Params={"Bucket": settings.aws_s3_bucket_name, "Key": key},
                 ExpiresIn=max(60, min(expires_in_seconds, 7 * 24 * 3600)),
             )
+        if value.startswith("supabase://"):
+            return _resolve_supabase_media_url(value, expires_in_seconds=expires_in_seconds)
         if value.startswith("bunny://"):
             settings = get_settings()
             pull_zone = str(settings.bunny_storage_pull_zone or "").strip().strip("/")
