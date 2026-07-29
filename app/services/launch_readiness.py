@@ -72,6 +72,26 @@ def evaluate_launch_readiness(
         ),
     )
 
+    billing_enabled = str(active_settings.billing_provider or "").strip().lower() == "cashfree"
+    billing_ready = billing_enabled and all(
+        (
+            str(active_settings.cashfree_app_id or "").strip(),
+            str(active_settings.cashfree_secret_key or "").strip(),
+        ),
+    )
+    checks.append(
+        LaunchCheck(
+            "billing_payments",
+            "pass" if billing_ready else "warning",
+            (
+                "Cashfree checkout and signed payment verification are configured."
+                if billing_ready
+                else "Billing code is ready, but online checkout remains disabled until Cashfree production credentials are added."
+            ),
+            critical=False,
+        ),
+    )
+
     smtp_ready = all(
         (
             active_settings.smtp_host,
@@ -176,6 +196,16 @@ def evaluate_launch_readiness(
                     "Request-bound database tenant context is enabled."
                     if active_settings.database_tenant_rls_enabled
                     else "Database tenant RLS is not enabled; keep application-level organization filters and complete the least-privilege database role rollout before enterprise launch."
+                ),
+                critical=False,
+            ),
+            LaunchCheck(
+                "distributed_rate_limits",
+                "warning" if active_settings.is_vercel else "pass",
+                (
+                    "The current limiter is process-local. Add a managed distributed rate-limit store before high-volume or adversarial traffic."
+                    if active_settings.is_vercel
+                    else "The current single-process rate limiter is active."
                 ),
                 critical=False,
             ),

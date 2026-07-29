@@ -1082,6 +1082,63 @@ class OrganizationMembership(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class OrganizationBillingAccount(Base):
+    __tablename__ = "organization_billing_accounts"
+    __table_args__ = (UniqueConstraint("organization_id", name="uq_organization_billing_account"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(30), default="cashfree", index=True)
+    plan_code: Mapped[str] = mapped_column(String(40), default="trial", index=True)
+    status: Mapped[str] = mapped_column(String(30), default="trialing", index=True)
+    currency: Mapped[str] = mapped_column(String(8), default="INR")
+    monthly_amount_minor: Mapped[int] = mapped_column(Integer, default=0)
+    billing_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    billing_phone: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class BillingOrder(Base):
+    __tablename__ = "billing_orders"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(30), default="cashfree", index=True)
+    provider_order_id: Mapped[str | None] = mapped_column(String(160), unique=True, nullable=True, index=True)
+    provider_payment_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    receipt_number: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True, index=True)
+    plan_code: Mapped[str] = mapped_column(String(40), index=True)
+    description: Mapped[str] = mapped_column(String(240))
+    amount_minor: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(8), default="INR")
+    status: Mapped[str] = mapped_column(String(30), default="created", index=True)
+    payment_session_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class BillingWebhookEvent(Base):
+    __tablename__ = "billing_webhook_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    provider: Mapped[str] = mapped_column(String(30), index=True)
+    event_key: Mapped[str] = mapped_column(String(180), unique=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    payload_sha256: Mapped[str] = mapped_column(String(64))
+    processing_status: Mapped[str] = mapped_column(String(30), default="received", index=True)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class JobRequisition(Base):
     __tablename__ = "job_requisitions"
     __table_args__ = (UniqueConstraint("organization_id", "job_code", name="uq_organization_job_code"),)

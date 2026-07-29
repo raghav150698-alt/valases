@@ -66,6 +66,20 @@ class SecurityConfigurationTest(unittest.TestCase):
         )
         self.assertIn("ENABLE_STARTUP_DATABASE_MANAGEMENT", errors)
 
+    def test_production_cashfree_requires_live_credentials_and_https_return(self) -> None:
+        errors = " | ".join(
+            _production_settings(
+                billing_provider="cashfree",
+                cashfree_environment="sandbox",
+                cashfree_app_id="",
+                cashfree_secret_key="",
+                billing_return_url="http://localhost/payment-return",
+            ).production_security_errors()
+        )
+        self.assertIn("CASHFREE_APP_ID", errors)
+        self.assertIn("CASHFREE_ENVIRONMENT", errors)
+        self.assertIn("HTTPS", errors)
+
     def test_production_startup_only_verifies_the_database(self) -> None:
         from app.main import on_startup
 

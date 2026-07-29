@@ -23,7 +23,8 @@ const VISION_WASM_URL = "/vendor/mediapipe/wasm";
 const FACE_MODEL_URL = "/vendor/mediapipe/models/face_landmarker.task";
 const OBJECT_MODEL_URL = "/vendor/mediapipe/models/efficientdet_lite0.tflite";
 const GAZE_MODEL_URL = "/assets/generated/screen_gaze_model.json";
-const AWAY_WARNING_MS = 2000;
+const AWAY_WARNING_MS = 6000;
+const AWAY_WARNING_COOLDOWN_MS = 15_000;
 
 function mean(values: number[]) {
   return values.reduce((total, value) => total + value, 0) / Math.max(1, values.length);
@@ -246,9 +247,9 @@ export function useCandidateGazeProctor(active: boolean) {
         }
         if (!awaySinceRef.current) awaySinceRef.current = now;
         const duration = now - awaySinceRef.current;
-        if (duration >= AWAY_WARNING_MS && now - lastWarningRef.current >= 4000) {
+        if (duration >= AWAY_WARNING_MS && now - lastWarningRef.current >= AWAY_WARNING_COOLDOWN_MS) {
           lastWarningRef.current = now;
-          emitProctorSignal("look_away_over_2s", { duration_ms: duration });
+          emitProctorSignal("look_away_sustained", { duration_ms: duration });
         }
       }, 220);
     } catch (caught) {

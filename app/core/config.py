@@ -53,6 +53,18 @@ class Settings(BaseSettings):
     supabase_url: str = Field(default="", validation_alias=AliasChoices("SUPABASE_URL", "VITE_SUPABASE_URL"))
     supabase_publishable_key: str = Field(default="", validation_alias=AliasChoices("SUPABASE_PUBLISHABLE_KEY", "VITE_SUPABASE_PUBLISHABLE_KEY"))
     supabase_secret_key: str = ""
+    billing_provider: str = "disabled"  # disabled | cashfree
+    billing_plan_catalog_json: str = (
+        '{"launch":{"name":"Launch","monthly_amount_minor":99900,"currency":"INR",'
+        '"description":"Core hiring workspace with usage-based assessments"},'
+        '"growth":{"name":"Growth","monthly_amount_minor":499900,"currency":"INR",'
+        '"description":"Expanded team access, reporting, and integrations"}}'
+    )
+    billing_return_url: str = ""
+    cashfree_app_id: str = ""
+    cashfree_secret_key: str = ""
+    cashfree_environment: str = "sandbox"  # sandbox | production
+    cashfree_api_version: str = "2025-01-01"
     integration_oauth_config_json: str = ""
     integration_token_encryption_key: str = ""
     object_storage_backend: str = "s3"  # s3 | firebase | bunny | local | auto
@@ -310,6 +322,17 @@ class Settings(BaseSettings):
                 errors.append("DESKTOP_SESSION_BROKER_TOKEN must contain at least 32 characters")
             if not str(self.desktop_session_gateway_origin or "").startswith("https://"):
                 errors.append("DESKTOP_SESSION_GATEWAY_ORIGIN must be an HTTPS origin")
+        billing_provider = str(self.billing_provider or "").strip().lower()
+        if billing_provider not in {"disabled", "cashfree"}:
+            errors.append("BILLING_PROVIDER must be disabled or cashfree")
+        if billing_provider == "cashfree":
+            if not str(self.cashfree_app_id or "").strip() or not str(self.cashfree_secret_key or "").strip():
+                errors.append("Cashfree billing requires CASHFREE_APP_ID and CASHFREE_SECRET_KEY")
+            if str(self.cashfree_environment or "").strip().lower() != "production":
+                errors.append("CASHFREE_ENVIRONMENT must be production when Cashfree billing is enabled in production")
+            return_url = str(self.billing_return_url or self.app_base_url or "").strip()
+            if not return_url.startswith("https://"):
+                errors.append("BILLING_RETURN_URL or APP_BASE_URL must use HTTPS when billing is enabled")
         if not self.rate_limit_enabled:
             errors.append("RATE_LIMIT_ENABLED must be true in production")
         if not self.admin_email_set:

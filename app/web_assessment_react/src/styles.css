@@ -993,6 +993,11 @@ body { margin: 0; background: #f6f8fb; }
   color: #334155;
   border: 1px solid #d8e0ea;
 }
+.workspace-icon-btn:hover {
+  border-color: #9eb9ad;
+  background: #f1f7f4;
+  color: #174f40;
+}
 .workspace-primary-action {
   background: #0f172a;
   color: #ffffff;

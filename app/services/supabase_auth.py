@@ -1,7 +1,7 @@
 from typing import Any
 
 import httpx
-from jose import jwt
+import jwt
 
 from app.core.config import Settings
 

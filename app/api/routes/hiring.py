@@ -12,7 +12,7 @@ import httpx
 from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
-from jose import JWTError, jwt
+import jwt
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -1674,7 +1674,7 @@ def complete_integration_connection(
     settings = get_settings()
     try:
         state_payload = jwt.decode(state_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
-    except JWTError as exc:
+    except jwt.InvalidTokenError as exc:
         raise HTTPException(status_code=400, detail="Invalid or expired integration connection state") from exc
     if state_payload.get("purpose") != "integration_oauth":
         raise HTTPException(status_code=400, detail="Invalid integration connection purpose")

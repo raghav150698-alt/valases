@@ -11862,7 +11862,7 @@ function renderSimMailModal(type) {
             <strong>${escapeHtmlAttr(mail.subject)}</strong>
             <span>${escapeHtmlAttr(mail.from)}</span>
           </div>
-          <button type="button" class="sim-mail-close" data-sim-action="close-mail-modal" aria-label="Close email">X</button>
+          <button type="button" class="sim-mail-close" data-sim-action="close-mail-modal" aria-label="Close email">${materialIcon("close")}</button>
         </header>
         <div class="sim-mail-modal-body">
           ${mail.body.map((line) => `<p>${escapeHtmlAttr(line)}</p>`).join("")}

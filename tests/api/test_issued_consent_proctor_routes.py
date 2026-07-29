@@ -48,6 +48,22 @@ class IssuedConsentAndProctorRouteTest(unittest.TestCase):
         self.assertEqual(state["integrity_penalty_pct"], 10.0)
         self.assertTrue(state["mandatory_review"])
 
+    def test_fullscreen_exit_is_recoverable_warning(self) -> None:
+        payload = IssuedCandidateProctorEventRequest(
+            event_type="fullscreen_exited",
+            severity="warning",
+            details={"reason": "Fullscreen was exited"},
+        )
+
+        with patch("app.api.routes.exams._issued_issue_from_bearer_token", return_value=self.issue):
+            response = issued_candidate_proctor_event(payload, "Bearer test", self.db)
+
+        state = self.issue.result_json["proctoring"]
+        self.assertEqual(response["warning_count"], 1)
+        self.assertFalse(response["should_terminate"])
+        self.assertFalse(state["terminated"])
+        self.assertEqual(self.issue.status, "started")
+
 
 if __name__ == "__main__":
     unittest.main()

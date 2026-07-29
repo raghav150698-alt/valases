@@ -168,7 +168,8 @@
 .admin-modal h2, .admin-modal p { margin: 0; }
 .admin-modal h2 { font-size: 18px; }
 .admin-modal p { margin-top: 5px; color: #66737e; font-size: 12px; }
-.admin-modal header > button { width: 30px; height: 30px; padding: 0; border: 1px solid #d3dbe1; border-radius: 4px; background: #fff; }
+.admin-modal header > button { width: 30px; height: 30px; display: inline-grid; place-items: center; padding: 0; border: 1px solid #d3dbe1; border-radius: 4px; background: #fff; color: #476052; cursor: pointer; }
+.admin-modal header > button:hover { border-color: #9eb9ad; background: #f1f7f4; color: #174f40; }
 .admin-user-form { display: grid; gap: 15px; padding: 20px; }
 .admin-user-form .admin-form-actions { margin: 3px -20px -20px; }
 .admin-user-form label > small { color: #73808a; font-size: 11px; font-weight: 500; }

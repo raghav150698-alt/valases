@@ -5,6 +5,7 @@ import { HyperFormula } from "hyperformula";
 import "handsontable/styles/handsontable.min.css";
 import "handsontable/styles/ht-theme-main.min.css";
 import { api } from "../../lib/api";
+import { X } from "lucide-react";
 
 type SpreadsheetValue = string | number | boolean | null;
 type SpreadsheetMap = Record<string, SpreadsheetValue>;
@@ -2192,7 +2193,7 @@ export function ExcelSimulator({
                 {sheet.name}
               </button>
               <button type="button" className="sheet-tab-tool" onClick={() => renameSheet(sheet.id)} title="Rename sheet">Edit</button>
-              {sheets.length > 1 && <button type="button" className="sheet-tab-tool sheet-tab-close" onClick={() => removeSheet(sheet.id)} title="Remove sheet">x</button>}
+              {sheets.length > 1 && <button type="button" className="sheet-tab-tool sheet-tab-close" onClick={() => removeSheet(sheet.id)} title="Remove sheet" aria-label={`Remove ${sheet.name}`}><X size={12} /></button>}
             </div>
           ))}
           <button type="button" className="sheet-tab-add" onClick={addSheet} title="Add sheet">+</button>

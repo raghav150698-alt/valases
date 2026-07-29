@@ -167,7 +167,7 @@ export function IssuedCandidatePanel() {
   const welcomeBriefing = useMemo(() => {
     if (!paper) return "";
     const assessmentType = paper.assessment_type.replaceAll("_", " ");
-    return `Please listen carefully to this complete briefing before you continue. Welcome to your Valases assessment. You are about to begin ${paper.assessment_title}, a ${assessmentType} assessment with ${paper.duration_minutes} minutes available. Find a quiet place, make sure your internet connection is stable, put away mobile phones, and keep your camera ready. Your assessment will remain in fullscreen. During the session, camera-based attention and object checks help protect assessment integrity. If sustained attention away from the screen or a mobile phone is detected, the timer pauses and a warning appears. Leaving fullscreen ends the assessment. When you are ready, select Next to review the privacy and camera notice.`;
+    return `Please listen carefully to this complete briefing before you continue. Welcome to your Valases assessment. You are about to begin ${paper.assessment_title}, a ${assessmentType} assessment with ${paper.duration_minutes} minutes available. Find a quiet place, make sure your internet connection is stable, put away mobile phones, and keep your camera ready. Your assessment will remain in fullscreen. During the session, camera-based attention and object checks help protect assessment integrity. If sustained attention away from the screen, a mobile phone, or repeated browser policy issues are detected, the timer pauses and a warning appears. Return to fullscreen promptly if it exits. When you are ready, select Next to review the privacy and camera notice.`;
   }, [paper]);
 
   const playWelcomeBriefing = () => {
@@ -426,11 +426,6 @@ export function IssuedCandidatePanel() {
       if (submittingRef.current) return;
       void submit("manual");
     },
-    onFullscreenExited: () => {
-      if (submittingRef.current) return;
-      setPolicyWarning({ reason: "Fullscreen was exited. The assessment is ending", count: 5 });
-      void recordProctorEvent("fullscreen_exited", "critical").finally(() => submit("fullscreen"));
-    },
     onPolicyWarning: (reason, count, signal) => {
       if (submittingRef.current) return;
       setPolicyWarning({ reason, count });
@@ -438,7 +433,7 @@ export function IssuedCandidatePanel() {
     },
     onPolicyTerminated: async (reason, _count, signal) => {
       if (submittingRef.current) return;
-      setPolicyWarning({ reason: `Assessment closed: ${reason}`, count: 5 });
+      setPolicyWarning({ reason: `Assessment closed: ${reason}`, count: 8 });
       await recordProctorEvent(signal?.eventType || "browser_policy_terminated", "critical", { reason, ...(signal?.details || {}) });
       await submit("policy");
     },
@@ -449,7 +444,7 @@ export function IssuedCandidatePanel() {
     durationMinutes: Number(paper?.duration_minutes || 30),
     timePerQuestionSeconds: Number(paper?.time_per_question_seconds || 30),
     questionIndex: index,
-    enabled: Boolean(paper && consentAccepted && !policyWarning && !escapeWarningVisible),
+    enabled: Boolean(paper && consentAccepted && !policyWarning && !escapeWarningVisible && !fullscreenRequired),
     initialState: restoredTimerState,
     onAssessmentTimeUp: () => { void submit(); },
     onQuestionTimeUp: () => {
@@ -570,7 +565,7 @@ export function IssuedCandidatePanel() {
                   <ul>
                     <li>Read each task carefully and submit only when your work is complete.</li>
                     <li>Sustained gaze away pauses the timer and displays a warning.</li>
-                    <li>Leaving fullscreen ends the assessment and submits the recorded attempt for review.</li>
+                    <li>If fullscreen exits, return promptly to continue. Repeated integrity warnings may send the attempt for review.</li>
                   </ul>
                 </div>
                 <div className={`candidate-audio-note ${briefingState}`}>
@@ -602,7 +597,7 @@ export function IssuedCandidatePanel() {
               <span className="launch-section-label">Before you begin</span>
               <h3 id="candidate-consent-title">Assessment privacy and integrity notice</h3>
               <p>Your answers, submitted work, timestamps, and assessment activity are collected to administer, score, secure, and review this assessment.</p>
-              <p>This session uses browser security checks and on-device camera analysis for attention and prohibited-object signals, including mobile phones. Camera frames are processed in the browser and are not recorded by this flow. Leaving fullscreen closes the assessment. Automated signals require recruiter review and are not a final employment decision.</p>
+              <p>This session uses browser security checks and on-device camera analysis for attention and prohibited-object signals, including mobile phones. Camera frames are processed in the browser and are not recorded by this flow. If fullscreen exits, return promptly to continue. Automated signals require recruiter review and are not a final employment decision.</p>
               <div className="candidate-policy-links">
                 <a href={`${legalBase}/privacy-policy.html`} target="_blank" rel="noreferrer">Privacy policy</a>
                 <a href={`${legalBase}/data-retention-and-deletion.html`} target="_blank" rel="noreferrer">Retention and deletion</a>
@@ -635,11 +630,11 @@ export function IssuedCandidatePanel() {
           )}
           {policyWarning && (
             <div className="assessment-blocking-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="policy-warning-title">
-              <div className={`assessment-warning-dialog${warningCount >= 5 ? " critical" : ""}`}>
+                <div className={`assessment-warning-dialog${warningCount >= 8 ? " critical" : ""}`}>
                 <span className="launch-section-label">Integrity check</span>
-                <h2 id="policy-warning-title">{warningCount >= 5 ? "Assessment closed" : "Please return your attention to the assessment"}</h2>
-                <p>{policyWarning.reason}. Warning {policyWarning.count} of 5.</p>
-                {warningCount < 5 && <button type="button" onClick={() => setPolicyWarning(null)}>Continue Assessment</button>}
+                <h2 id="policy-warning-title">{warningCount >= 8 ? "Assessment closed" : "Please return your attention to the assessment"}</h2>
+                <p>{policyWarning.reason}. Warning {policyWarning.count} of 8.</p>
+                {warningCount < 8 && <button type="button" onClick={() => setPolicyWarning(null)}>Continue Assessment</button>}
               </div>
             </div>
           )}
@@ -647,8 +642,8 @@ export function IssuedCandidatePanel() {
             <div className="assessment-blocking-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="escape-warning-title">
               <div className="assessment-warning-dialog critical">
                 <span className="launch-section-label">Fullscreen protection</span>
-                <h2 id="escape-warning-title">Leaving fullscreen will end this assessment</h2>
-                <p>Your current work will be submitted and the session will close if fullscreen is exited.</p>
+                <h2 id="escape-warning-title">Keep the assessment in fullscreen</h2>
+                <p>Return to fullscreen to continue. You can still end and submit manually if you are finished.</p>
                 <div className="assessment-dialog-actions">
                   <button type="button" className="secondary-btn" onClick={keepAssessmentOpen}>Keep Assessment Open</button>
                   <button type="button" className="assessment-exit-btn" onClick={endAssessmentFromEscape}>End Assessment</button>

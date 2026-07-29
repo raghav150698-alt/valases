@@ -5,7 +5,7 @@ from threading import Lock
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
@@ -728,7 +728,7 @@ def add_event(
     item.risk_score += weight
     item.warning_count += warn_inc
     _recompute_flag(item)
-    should_terminate = item.warning_count >= 5 or "fullscreen" in str(payload.event_type or "").lower()
+    should_terminate = item.warning_count >= 8
     if should_terminate:
         item.status = "terminated"
         item.ended_reason = "warning_limit_reached"

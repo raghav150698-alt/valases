@@ -140,7 +140,7 @@ async def apply_security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=()"
     response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
-    if path.startswith(("/auth/", "/admin/", "/exams/", "/proctoring/", "/tools/", "/ops/", "/config/")):
+    if path.startswith(("/auth/", "/admin/", "/billing/", "/exams/", "/proctoring/", "/tools/", "/ops/", "/config/")):
         response.headers["Cache-Control"] = "no-store, max-age=0"
         response.headers["Pragma"] = "no-cache"
     if settings.security_enable_csp:
@@ -159,10 +159,10 @@ async def apply_security_headers(request: Request, call_next):
             "default-src 'self'; "
             "img-src 'self' data: blob: https:; "
             "media-src 'self' blob: data: https:; "
-            "script-src 'self' 'wasm-unsafe-eval' https://www.gstatic.com https://www.googleapis.com https://storage.googleapis.com; "
+            "script-src 'self' 'wasm-unsafe-eval' https://sdk.cashfree.com https://www.gstatic.com https://www.googleapis.com https://storage.googleapis.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' data: https://fonts.gstatic.com; "
-            f"connect-src 'self'{supabase_origin}{desktop_gateway_origin}{desktop_gateway_websocket} https://www.gstatic.com https://www.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://storage.googleapis.com; "
+            f"connect-src 'self'{supabase_origin}{desktop_gateway_origin}{desktop_gateway_websocket} https://api.cashfree.com https://sandbox.cashfree.com https://sdk.cashfree.com https://www.gstatic.com https://www.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://storage.googleapis.com; "
             "worker-src 'self' blob:; "
             f"frame-src {frame_sources}; "
             f"frame-ancestors {settings.security_csp_frame_ancestors}; "

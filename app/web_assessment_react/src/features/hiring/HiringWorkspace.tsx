@@ -7,6 +7,7 @@ import {
   CalendarDays,
   CalendarPlus,
   ClipboardCheck,
+  CreditCard,
   LayoutDashboard,
   LogOut,
   Pause,
@@ -54,6 +55,41 @@ type Workspace = {
   metrics: { open_jobs: number; applications: number; scheduled_interviews: number };
   pipeline: Record<string, number>;
   recent_jobs: Job[];
+};
+
+type BillingOverview = {
+  provider: "cashfree";
+  provider_ready: boolean;
+  checkout_mode: "sandbox" | "production";
+  account: {
+    plan_code: string;
+    status: string;
+    currency: string;
+    monthly_amount_minor: number;
+    billing_email: string | null;
+    billing_phone: string | null;
+    current_period_start: string | null;
+    current_period_end: string | null;
+    last_paid_at: string | null;
+  };
+  plans: Array<{
+    code: string;
+    name: string;
+    monthly_amount_minor: number;
+    currency: string;
+    description: string;
+  }>;
+  orders: Array<{
+    id: string;
+    plan_code: string;
+    description: string;
+    amount_minor: number;
+    currency: string;
+    status: string;
+    receipt_number: string | null;
+    paid_at: string | null;
+    created_at: string;
+  }>;
 };
 
 type Job = {
@@ -506,8 +542,124 @@ function SettingsView({ organization, currentUser, role, permissions, onRefresh,
       {organization && canManageOrganization ? <OrganizationProfileForm organization={organization} onSaved={onRefresh} /> : <div className="hiring-settings-row"><div><strong>Company</strong><span>{organization?.name || "Your organization"}</span></div></div>}
     </div>
     <div className="hiring-settings-row"><div><strong>Access role</strong><span>{stageLabel(role)}</span></div><small>{permissions.length} permissions</small></div>
+    {permissions.includes("billing.manage") && <OrganizationBilling />}
     <div className="hiring-settings-row danger"><div><strong>Sign out</strong><span>End this browser session on this device.</span></div><button type="button" className="hiring-button secondary" onClick={() => void onSignOut()}><LogOut size={16} />Sign out</button></div>
   </section>;
+}
+
+function billingMoney(amountMinor: number, currency: string) {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 0 }).format(amountMinor / 100);
+}
+
+async function loadCashfreeCheckout() {
+  const active = window as typeof window & { Cashfree?: (options: { mode: "sandbox" | "production" }) => { checkout: (options: { paymentSessionId: string; redirectTarget: "_self" }) => Promise<unknown> } };
+  if (active.Cashfree) return active.Cashfree;
+  await new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-valases-cashfree="true"]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Payment checkout could not be loaded.")), { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
+    script.async = true;
+    script.dataset.valasesCashfree = "true";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Payment checkout could not be loaded."));
+    document.head.appendChild(script);
+  });
+  if (!active.Cashfree) throw new Error("Payment checkout could not be initialized.");
+  return active.Cashfree;
+}
+
+function OrganizationBilling() {
+  const queryClient = useQueryClient();
+  const [phone, setPhone] = useState("");
+  const [message, setMessage] = useState("");
+  const billing = useQuery<BillingOverview>({
+    queryKey: ["organization-billing"],
+    queryFn: async () => (await api.get("/billing/organization")).data,
+  });
+  useEffect(() => {
+    if (billing.data?.account.billing_phone) setPhone(billing.data.account.billing_phone);
+  }, [billing.data?.account.billing_phone]);
+  useEffect(() => {
+    const orderId = new URLSearchParams(window.location.search).get("billing_return");
+    if (!orderId) return;
+    let active = true;
+    setMessage("Confirming payment...");
+    api.post(`/billing/orders/${encodeURIComponent(orderId)}/verify`)
+      .then((response) => {
+        if (!active) return;
+        setMessage(response.data.order.status === "paid" ? "Payment verified. Your billing plan is active." : "Payment is still processing. Refresh shortly.");
+        void queryClient.invalidateQueries({ queryKey: ["organization-billing"] });
+      })
+      .catch((reason) => {
+        if (active) setMessage(apiError(reason, "Payment could not be verified yet."));
+      })
+      .finally(() => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("billing_return");
+        window.history.replaceState({}, "", url);
+      });
+    return () => { active = false; };
+  }, [queryClient]);
+  const startCheckout = async (planCode: string) => {
+    if (!/^\+?[0-9]{8,15}$/.test(phone.trim())) {
+      setMessage("Enter a valid billing phone number before continuing.");
+      return;
+    }
+    setMessage("Preparing secure checkout...");
+    try {
+      const { data } = await api.post("/billing/checkout", { plan_code: planCode, billing_phone: phone.trim() });
+      const Cashfree = await loadCashfreeCheckout();
+      const checkout = Cashfree({ mode: data.checkout_mode });
+      await checkout.checkout({ paymentSessionId: data.payment_session_id, redirectTarget: "_self" });
+    } catch (reason) {
+      setMessage(apiError(reason, "Secure checkout could not be started."));
+    }
+  };
+  const downloadReceipt = async (orderId: string, receiptNumber: string) => {
+    setMessage("Preparing receipt...");
+    try {
+      const { data } = await api.get(`/billing/orders/${encodeURIComponent(orderId)}/receipt`);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = `${receiptNumber}.json`;
+      link.click();
+      URL.revokeObjectURL(href);
+      setMessage("Receipt downloaded.");
+    } catch (reason) {
+      setMessage(apiError(reason, "Receipt could not be downloaded."));
+    }
+  };
+  return <div className="hiring-settings-section hiring-billing-section">
+    <div className="hiring-panel-header"><div><h2>Billing</h2><p>Manage the organization plan and verified payment history.</p></div><CreditCard size={19} aria-hidden="true" /></div>
+    {billing.isLoading && <div className="hiring-settings-loading">Loading billing...</div>}
+    {billing.isError && <p className="hiring-form-error">{apiError(billing.error, "Billing information could not be loaded.")}</p>}
+    {billing.data && <>
+      <div className="hiring-billing-summary">
+        <div><span>Current plan</span><strong>{stageLabel(billing.data.account.plan_code)}</strong></div>
+        <div><span>Status</span><StatusPill status={billing.data.account.status} /></div>
+        <div><span>Current period</span><strong>{billing.data.account.current_period_end ? `Through ${new Date(billing.data.account.current_period_end).toLocaleDateString()}` : "Trial period"}</strong></div>
+      </div>
+      <label className="hiring-billing-phone">Billing phone<input type="tel" inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+919876543210" /><small>Used by the payment provider for checkout verification.</small></label>
+      <div className="hiring-plan-grid">
+        {billing.data.plans.map((plan) => <article key={plan.code} className={billing.data.account.plan_code === plan.code && billing.data.account.status === "active" ? "current" : ""}>
+          <div><strong>{plan.name}</strong>{billing.data.account.plan_code === plan.code && billing.data.account.status === "active" && <span>Current</span>}</div>
+          <b>{billingMoney(plan.monthly_amount_minor, plan.currency)}<small>/month</small></b>
+          <p>{plan.description}</p>
+          <button type="button" className="hiring-button primary" disabled={!billing.data.provider_ready} onClick={() => void startCheckout(plan.code)}>{billing.data.account.plan_code === plan.code ? "Renew plan" : "Choose plan"}</button>
+        </article>)}
+      </div>
+      {!billing.data.provider_ready && <p className="hiring-billing-provider-note">Online checkout is ready for activation. Add the Cashfree production credentials to enable payments.</p>}
+      {billing.data.orders.length > 0 && <div className="hiring-billing-history"><h3>Payment history</h3>{billing.data.orders.map((order) => <div key={order.id}><span><strong>{order.description}</strong><small>{order.receipt_number || new Date(order.created_at).toLocaleDateString()}</small></span><b>{billingMoney(order.amount_minor, order.currency)}</b><StatusPill status={order.status} />{order.receipt_number && <button type="button" className="hiring-button secondary" onClick={() => void downloadReceipt(order.id, order.receipt_number!)}>Receipt</button>}</div>)}</div>}
+    </>}
+    {message && <p className="hiring-billing-message" role="status">{message}</p>}
+  </div>;
 }
 
 function TeamView({ members, onAddMember, onRefresh }: { members: Member[]; onAddMember: () => void; onRefresh: () => void }) {
@@ -665,7 +817,7 @@ function ApplicationDrawer({ application, detail, loading, transitionError, stag
   const missingScorecard = requiresScorecard && Boolean(detail) && detail!.evidence_summary.scorecard_count < 1;
   const screening = detail?.screening || { match_score: application.ai_match_score, recommendation: application.ai_recommendation, rationale: application.ai_rationale };
   return <aside className="hiring-drawer" aria-label="Candidate application details">
-    <header><div><small>{application.job_title}</small><h2>{application.candidate.full_name}</h2><span>{application.candidate.headline || application.candidate.email}</span></div><button type="button" className="hiring-icon-button" aria-label="Close candidate details" onClick={onClose}>x</button></header>
+    <header><div><small>{application.job_title}</small><h2>{application.candidate.full_name}</h2><span>{application.candidate.headline || application.candidate.email}</span></div><button type="button" className="hiring-icon-button" aria-label="Close candidate details" onClick={onClose}><X size={18} /></button></header>
     {loading && <div className="hiring-drawer-loading">Loading decision evidence...</div>}
     {detail && <section className={`hiring-readiness ${detail.evidence_summary.status}`}>
       <div><h3>Decision readiness</h3><StatusPill status={detail.evidence_summary.status} /></div>

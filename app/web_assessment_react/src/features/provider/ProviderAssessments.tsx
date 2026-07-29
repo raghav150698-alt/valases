@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { X } from "lucide-react";
 import { BrandLogo } from "../../components/BrandLogo";
 import { AssessmentToolIcon } from "../../components/AssessmentToolIcon";
 import { api } from "../../lib/api";
@@ -881,7 +882,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   </article>
                 ))}
               </div>
-              {previewDefaultId && defaultAssessmentDetail.data && <div className="default-key-preview"><div className="workspace-surface-head"><div><strong>{defaultAssessmentDetail.data.title}</strong><p>Answer key and scoring checkpoints</p></div><button type="button" className="workspace-icon-btn" aria-label="Close scoring key" onClick={() => setPreviewDefaultId(null)}>x</button></div>
+              {previewDefaultId && defaultAssessmentDetail.data && <div className="default-key-preview"><div className="workspace-surface-head"><div><strong>{defaultAssessmentDetail.data.title}</strong><p>Answer key and scoring checkpoints</p></div><button type="button" className="workspace-icon-btn" aria-label="Close scoring key" onClick={() => setPreviewDefaultId(null)}><X size={17} /></button></div>
                 {(defaultAssessmentDetail.data.scoring?.checkpoints || []).length > 0 && <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.scoring?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>Minimum checkpoint score: {checkpoint.threshold}%</small></div>)}</div>}
                 {defaultAssessmentDetail.data.questions ? <ol>{defaultAssessmentDetail.data.questions.map((question, questionIndex) => <li key={`${question.question_text}-${questionIndex}`}><strong>{question.question_text}</strong><span>{question.options.find((option) => option.is_correct)?.option_text || "No answer configured"}</span>{question.competency && <small>{question.competency}{question.difficulty ? ` | ${question.difficulty}` : ""}</small>}</li>)}</ol> : <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.task?.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>{checkpoint.source} = {JSON.stringify(checkpoint.expected)}</small></div>)}</div>}
               </div>}
@@ -890,7 +891,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
             </section>
 
             {showBuilder && <section className="workspace-surface assessment-builder-v2">
-              <div className="workspace-surface-head"><div><h3>New assessment</h3><p>Define the candidate task and its scoring evidence.</p></div><button type="button" className="workspace-icon-btn" aria-label="Close assessment builder" onClick={() => setShowBuilder(false)}>x</button></div>
+              <div className="workspace-surface-head"><div><h3>New assessment</h3><p>Define the candidate task and its scoring evidence.</p></div><button type="button" className="workspace-icon-btn" aria-label="Close assessment builder" onClick={() => setShowBuilder(false)}><X size={17} /></button></div>
               <div className="builder-stepper" aria-label="Assessment builder progress">
                 {["Basics", "Candidate task", "Answer key", "Review"].map((label, stepIndex) => <button type="button" key={label} className={builderStep === stepIndex + 1 ? "active" : builderStep > stepIndex + 1 ? "complete" : ""} onClick={() => setBuilderStep(stepIndex + 1)}><span>{stepIndex + 1}</span>{label}</button>)}
               </div>
@@ -1214,7 +1215,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
             <div className="result-review-backdrop" role="presentation" onMouseDown={() => setReviewIssueId(null)}>
             {review.isLoading ? <section className="result-review-drawer workspace-loading" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>Loading candidate result...</section> : review.data ? (
             <section className="workspace-surface result-detail-panel result-review-drawer" role="dialog" aria-modal="true" aria-labelledby="candidate-result-title" onMouseDown={(event) => event.stopPropagation()}>
-              <div className="workspace-surface-head"><div><h3 id="candidate-result-title">{review.data.candidate_name || review.data.candidate_email}</h3><p>{review.data.assessment_title} | Candidate result detail</p></div><button type="button" className="workspace-icon-btn" aria-label="Close result detail" onClick={() => setReviewIssueId(null)}>x</button></div>
+              <div className="workspace-surface-head"><div><h3 id="candidate-result-title">{review.data.candidate_name || review.data.candidate_email}</h3><p>{review.data.assessment_title} | Candidate result detail</p></div><button type="button" className="workspace-icon-btn" aria-label="Close result detail" onClick={() => setReviewIssueId(null)}><X size={17} /></button></div>
               <div className="result-detail-summary">
                 <div><span>Provisional score</span><strong>{review.data.result?.provisional_score_pct == null ? "Manual" : `${Number(review.data.result.provisional_score_pct).toFixed(1)}%`}</strong></div>
                 <div><span>Raw checkpoint score</span><strong>{review.data.result?.raw_provisional_score_pct == null ? "--" : `${Number(review.data.result.raw_provisional_score_pct).toFixed(1)}%`}</strong></div>
@@ -1247,7 +1248,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
           <section className="workspace-settings-modal" role="dialog" aria-modal="true" aria-labelledby="workspace-settings-title" onMouseDown={(event) => event.stopPropagation()}>
             <div className="workspace-surface-head">
               <div><h3 id="workspace-settings-title">Workspace settings</h3><p>Organization defaults will be stored in Supabase when it is connected.</p></div>
-              <button type="button" className="workspace-icon-btn" aria-label="Close settings" onClick={() => setShowSettings(false)}>x</button>
+              <button type="button" className="workspace-icon-btn" aria-label="Close settings" onClick={() => setShowSettings(false)}><X size={17} /></button>
             </div>
             <div className="workspace-form-grid compact">
               <label className="field-stack"><span>Workspace name</span><input defaultValue="Valases Recruiting" /></label>

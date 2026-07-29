@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
-from jose import jwt
+import jwt
 from pydantic import BaseModel, EmailStr, Field
 
 from app.api.deps import require_role
@@ -415,6 +415,9 @@ def _integrity_adjusted_score(raw_score_pct: float | None, state: dict) -> float
         return None
     penalty = min(30.0, max(0.0, float(state.get("integrity_penalty_pct") or 0)))
     return round(max(0.0, float(raw_score_pct) - penalty), 2)
+
+
+ISSUED_PROCTOR_WARNING_LIMIT = 8
 
 
 def _internal_assessment_id(exam_id: int) -> str:
@@ -2064,7 +2067,7 @@ def issued_candidate_proctor_event(
 
     Issued candidates do not have a recruiter/student account, so this uses the
     short-lived issued token and keeps a bounded audit trail on the issue row.
-    The fifth warning terminates the attempt and forces manual review.
+    Repeated warnings terminate the attempt and force manual review.
     """
     issue = _issued_issue_from_bearer_token(authorization, db)
     if issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
@@ -2085,7 +2088,7 @@ def issued_candidate_proctor_event(
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
     state["events"] = [*(state.get("events") or [])[-99:], event]
-    should_terminate = int(state["warning_count"]) >= 5 or "fullscreen" in normalized_event_type
+    should_terminate = int(state["warning_count"]) >= ISSUED_PROCTOR_WARNING_LIMIT
     if should_terminate:
         state["terminated"] = True
         state["termination_reason"] = "warning_limit_reached"

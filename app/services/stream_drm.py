@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 import uuid
 
-from jose import JWTError, jwt
+import jwt
 
 from app.core.config import get_settings
 
@@ -66,7 +66,7 @@ def verify_stream_license(
     algo = str(s.jwt_algorithm or "HS256")
     try:
         payload = jwt.decode(token, _secret_key(), algorithms=[algo])
-    except JWTError as exc:
+    except jwt.InvalidTokenError as exc:
         raise StreamDrmError("Invalid or expired stream license token") from exc
 
     if str(payload.get("typ") or "") != "stream_license":

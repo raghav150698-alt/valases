@@ -16,7 +16,7 @@ export type ProctorViolation = {
   details?: Record<string, unknown>;
 };
 
-const MAX_WARNINGS = 5;
+const MAX_WARNINGS = 8;
 
 export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onFullscreenExited, onPolicyWarning, onPolicyTerminated }: AssessmentSessionOptions) {
   const [fullscreenRequired, setFullscreenRequired] = useState(false);
@@ -105,12 +105,11 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
       setFullscreenRequired(missing);
       if (missing && !terminatedRef.current) {
         setEscapeWarningVisible(false);
-        if (fullscreenExitedCallbackRef.current) {
-          terminatedRef.current = true;
-          fullscreenExitedCallbackRef.current();
-        } else {
-          recordViolation("Fullscreen was exited", true);
-        }
+        recordViolation("Fullscreen was exited", false, {
+          eventType: "fullscreen_exited",
+          details: { reason: "Fullscreen was exited" },
+        });
+        fullscreenExitedCallbackRef.current?.();
       }
     };
 
@@ -147,9 +146,9 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
       const detail = (event as CustomEvent<{ event_type?: string; duration_ms?: number; confidence?: number; object_label?: string }>).detail || {};
       const eventType = String(detail.event_type || "").toLowerCase();
       const durationMs = Number(detail.duration_ms || 0);
-      const isSustainedGazeAway = ["look_away_over_2s", "gaze_away_over_3s", "gaze_pattern_review_flag"].includes(eventType);
-      if (isSustainedGazeAway && durationMs >= 2000) {
-        recordViolation("Sustained gaze away was detected", false, { eventType: "look_away_over_2s", details: { duration_ms: durationMs } });
+      const isSustainedGazeAway = ["look_away_sustained", "look_away_over_2s", "gaze_away_over_3s", "gaze_pattern_review_flag"].includes(eventType);
+      if (isSustainedGazeAway && durationMs >= 6000) {
+        recordViolation("Sustained attention away was detected", false, { eventType: "look_away_sustained", details: { duration_ms: durationMs } });
       } else if (eventType === "mobile_phone_detected") {
         recordViolation("A mobile phone was detected. Put it away before continuing", false, {
           eventType: "mobile_phone_detected",

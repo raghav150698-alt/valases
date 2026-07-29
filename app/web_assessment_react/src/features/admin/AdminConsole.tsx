@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { X } from "lucide-react";
 
 import { BrandLogo } from "../../components/BrandLogo";
 import { AssessmentToolIcon } from "../../components/AssessmentToolIcon";
@@ -738,7 +739,7 @@ export function AdminConsole() {
           <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="new-company-title" onMouseDown={(event) => event.stopPropagation()}>
             <header>
               <div><h2 id="new-company-title">Add company</h2><p>Create the business workspace and its initial login.</p></div>
-              <button type="button" aria-label="Close" onClick={() => setShowNewCompany(false)}>x</button>
+              <button type="button" aria-label="Close" onClick={() => setShowNewCompany(false)}><X size={17} /></button>
             </header>
             {createdCompany ? (
               <div className="admin-created-access">
@@ -783,7 +784,7 @@ export function AdminConsole() {
       {showNewRequest && (
         <div className="admin-modal-backdrop" role="presentation" onMouseDown={() => setShowNewRequest(false)}>
           <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="new-request-title" onMouseDown={(event) => event.stopPropagation()}>
-            <header><div><h2 id="new-request-title">Record data request</h2><p>Create a tracked candidate privacy request with a 30-day due date.</p></div><button type="button" aria-label="Close" onClick={() => setShowNewRequest(false)}>x</button></header>
+            <header><div><h2 id="new-request-title">Record data request</h2><p>Create a tracked candidate privacy request with a 30-day due date.</p></div><button type="button" aria-label="Close" onClick={() => setShowNewRequest(false)}><X size={17} /></button></header>
             <form className="admin-user-form" onSubmit={(event) => { event.preventDefault(); createDataRequest.mutate(); }}>
               <label>Company<select required value={newRequest.provider_id} onChange={(event) => setNewRequest((value) => ({ ...value, provider_id: event.target.value }))}><option value="">Select company</option>{(companies.data || []).filter((company) => company.organization_id).map((company) => <option key={company.provider_id} value={company.provider_id}>{company.company_name}</option>)}</select></label>
               <label>Request type<select value={newRequest.request_type} onChange={(event) => setNewRequest((value) => ({ ...value, request_type: event.target.value }))}><option value="access">Access</option><option value="export">Portable export</option><option value="delete">Deletion</option></select></label>
