@@ -8,6 +8,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.routes.hiring import (
     ApplicationCreate,
+    AtsApplicationBatch,
+    AtsApplicationImport,
     CandidateCreate,
     CurrentUserProfileUpdate,
     IntegrationUpdate,
@@ -29,6 +31,7 @@ from app.api.routes.hiring import (
     list_candidates,
     list_integrations,
     get_sso_configuration,
+    import_ats_applications,
     run_compliance_checks,
     screen_application,
     submit_scorecard,
@@ -52,6 +55,7 @@ from app.models.entities import (
     Exam,
     ExamStatus,
     HiringApplication,
+    HiringIntegration,
     Organization,
     OrganizationMembership,
     ProviderProfile,
@@ -114,6 +118,60 @@ class HiringWorkspaceTest(unittest.TestCase):
                 current_user=self.recruiter,
             )
         self.assertEqual(invalid_logo.exception.status_code, 422)
+
+    def test_connected_ats_import_is_idempotent_and_preserves_recruiter_stage(self) -> None:
+        workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)
+        organization_id = workspace["organization"]["id"]
+        integration = HiringIntegration(
+            organization_id=organization_id,
+            provider="greenhouse",
+            status="connected",
+            config_json={"external_account_name": "Example Greenhouse"},
+        )
+        self.db.add(integration)
+        self.db.commit()
+        batch = AtsApplicationBatch(
+            applications=[
+                AtsApplicationImport(
+                    external_application_id="gh-app-1001",
+                    external_candidate_id="gh-candidate-501",
+                    external_job_id="gh-job-71",
+                    job_code="FIN-ATS-1",
+                    job_title="Senior Accountant",
+                    candidate_email="ats.candidate@example.com",
+                    candidate_first_name="Asha",
+                    candidate_last_name="Rao",
+                    candidate_skills=["US GAAP", "Excel"],
+                ),
+            ],
+        )
+
+        first = import_ats_applications(
+            "greenhouse",
+            batch,
+            organization_id=organization_id,
+            db=self.db,
+            current_user=self.recruiter,
+        )
+        self.assertEqual(first["applications_created"], 1)
+        application = self.db.scalar(
+            select(HiringApplication).where(HiringApplication.external_application_id == "gh-app-1001"),
+        )
+        self.assertEqual(application.stage, "applied")
+        application.stage = "screening"
+        self.db.commit()
+
+        second = import_ats_applications(
+            "greenhouse",
+            batch,
+            organization_id=organization_id,
+            db=self.db,
+            current_user=self.recruiter,
+        )
+        self.assertEqual(second["applications_created"], 0)
+        self.assertEqual(second["applications_updated"], 1)
+        self.db.refresh(application)
+        self.assertEqual(application.stage, "screening")
 
     def test_member_can_update_and_remove_their_profile_photo(self) -> None:
         workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)

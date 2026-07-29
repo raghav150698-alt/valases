@@ -218,6 +218,28 @@ class ApplicationCreate(BaseModel):
     source: str = Field(default="manual", max_length=80)
 
 
+class AtsApplicationImport(BaseModel):
+    external_application_id: str = Field(min_length=1, max_length=240)
+    external_candidate_id: str = Field(default="", max_length=240)
+    external_job_id: str = Field(default="", max_length=240)
+    job_code: str = Field(min_length=1, max_length=60)
+    job_title: str = Field(min_length=2, max_length=240)
+    candidate_email: str = Field(min_length=5, max_length=320)
+    candidate_first_name: str = Field(min_length=1, max_length=120)
+    candidate_last_name: str = Field(default="", max_length=120)
+    candidate_headline: str = Field(default="", max_length=300)
+    candidate_location: str = Field(default="", max_length=180)
+    candidate_skills: list[str] = Field(default_factory=list, max_length=100)
+    candidate_experience_years: float | None = Field(default=None, ge=0, le=80)
+    resume_text: str = Field(default="", max_length=120000)
+    stage: Literal["applied", "screening", "assessment", "interview", "offer", "hired", "rejected", "withdrawn"] = "applied"
+    applied_at: datetime | None = None
+
+
+class AtsApplicationBatch(BaseModel):
+    applications: list[AtsApplicationImport] = Field(min_length=1, max_length=500)
+
+
 class StageUpdate(BaseModel):
     stage: Literal["applied", "screening", "assessment", "interview", "offer", "hired", "rejected", "withdrawn"]
     reason: str = Field(default="", max_length=3000)
@@ -1141,6 +1163,7 @@ def list_applications(
             "stage": application.stage,
             "status": application.status,
             "source": application.source,
+            "external_application_id": application.external_application_id,
             "ai_match_score": application.ai_match_score,
             "ai_confidence": application.ai_confidence,
             "ai_recommendation": application.ai_recommendation,
@@ -1156,6 +1179,163 @@ def list_applications(
         }
         for application, candidate, job in rows
     ]
+
+
+@router.post("/integrations/{provider}/applications/import")
+def import_ats_applications(
+    provider: str,
+    payload: AtsApplicationBatch,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "integrations.manage")
+    normalized_provider = provider.strip().lower()
+    catalog = _INTEGRATION_CATALOG.get(normalized_provider)
+    if not catalog or catalog["category"] != "ats":
+        raise HTTPException(status_code=422, detail="Choose a supported ATS provider")
+    integration = db.scalar(
+        select(HiringIntegration).where(
+            HiringIntegration.organization_id == organization.id,
+            HiringIntegration.provider == normalized_provider,
+        ),
+    )
+    if not integration or integration.status != "connected":
+        raise HTTPException(status_code=409, detail="Connect this ATS before importing applications")
+
+    created_candidates = 0
+    updated_candidates = 0
+    created_jobs = 0
+    created_applications = 0
+    updated_applications = 0
+    for item in payload.applications:
+        email = item.candidate_email.strip().lower()
+        candidate = db.scalar(
+            select(HiringCandidate).where(
+                HiringCandidate.organization_id == organization.id,
+                HiringCandidate.email == email,
+            ),
+        )
+        if not candidate:
+            candidate = HiringCandidate(
+                organization_id=organization.id,
+                first_name=item.candidate_first_name.strip(),
+                last_name=item.candidate_last_name.strip(),
+                email=email,
+                headline=item.candidate_headline.strip(),
+                location=item.candidate_location.strip(),
+                source=normalized_provider,
+                resume_text=item.resume_text.strip(),
+                skills_json=_list_strings(item.candidate_skills),
+                experience_years=item.candidate_experience_years,
+                consent_status="pending",
+            )
+            db.add(candidate)
+            db.flush()
+            created_candidates += 1
+        else:
+            candidate.headline = item.candidate_headline.strip() or candidate.headline
+            candidate.location = item.candidate_location.strip() or candidate.location
+            candidate.resume_text = item.resume_text.strip() or candidate.resume_text
+            candidate.skills_json = _list_strings([*(candidate.skills_json or []), *item.candidate_skills])
+            candidate.experience_years = item.candidate_experience_years if item.candidate_experience_years is not None else candidate.experience_years
+            updated_candidates += 1
+
+        job_code = item.job_code.strip()
+        job = db.scalar(
+            select(JobRequisition).where(
+                JobRequisition.organization_id == organization.id,
+                JobRequisition.job_code == job_code,
+            ),
+        )
+        if not job:
+            job = JobRequisition(
+                organization_id=organization.id,
+                created_by_user_id=current_user.id,
+                job_code=job_code,
+                title=item.job_title.strip(),
+                status="open",
+                department="Imported",
+                location="Not specified",
+                skills_json=[],
+            )
+            db.add(job)
+            db.flush()
+            created_jobs += 1
+
+        application = db.scalar(
+            select(HiringApplication).where(
+                HiringApplication.organization_id == organization.id,
+                HiringApplication.source == normalized_provider,
+                HiringApplication.external_application_id == item.external_application_id.strip(),
+            ),
+        )
+        if not application:
+            application = db.scalar(
+                select(HiringApplication).where(
+                    HiringApplication.job_id == job.id,
+                    HiringApplication.candidate_id == candidate.id,
+                ),
+            )
+        if application:
+            application.source = normalized_provider
+            application.external_application_id = item.external_application_id.strip()
+            application.external_candidate_id = item.external_candidate_id.strip() or None
+            application.external_job_id = item.external_job_id.strip() or None
+            updated_applications += 1
+        else:
+            application = HiringApplication(
+                organization_id=organization.id,
+                job_id=job.id,
+                candidate_id=candidate.id,
+                owner_user_id=None,
+                source=normalized_provider,
+                external_application_id=item.external_application_id.strip(),
+                external_candidate_id=item.external_candidate_id.strip() or None,
+                external_job_id=item.external_job_id.strip() or None,
+                stage=item.stage,
+                applied_at=item.applied_at or datetime.now(timezone.utc),
+            )
+            db.add(application)
+            db.flush()
+            db.add(
+                HiringStageEvent(
+                    organization_id=organization.id,
+                    application_id=application.id,
+                    actor_user_id=current_user.id,
+                    to_stage=item.stage,
+                    reason=f"Imported from {normalized_provider}",
+                ),
+            )
+            created_applications += 1
+
+    integration.last_synced_at = datetime.now(timezone.utc)
+    _write_audit(
+        db,
+        organization.id,
+        current_user.id,
+        "ats_applications_imported",
+        "integration",
+        integration.id,
+        {
+            "provider": normalized_provider,
+            "received": len(payload.applications),
+            "applications_created": created_applications,
+            "applications_updated": updated_applications,
+        },
+    )
+    db.commit()
+    return {
+        "provider": normalized_provider,
+        "received": len(payload.applications),
+        "candidates_created": created_candidates,
+        "candidates_updated": updated_candidates,
+        "jobs_created": created_jobs,
+        "applications_created": created_applications,
+        "applications_updated": updated_applications,
+        "synced_at": integration.last_synced_at,
+    }
 
 
 @router.get("/applications/{application_id}")

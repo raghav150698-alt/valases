@@ -6,8 +6,11 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   CalendarPlus,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   CreditCard,
+  Inbox,
   LayoutDashboard,
   LogOut,
   Pause,
@@ -128,6 +131,8 @@ type Application = {
   candidate: Candidate;
   stage: string;
   status: string;
+  source: string;
+  applied_at: string;
   ai_match_score: number | null;
   ai_confidence: number | null;
   ai_recommendation: string | null;
@@ -380,7 +385,7 @@ export function HiringWorkspace() {
 
         {tab === "overview" && <Overview workspace={workspace} jobs={jobs} applications={applications} interviews={interviews} onTab={setTab} onNewJob={() => setDialog("job")} onNewApplication={() => setDialog("application")} />}
         {tab === "jobs" && <JobsView jobs={filteredJobs} applications={applications} onNewJob={() => setDialog("job")} onCreateApplication={() => setDialog("application")} onStatusChange={(id, status) => jobStatusMutation.mutate({ id, status })} />}
-        {tab === "candidates" && <CandidatesView candidates={filteredCandidates} applications={applications} onNewCandidate={() => setDialog("candidate")} onCreateApplication={() => setDialog("application")} />}
+        {tab === "candidates" && <CandidatesView candidates={filteredCandidates} applications={filteredApplications} onNewCandidate={() => setDialog("candidate")} onCreateApplication={() => setDialog("application")} onSelectApplication={(application) => { setStageError(""); setSelectedApplication(application); }} />}
         {tab === "pipeline" && <PipelineView stages={pipelineStages} applications={filteredApplications} movingId={stageMutation.isPending ? stageMutation.variables?.id : undefined} onSelect={(application) => { setStageError(""); setSelectedApplication(application); }} onMove={(id, stage) => stageMutation.mutate({ id, stage })} onOpenAssessments={() => setTab("assessments")} />}
         {tab === "interviews" && <InterviewsView interviews={filteredInterviews} applications={filteredApplications} onSchedule={() => setDialog("interview")} onScorecard={(interview) => { setSelectedInterview(interview); setDialog("scorecard"); }} />}
         {tab === "assessments" && <Suspense fallback={<div className="hiring-section-empty">Loading assessment workspace...</div>}><ProviderAssessments embedded /></Suspense>}
@@ -454,7 +459,104 @@ function JobsView({ jobs, applications, onNewJob, onCreateApplication, onStatusC
   </section>;
 }
 
-function CandidatesView({ candidates, applications, onNewCandidate, onCreateApplication }: { candidates: Candidate[]; applications: Application[]; onNewCandidate: () => void; onCreateApplication: () => void }) { return <section className="hiring-panel hiring-full-panel"><div className="hiring-panel-header"><div><h2>Candidate directory</h2><p>Keep candidate information, consent and skills visible to the hiring team.</p></div><button type="button" className="hiring-button primary" onClick={onNewCandidate}><UserPlus size={16} />Add candidate</button></div>{candidates.length ? <div className="hiring-table"><div className="hiring-table-head candidates"><span>Candidate</span><span>Skills</span><span>Experience</span><span>Consent</span><span>Applications</span><span></span></div>{candidates.map((candidate) => <div className="hiring-table-row candidates" key={candidate.id}><div><strong>{candidate.full_name}</strong><small>{candidate.headline || candidate.email}</small></div><div className="hiring-skills">{candidate.skills.length ? candidate.skills.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>) : <small>No skills added</small>}</div><span>{candidate.experience_years ?? "-"}{candidate.experience_years !== null ? " yrs" : ""}</span><StatusPill status={candidate.consent_status} /><span>{applications.filter((application) => application.candidate.id === candidate.id).length}</span><button type="button" className="hiring-row-command" onClick={onCreateApplication}><ArrowRight size={15} />Add to role</button></div>)}</div> : <Empty text="Add candidates manually or through an ATS connection." action="Add candidate" onClick={onNewCandidate} />}</section>; }
+function CandidatesView({
+  candidates,
+  applications,
+  onNewCandidate,
+  onCreateApplication,
+  onSelectApplication,
+}: {
+  candidates: Candidate[];
+  applications: Application[];
+  onNewCandidate: () => void;
+  onCreateApplication: () => void;
+  onSelectApplication: (application: Application) => void;
+}) {
+  type CandidateTab = "applications" | "directory";
+  type Queue = "all" | "new" | "needs_review" | "priority";
+  const [activeTab, setActiveTab] = useState<CandidateTab>("applications");
+  const [queue, setQueue] = useState<Queue>("all");
+  const [jobFilter, setJobFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [stageFilter, setStageFilter] = useState("all");
+  const [sortOrder, setSortOrder] = useState<"newest" | "rank">("newest");
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
+  const roles = useMemo(
+    () => Array.from(new Map(applications.map((application) => [application.job_id, application.job_title])).entries()),
+    [applications],
+  );
+  const sources = useMemo(
+    () => Array.from(new Set(applications.map((application) => application.source || "manual"))).sort(),
+    [applications],
+  );
+  const stages = useMemo(
+    () => Array.from(new Set(applications.map((application) => application.stage))).sort(),
+    [applications],
+  );
+  const queueCounts = {
+    all: applications.length,
+    new: applications.filter((application) => application.stage === "applied").length,
+    needs_review: applications.filter((application) => ["applied", "screening"].includes(application.stage) && application.ai_match_score === null).length,
+    priority: applications.filter((application) => ["applied", "screening"].includes(application.stage) && application.ranking.average_score >= 70).length,
+  };
+  const filtered = applications
+    .filter((application) => {
+      if (queue === "new" && application.stage !== "applied") return false;
+      if (queue === "needs_review" && (!["applied", "screening"].includes(application.stage) || application.ai_match_score !== null)) return false;
+      if (queue === "priority" && (!["applied", "screening"].includes(application.stage) || application.ranking.average_score < 70)) return false;
+      if (jobFilter !== "all" && String(application.job_id) !== jobFilter) return false;
+      if (sourceFilter !== "all" && (application.source || "manual") !== sourceFilter) return false;
+      return stageFilter === "all" || application.stage === stageFilter;
+    })
+    .sort((left, right) => sortOrder === "rank"
+      ? right.ranking.average_score - left.ranking.average_score
+      : new Date(right.applied_at).getTime() - new Date(left.applied_at).getTime());
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const changeFilter = (setter: (value: string) => void, value: string) => {
+    setter(value);
+    setPage(1);
+  };
+  return <section className="hiring-candidate-workspace">
+    <div className="hiring-candidate-header">
+      <div className="hiring-candidate-tabs" role="tablist" aria-label="Candidate workspace">
+        <button type="button" role="tab" aria-selected={activeTab === "applications"} className={activeTab === "applications" ? "active" : ""} onClick={() => setActiveTab("applications")}><Inbox size={16} /><span>Applications</span><strong>{applications.length}</strong></button>
+        <button type="button" role="tab" aria-selected={activeTab === "directory"} className={activeTab === "directory" ? "active" : ""} onClick={() => setActiveTab("directory")}><Users size={16} /><span>Directory</span><strong>{candidates.length}</strong></button>
+      </div>
+      <button type="button" className="hiring-button primary" onClick={onNewCandidate}><UserPlus size={16} />Add candidate</button>
+    </div>
+    {activeTab === "applications" && <>
+      <div className="hiring-application-queues" role="tablist" aria-label="Application queues">
+        {(["all", "new", "needs_review", "priority"] as Queue[]).map((item) => <button type="button" role="tab" aria-selected={queue === item} className={queue === item ? "active" : ""} key={item} onClick={() => { setQueue(item); setPage(1); }}><span>{item === "all" ? "All applications" : stageLabel(item)}</span><strong>{queueCounts[item]}</strong></button>)}
+      </div>
+      <div className="hiring-application-filters">
+        <label>Role<select value={jobFilter} onChange={(event) => changeFilter(setJobFilter, event.target.value)}><option value="all">All roles</option>{roles.map(([id, title]) => <option value={id} key={id}>{title}</option>)}</select></label>
+        <label>Source<select value={sourceFilter} onChange={(event) => changeFilter(setSourceFilter, event.target.value)}><option value="all">All sources</option>{sources.map((source) => <option value={source} key={source}>{stageLabel(source)}</option>)}</select></label>
+        <label>Stage<select value={stageFilter} onChange={(event) => changeFilter(setStageFilter, event.target.value)}><option value="all">All stages</option>{stages.map((stage) => <option value={stage} key={stage}>{stageLabel(stage)}</option>)}</select></label>
+        <label>Sort<select value={sortOrder} onChange={(event) => { setSortOrder(event.target.value as "newest" | "rank"); setPage(1); }}><option value="newest">Newest first</option><option value="rank">Best evidence match</option></select></label>
+      </div>
+      <div className="hiring-application-inbox">
+        <div className="hiring-inbox-head"><span>Candidate</span><span>Role</span><span>Source</span><span>Stage</span><span>Evidence</span><span>Applied</span><span /></div>
+        {pageRows.map((application) => <article className="hiring-inbox-row" key={application.id} onClick={() => onSelectApplication(application)}>
+          <div><strong>{application.candidate.full_name}</strong><small>{application.candidate.email}</small></div>
+          <span>{application.job_title}</span>
+          <span className={`hiring-source${application.source !== "manual" ? " synced" : ""}`}>{application.source === "manual" ? "Manual" : stageLabel(application.source)}</span>
+          <StatusPill status={application.stage} />
+          <strong className="hiring-application-score">{application.ranking.average_score.toFixed(0)}</strong>
+          <span>{new Date(application.applied_at).toLocaleDateString()}</span>
+          <button type="button" className="hiring-row-command" onClick={(event) => { event.stopPropagation(); onSelectApplication(application); }}>Review<ArrowRight size={14} /></button>
+        </article>)}
+        {!pageRows.length && <Empty text="No applications match this queue and filter combination." />}
+      </div>
+      {filtered.length > pageSize && <div className="hiring-pagination"><span>{(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}</span><div><button type="button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft size={16} /></button><strong>{currentPage} / {totalPages}</strong><button type="button" aria-label="Next page" disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}><ChevronRight size={16} /></button></div></div>}
+    </>}
+    {activeTab === "directory" && <div className="hiring-panel hiring-full-panel hiring-directory-panel">
+      {candidates.length ? <div className="hiring-table"><div className="hiring-table-head candidates"><span>Candidate</span><span>Skills</span><span>Experience</span><span>Consent</span><span>Applications</span><span /></div>{candidates.map((candidate) => <div className="hiring-table-row candidates" key={candidate.id}><div><strong>{candidate.full_name}</strong><small>{candidate.headline || candidate.email}</small></div><div className="hiring-skills">{candidate.skills.length ? candidate.skills.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>) : <small>No skills added</small>}</div><span>{candidate.experience_years ?? "-"}{candidate.experience_years !== null ? " yrs" : ""}</span><StatusPill status={candidate.consent_status} /><span>{applications.filter((application) => application.candidate.id === candidate.id).length}</span><button type="button" className="hiring-row-command" onClick={onCreateApplication}><ArrowRight size={15} />Add to role</button></div>)}</div> : <Empty text="Add candidates manually or connect an ATS to build the directory." action="Add candidate" onClick={onNewCandidate} />}
+    </div>}
+  </section>;
+}
 
 function PipelineView({ stages, applications, movingId, onSelect, onMove, onOpenAssessments }: { stages: string[]; applications: Application[]; movingId?: number; onSelect: (application: Application) => void; onMove: (id: number, stage: string) => void; onOpenAssessments: () => void }) {
   const visibleStages = stages.slice(0, 6);

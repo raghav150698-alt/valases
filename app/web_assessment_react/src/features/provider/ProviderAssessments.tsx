@@ -638,6 +638,12 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     publish: ["Publish", "Prepare an assessment and send it to an eligible candidate."],
     results: ["Results", "Review completed candidate outcomes."],
   } as const;
+  const tabCounts: Record<WorkspaceTab, number> = {
+    dashboard: issuedRows.length,
+    assessments: assessmentRows.length,
+    publish: activeIssueCount,
+    results: completedIssueCount,
+  };
 
   const logout = async () => {
     try {
@@ -673,9 +679,9 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
       <main className="workspace-product-main">
       {embedded && <nav className="assessment-horizontal-tabs" aria-label="Assessment workspace navigation">
         {(["dashboard", "assessments", "publish", "results"] as WorkspaceTab[]).map((tab) => (
-          <button key={tab} type="button" className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
+          <button key={tab} type="button" role="tab" aria-selected={activeTab === tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
             <span>{tab[0].toUpperCase() + tab.slice(1)}</span>
-            {tab === "assessments" && assessmentRows.length > 0 && <em>{assessmentRows.length}</em>}
+            <strong>{tabCounts[tab]}</strong>
           </button>
         ))}
       </nav>}

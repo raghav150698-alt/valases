@@ -1193,7 +1193,10 @@ class HiringCandidate(Base):
 
 class HiringApplication(Base):
     __tablename__ = "hiring_applications"
-    __table_args__ = (UniqueConstraint("job_id", "candidate_id", name="uq_job_candidate_application"),)
+    __table_args__ = (
+        UniqueConstraint("job_id", "candidate_id", name="uq_job_candidate_application"),
+        UniqueConstraint("organization_id", "source", "external_application_id", name="uq_org_source_external_application"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
@@ -1203,6 +1206,9 @@ class HiringApplication(Base):
     stage: Mapped[str] = mapped_column(String(50), default="applied", index=True)
     status: Mapped[str] = mapped_column(String(30), default="active", index=True)
     source: Mapped[str] = mapped_column(String(80), default="manual", index=True)
+    external_application_id: Mapped[str | None] = mapped_column(String(240), nullable=True, index=True)
+    external_candidate_id: Mapped[str | None] = mapped_column(String(240), nullable=True, index=True)
+    external_job_id: Mapped[str | None] = mapped_column(String(240), nullable=True, index=True)
     ai_match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     ai_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     ai_recommendation: Mapped[str | None] = mapped_column(String(60), nullable=True)
