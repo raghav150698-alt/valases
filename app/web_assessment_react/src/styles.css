@@ -2044,6 +2044,40 @@ body { margin: 0; background: #f6f8fb; }
 }
 .candidate-login-intro { display: grid; gap: 10px; }
 .candidate-login-logo { width: 90px; height: 54px; }
+
+.candidate-offer-page { width: min(100% - 32px, 900px); margin: 34px auto 64px; display: grid; gap: 18px; color: #183128; }
+.candidate-offer-company { min-height: 72px; display: flex; align-items: center; gap: 15px; padding: 16px 20px; border: 1px solid #d8e3de; background: #fff; }
+.candidate-offer-company img { width: 112px; max-height: 52px; object-fit: contain; object-position: left center; }
+.candidate-offer-company div { display: grid; gap: 3px; }
+.candidate-offer-company span, .candidate-offer-summary small { color: #6c7d76; font-size: 11px; text-transform: uppercase; }
+.candidate-offer-company strong { font-size: 18px; }
+.candidate-offer-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid #d8e3de; background: #fff; }
+.candidate-offer-summary > div { min-width: 0; min-height: 76px; display: grid; align-content: center; gap: 6px; padding: 13px 16px; border-right: 1px solid #e2eae6; }
+.candidate-offer-summary > div:last-child { border-right: 0; }
+.candidate-offer-summary strong { overflow-wrap: anywhere; font-size: 13px; }
+.candidate-offer-document { width: 100%; height: min(680px, 70vh); border: 1px solid #d8e3de; background: #fff; }
+.candidate-offer-signature { display: grid; gap: 16px; padding: 22px; border: 1px solid #cbdcd4; background: #fff; }
+.candidate-offer-signature > div:first-child { display: flex; align-items: center; gap: 10px; }
+.candidate-offer-signature > div:first-child > span { display: grid; gap: 3px; }
+.candidate-offer-signature small { color: #708078; }
+.candidate-offer-signature > label:not(.candidate-offer-consent) { display: grid; gap: 6px; color: #53675e; font-size: 12px; font-weight: 700; }
+.candidate-offer-signature input[type="text"], .candidate-offer-signature input:not([type]) { min-height: 42px; padding: 0 11px; border: 1px solid #becfc7; font: inherit; }
+.candidate-offer-consent { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 9px; align-items: start; color: #52665d; font-size: 13px; line-height: 1.45; }
+.candidate-offer-signature footer { display: flex; justify-content: flex-end; gap: 10px; }
+.candidate-offer-signature button { min-height: 40px; padding: 0 16px; border-radius: 4px; font: inherit; font-weight: 700; cursor: pointer; }
+.candidate-offer-decline { border: 1px solid #cbd6d1; background: #fff; color: #5e6e67; }
+.candidate-offer-accept { border: 1px solid #116a50; background: #116a50; color: #fff; }
+.candidate-offer-signature button:disabled { opacity: .5; cursor: not-allowed; }
+.candidate-offer-error { margin: 0; color: #9c3d38; }
+.candidate-offer-closed, .candidate-offer-state { min-height: 280px; display: grid; place-content: center; justify-items: center; gap: 10px; text-align: center; }
+.candidate-offer-state svg { color: #16765b; }
+@media (max-width: 700px) {
+  .candidate-offer-summary { grid-template-columns: 1fr 1fr; }
+  .candidate-offer-summary > div:nth-child(2) { border-right: 0; }
+  .candidate-offer-summary > div { border-bottom: 1px solid #e2eae6; }
+  .candidate-offer-summary > div:nth-last-child(-n+2) { border-bottom: 0; }
+  .candidate-offer-document { height: 600px; }
+}
 .candidate-login-intro h1 {
   margin: 8px 0 0;
   color: #111b17;

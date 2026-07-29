@@ -28,6 +28,8 @@ _REQUIRED_PRODUCTION_TABLES = {
     "hiring_candidates",
     "hiring_applications",
     "hiring_stage_events",
+    "hiring_communications",
+    "hiring_offers",
     "hiring_interviews",
     "hiring_scorecards",
     "hiring_compliance_checks",

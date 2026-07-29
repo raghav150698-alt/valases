@@ -4,14 +4,16 @@ import base64
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
+from html import escape
 from typing import Literal
 from urllib.parse import urlencode
 
 import httpx
 from cryptography.fernet import Fernet
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 import jwt
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -26,9 +28,11 @@ from app.models.entities import (
     AssessmentIssue,
     HiringApplication,
     HiringCandidate,
+    HiringCommunication,
     HiringComplianceCheck,
     HiringIntegration,
     HiringInterview,
+    HiringOffer,
     HiringScorecard,
     HiringStageEvent,
     JobRequisition,
@@ -41,6 +45,7 @@ from app.models.entities import (
     UserApproval,
     UserRole,
 )
+from app.services.notifications import send_email
 from app.services.supabase_auth import invite_supabase_user
 from app.services.organization_branding import (
     member_avatar_url,
@@ -51,7 +56,7 @@ from app.services.organization_branding import (
 
 router = APIRouter(prefix="/hiring", tags=["hiring-workspace"])
 
-_MEMBER_ROLES = {"owner", "org_admin", "recruiter", "custom", "hiring_manager", "interviewer", "viewer"}
+_MEMBER_ROLES = {"owner", "org_admin", "recruiter", "custom", "hiring_manager", "interviewer", "viewer", "payroll"}
 _PERMISSIONS = {
     "jobs.view",
     "jobs.manage",
@@ -67,6 +72,10 @@ _PERMISSIONS = {
     "integrations.view",
     "integrations.manage",
     "reports.view",
+    "offers.view",
+    "offers.manage",
+    "offers.compensation",
+    "offers.release",
     "members.manage",
     "organization.manage",
     "billing.manage",
@@ -87,6 +96,7 @@ _ROLE_PERMISSIONS = {
         "reports.view",
     },
     "interviewer": {"candidates.view", "pipeline.view", "assessment_results.view", "interviews.view", "interviews.manage"},
+    "payroll": {"offers.view", "offers.compensation"},
     "viewer": {"jobs.view", "candidates.view", "pipeline.view", "assessments.view", "assessment_results.view", "interviews.view", "reports.view"},
 }
 _PIPELINE_STAGES = ["applied", "screening", "assessment", "interview", "offer", "hired", "rejected", "withdrawn"]
@@ -126,13 +136,13 @@ class CurrentUserProfileUpdate(BaseModel):
 class MembershipCreate(BaseModel):
     email: str = Field(min_length=5, max_length=320)
     full_name: str = Field(default="", max_length=200)
-    role: Literal["org_admin", "recruiter", "custom"] = "recruiter"
+    role: Literal["org_admin", "recruiter", "payroll", "custom"] = "recruiter"
     permissions: list[str] = Field(default_factory=list, max_length=40)
     authentication: Literal["email_invite", "sso_only"] = "email_invite"
 
 
 class MembershipUpdate(BaseModel):
-    role: Literal["org_admin", "recruiter", "custom"]
+    role: Literal["org_admin", "recruiter", "payroll", "custom"]
     permissions: list[str] = Field(default_factory=list, max_length=40)
     status: Literal["active", "suspended"] = "active"
 
@@ -245,6 +255,53 @@ class StageUpdate(BaseModel):
     reason: str = Field(default="", max_length=3000)
 
 
+class RejectionRequest(BaseModel):
+    reason_code: Literal["position_filled", "skills_not_met", "experience_not_met", "assessment_result", "interview_outcome", "position_closed", "other"]
+    notes: str = Field(default="", max_length=3000)
+    sender_mode: Literal["company", "recruiter"] = "company"
+    subject: str = Field(default="", max_length=500)
+    body: str = Field(default="", max_length=10000)
+    send_email: bool = True
+
+
+class JobCloseVacanciesRequest(BaseModel):
+    sender_mode: Literal["company", "recruiter"] = "company"
+    subject: str = Field(default="", max_length=500)
+    body: str = Field(default="", max_length=10000)
+    send_email: bool = True
+
+
+class OfferCreate(BaseModel):
+    application_id: int = Field(gt=0)
+    currency: str = Field(default="INR", min_length=3, max_length=8)
+    pay_frequency: Literal["annual", "monthly", "hourly"] = "annual"
+    base_compensation: float | None = Field(default=None, ge=0)
+    variable_compensation: float = Field(default=0, ge=0)
+    benefits_value: float = Field(default=0, ge=0)
+    start_date: datetime | None = None
+    expires_at: datetime | None = None
+    letter_body: str = Field(default="", max_length=30000)
+    terms_text: str = Field(default="", max_length=30000)
+
+
+class OfferUpdate(BaseModel):
+    currency: str | None = Field(default=None, min_length=3, max_length=8)
+    pay_frequency: Literal["annual", "monthly", "hourly"] | None = None
+    base_compensation: float | None = Field(default=None, ge=0)
+    variable_compensation: float | None = Field(default=None, ge=0)
+    benefits_value: float | None = Field(default=None, ge=0)
+    start_date: datetime | None = None
+    expires_at: datetime | None = None
+    letter_body: str | None = Field(default=None, max_length=30000)
+    terms_text: str | None = Field(default=None, max_length=30000)
+
+
+class OfferDecision(BaseModel):
+    signature_name: str = Field(min_length=2, max_length=240)
+    accepted: bool
+    consent: bool
+
+
 class InterviewCreate(BaseModel):
     application_id: int = Field(gt=0)
     interview_type: str = Field(default="structured", min_length=2, max_length=80)
@@ -270,6 +327,13 @@ class IntegrationUpdate(BaseModel):
 
 def _list_strings(values: list[str]) -> list[str]:
     return list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
+
+
+def _is_past(value: datetime | None) -> bool:
+    if value is None:
+        return False
+    comparable = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return comparable <= datetime.now(timezone.utc)
 
 
 def _slugify(value: str) -> str:
@@ -446,7 +510,17 @@ def _application_or_404(db: Session, organization_id: int, application_id: int) 
     return application
 
 
-def _serialize_job(job: JobRequisition) -> dict:
+def _serialize_job(job: JobRequisition, db: Session | None = None) -> dict:
+    filled_count = 0
+    if db is not None:
+        filled_count = int(
+            db.scalar(
+                select(func.count(HiringApplication.id)).where(
+                    HiringApplication.job_id == job.id,
+                    HiringApplication.stage == "hired",
+                ),
+            ) or 0,
+        )
     return {
         "id": job.id,
         "job_code": job.job_code,
@@ -457,6 +531,8 @@ def _serialize_job(job: JobRequisition) -> dict:
         "work_arrangement": job.work_arrangement,
         "status": job.status,
         "headcount": job.headcount,
+        "filled_count": filled_count,
+        "openings_remaining": max(0, int(job.headcount or 0) - filled_count),
         "description": job.description,
         "responsibilities": job.responsibilities_json or [],
         "requirements": job.requirements_json or [],
@@ -485,6 +561,260 @@ def _serialize_candidate(candidate: HiringCandidate) -> dict:
         "consent_status": candidate.consent_status,
         "created_at": candidate.created_at,
     }
+
+
+_REJECTION_REASON_LABELS = {
+    "position_filled": "the position has been filled",
+    "skills_not_met": "the role requires a different skills match",
+    "experience_not_met": "the role requires a different experience profile",
+    "assessment_result": "the assessment outcome did not meet the role requirements",
+    "interview_outcome": "we are proceeding with another candidate after the interview process",
+    "position_closed": "the position has been closed",
+    "other": "we will not be progressing this application",
+}
+
+
+def _organization_branding(organization: Organization) -> tuple[str, str]:
+    return organization.name.strip(), organization_logo_url(organization.settings_json)
+
+
+def _candidate_message_html(company_name: str, company_logo: str, body: str) -> str:
+    safe_company = escape(company_name)
+    safe_body = "<br>".join(escape(body).splitlines())
+    logo = (
+        f'<img src="{escape(company_logo, quote=True)}" width="144" alt="{safe_company}" '
+        'style="display:block;max-width:144px;max-height:60px;width:auto;height:auto;border:0">'
+        if company_logo.startswith("data:image/")
+        else f'<strong style="font-size:21px;color:#173b31">{safe_company}</strong>'
+    )
+    return f"""<!doctype html><html><body style="margin:0;background:#f4f7f5;font-family:Arial,sans-serif;color:#17251f">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:34px 16px">
+<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px">
+<tr><td style="padding:0 0 18px">{logo}</td></tr><tr><td style="height:4px;background:#14805e"></td></tr>
+<tr><td style="padding:36px 40px;background:#fff;border:1px solid #dce5e0;border-top:0;font-size:15px;line-height:24px;color:#41534b">{safe_body}</td></tr>
+<tr><td align="center" style="padding:22px 12px 0;color:#7b8882;font-size:11px">Sent by {safe_company} through Valases</td></tr>
+</table></td></tr></table></body></html>"""
+
+
+def _candidate_message_email_content(company_name: str, company_logo: str, body: str) -> tuple[str, dict[str, tuple[bytes, str, str]]]:
+    html = _candidate_message_html(company_name, company_logo, body)
+    match = re.fullmatch(r"data:image/(png|jpeg|webp);base64,(.+)", company_logo, flags=re.DOTALL)
+    if not match:
+        return html, {}
+    try:
+        content = base64.b64decode(match.group(2), validate=True)
+    except Exception:
+        return html, {}
+    if not content:
+        return html, {}
+    return (
+        html.replace(escape(company_logo, quote=True), "cid:company-logo"),
+        {"company-logo": (content, "image", match.group(1))},
+    )
+
+
+def _send_candidate_communication(
+    db: Session,
+    *,
+    organization: Organization,
+    application: HiringApplication,
+    candidate: HiringCandidate,
+    job: JobRequisition,
+    actor: User,
+    communication_type: str,
+    template_key: str,
+    sender_mode: str,
+    subject: str,
+    body: str,
+    should_send: bool,
+) -> HiringCommunication:
+    company_name, company_logo = _organization_branding(organization)
+    record = HiringCommunication(
+        organization_id=organization.id,
+        application_id=application.id,
+        job_id=job.id,
+        candidate_id=candidate.id,
+        actor_user_id=actor.id,
+        communication_type=communication_type,
+        template_key=template_key,
+        sender_mode=sender_mode,
+        recipient_email=candidate.email,
+        subject=subject,
+        body_text=body,
+        status="draft",
+    )
+    if should_send:
+        try:
+            html_body, inline_images = _candidate_message_email_content(company_name, company_logo, body)
+            result = send_email(
+                candidate.email,
+                subject,
+                body,
+                html_body=html_body,
+                inline_images=inline_images,
+                reply_to=actor.email if sender_mode == "recruiter" else None,
+            )
+            record.status = "sent" if result.get("sent") else "failed"
+            record.provider_error = str(result.get("reason") or "")[:500] or None
+            record.sent_at = datetime.now(timezone.utc) if result.get("sent") else None
+        except Exception as exc:
+            record.status = "failed"
+            record.provider_error = str(exc)[:500]
+    db.add(record)
+    return record
+
+
+def _default_rejection_message(
+    candidate: HiringCandidate,
+    job: JobRequisition,
+    organization: Organization,
+    reason_code: str,
+    sender_mode: str,
+    actor: User,
+) -> tuple[str, str]:
+    company_name = organization.name.strip()
+    signatory = actor.full_name.strip() if sender_mode == "recruiter" and actor.full_name else company_name
+    subject = f"Update on your application for {job.title}"
+    reason = _REJECTION_REASON_LABELS[reason_code]
+    body = (
+        f"Hello {candidate.first_name},\n\n"
+        f"Thank you for the time and effort you invested in the {job.title} process with {company_name}. "
+        f"After reviewing your application, {reason}. We will therefore not be moving your application forward.\n\n"
+        "We appreciate your interest and wish you every success in your search.\n\n"
+        f"Regards,\n{signatory}"
+    )
+    return subject, body
+
+
+def _render_message_template(value: str, candidate: HiringCandidate, job: JobRequisition, organization: Organization) -> str:
+    return (
+        value.replace("{candidate_name}", f"{candidate.first_name} {candidate.last_name}".strip())
+        .replace("{first_name}", candidate.first_name)
+        .replace("{job_title}", job.title)
+        .replace("{company_name}", organization.name)
+    )
+
+
+def _reject_application(
+    db: Session,
+    *,
+    organization: Organization,
+    application: HiringApplication,
+    candidate: HiringCandidate,
+    job: JobRequisition,
+    actor: User,
+    reason_code: str,
+    notes: str,
+    sender_mode: str,
+    subject: str,
+    body: str,
+    should_send: bool,
+) -> HiringCommunication:
+    default_subject, default_body = _default_rejection_message(
+        candidate,
+        job,
+        organization,
+        reason_code,
+        sender_mode,
+        actor,
+    )
+    final_subject = _render_message_template(subject.strip() or default_subject, candidate, job, organization)
+    final_body = _render_message_template(body.strip() or default_body, candidate, job, organization)
+    previous_stage = application.stage
+    application.stage = "rejected"
+    application.status = "closed"
+    application.human_decision = reason_code
+    db.add(
+        HiringStageEvent(
+            organization_id=organization.id,
+            application_id=application.id,
+            actor_user_id=actor.id,
+            from_stage=previous_stage,
+            to_stage="rejected",
+            reason=f"{_REJECTION_REASON_LABELS[reason_code]}. {notes}".strip(),
+        ),
+    )
+    communication = _send_candidate_communication(
+        db,
+        organization=organization,
+        application=application,
+        candidate=candidate,
+        job=job,
+        actor=actor,
+        communication_type="application_rejection",
+        template_key=reason_code,
+        sender_mode=sender_mode,
+        subject=final_subject,
+        body=final_body,
+        should_send=should_send,
+    )
+    _write_audit(
+        db,
+        organization.id,
+        actor.id,
+        "application_rejected",
+        "application",
+        application.id,
+        {"reason_code": reason_code, "email_status": communication.status},
+    )
+    return communication
+
+
+def _serialize_offer(offer: HiringOffer) -> dict:
+    return {
+        "id": offer.id,
+        "application_id": offer.application_id,
+        "job_id": offer.job_id,
+        "candidate_id": offer.candidate_id,
+        "offer_reference": offer.offer_reference,
+        "status": offer.status,
+        "job_title": offer.job_title_snapshot,
+        "candidate_name": offer.candidate_name_snapshot,
+        "candidate_email": offer.candidate_email_snapshot,
+        "currency": offer.currency,
+        "pay_frequency": offer.pay_frequency,
+        "base_compensation": offer.base_compensation,
+        "variable_compensation": offer.variable_compensation,
+        "benefits_value": offer.benefits_value,
+        "total_ctc": offer.total_ctc,
+        "start_date": offer.start_date,
+        "expires_at": offer.expires_at,
+        "letter_body": offer.letter_body,
+        "terms_text": offer.terms_text,
+        "released_at": offer.released_at,
+        "signed_at": offer.signed_at,
+        "signature_name": offer.signature_name,
+        "released_document_hash": offer.released_document_hash,
+        "signed_document_hash": offer.signed_document_hash,
+        "created_at": offer.created_at,
+        "updated_at": offer.updated_at,
+    }
+
+
+def _offer_document_html(offer: HiringOffer, organization: Organization, *, signed: bool = False) -> str:
+    company_name, company_logo = _organization_branding(organization)
+    logo = (
+        f'<img src="{escape(company_logo, quote=True)}" alt="{escape(company_name)}" style="max-width:160px;max-height:64px">'
+        if company_logo.startswith("data:image/")
+        else f"<h2>{escape(company_name)}</h2>"
+    )
+    signature = (
+        f"""<section style="margin-top:40px;border-top:1px solid #ccd8d2;padding-top:20px">
+        <strong>Accepted electronically by {escape(offer.signature_name or '')}</strong><br>
+        <span>{escape(offer.signed_at.isoformat() if offer.signed_at else '')}</span>
+        </section>"""
+        if signed else ""
+    )
+    return f"""<!doctype html><html><head><meta charset="utf-8"><title>{escape(offer.offer_reference)}</title></head>
+<body style="font-family:Arial,sans-serif;color:#1b2a24;max-width:760px;margin:40px auto;padding:24px;line-height:1.6">
+{logo}<p style="color:#65766e">{escape(offer.offer_reference)}</p>
+<h1>Offer of employment</h1><p>Dear {escape(offer.candidate_name_snapshot)},</p>
+<div>{'<br>'.join(escape(offer.letter_body).splitlines())}</div>
+<table style="width:100%;margin:28px 0;border-collapse:collapse">
+<tr><td style="padding:10px;border:1px solid #d8e2dd">Position</td><td style="padding:10px;border:1px solid #d8e2dd"><strong>{escape(offer.job_title_snapshot)}</strong></td></tr>
+<tr><td style="padding:10px;border:1px solid #d8e2dd">Total CTC</td><td style="padding:10px;border:1px solid #d8e2dd"><strong>{escape(offer.currency)} {float(offer.total_ctc or 0):,.2f} ({escape(offer.pay_frequency)})</strong></td></tr>
+</table><div>{'<br>'.join(escape(offer.terms_text).splitlines())}</div>{signature}
+</body></html>"""
 
 
 def _screen_application(job: JobRequisition, candidate: HiringCandidate) -> tuple[float, float, str, dict]:
@@ -620,7 +950,7 @@ def hiring_workspace(
         "pipeline_stages": _PIPELINE_STAGES,
         "metrics": {"open_jobs": int(active_jobs), "applications": int(app_count), "scheduled_interviews": int(interview_count)},
         "pipeline": {stage: int(count) for stage, count in stage_rows},
-        "recent_jobs": [_serialize_job(job) for job in jobs],
+        "recent_jobs": [_serialize_job(job, db) for job in jobs],
     }
 
 
@@ -946,11 +1276,14 @@ def list_jobs(
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
     _require_permission(current_user, membership, "jobs.view")
-    query = select(JobRequisition).where(JobRequisition.organization_id == organization.id)
+    query = select(JobRequisition).where(
+        JobRequisition.organization_id == organization.id,
+        JobRequisition.status != "deleted",
+    )
     if job_status:
         query = query.where(JobRequisition.status == job_status)
     rows = list(db.scalars(query.order_by(JobRequisition.updated_at.desc())).all())
-    return [_serialize_job(row) for row in rows]
+    return [_serialize_job(row, db) for row in rows]
 
 
 @router.post("/jobs", status_code=status.HTTP_201_CREATED)
@@ -992,7 +1325,7 @@ def create_job(
     _write_audit(db, organization.id, current_user.id, "job_created", "job", job.id, {"job_code": job.job_code})
     db.commit()
     db.refresh(job)
-    return _serialize_job(job)
+    return _serialize_job(job, db)
 
 
 @router.patch("/jobs/{job_id}")
@@ -1016,7 +1349,97 @@ def update_job(
     _write_audit(db, organization.id, current_user.id, "job_updated", "job", job.id, {"fields": sorted(payload.model_fields_set)})
     db.commit()
     db.refresh(job)
-    return _serialize_job(job)
+    return _serialize_job(job, db)
+
+
+@router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_job(
+    job_id: int,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "jobs.manage")
+    job = _job_or_404(db, organization.id, job_id)
+    active_applications = int(
+        db.scalar(
+            select(func.count(HiringApplication.id)).where(
+                HiringApplication.job_id == job.id,
+                HiringApplication.status == "active",
+            ),
+        ) or 0,
+    )
+    if active_applications:
+        raise HTTPException(
+            status_code=409,
+            detail="Close or reject the active applications before deleting this job",
+        )
+    job.status = "deleted"
+    _write_audit(db, organization.id, current_user.id, "job_deleted", "job", job.id)
+    db.commit()
+
+
+@router.post("/jobs/{job_id}/close-vacancies")
+def close_job_vacancies(
+    job_id: int,
+    payload: JobCloseVacanciesRequest,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "jobs.manage")
+    _require_permission(current_user, membership, "pipeline.manage")
+    job = _job_or_404(db, organization.id, job_id)
+    applications = list(
+        db.scalars(
+            select(HiringApplication).where(
+                HiringApplication.job_id == job.id,
+                HiringApplication.status == "active",
+                HiringApplication.stage != "hired",
+            ),
+        ).all(),
+    )
+    sent = failed = drafted = 0
+    for application in applications:
+        candidate = _candidate_or_404(db, organization.id, application.candidate_id)
+        communication = _reject_application(
+            db,
+            organization=organization,
+            application=application,
+            candidate=candidate,
+            job=job,
+            actor=current_user,
+            reason_code="position_filled",
+            notes="Vacancy requirement fulfilled",
+            sender_mode=payload.sender_mode,
+            subject=payload.subject,
+            body=payload.body,
+            should_send=payload.send_email,
+        )
+        sent += int(communication.status == "sent")
+        failed += int(communication.status == "failed")
+        drafted += int(communication.status == "draft")
+    job.status = "paused"
+    _write_audit(
+        db,
+        organization.id,
+        current_user.id,
+        "job_vacancies_fulfilled",
+        "job",
+        job.id,
+        {"applications_closed": len(applications), "emails_sent": sent, "emails_failed": failed},
+    )
+    db.commit()
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "applications_closed": len(applications),
+        "emails_sent": sent,
+        "emails_failed": failed,
+        "drafts_created": drafted,
+    }
 
 
 @router.post("/jobs/draft-description")
@@ -1110,8 +1533,43 @@ def create_application(
 ):
     organization, membership = _organization_context(db, current_user, organization_id)
     _require_permission(current_user, membership, "pipeline.manage")
-    _job_or_404(db, organization.id, payload.job_id)
+    job = _job_or_404(db, organization.id, payload.job_id)
+    if job.status != "open":
+        raise HTTPException(status_code=409, detail="This job is not accepting applications")
     _candidate_or_404(db, organization.id, payload.candidate_id)
+    existing = db.scalar(
+        select(HiringApplication).where(
+            HiringApplication.organization_id == organization.id,
+            HiringApplication.job_id == payload.job_id,
+            HiringApplication.candidate_id == payload.candidate_id,
+        ),
+    )
+    if existing and existing.status == "active":
+        raise HTTPException(status_code=409, detail="This candidate already has an active application for this role")
+    if existing:
+        previous_stage = existing.stage
+        existing.stage = "screening"
+        existing.status = "active"
+        existing.owner_user_id = current_user.id
+        existing.source = payload.source.strip() or "manual"
+        existing.human_decision = None
+        existing.ai_match_score = None
+        existing.ai_confidence = None
+        existing.ai_recommendation = None
+        existing.ai_rationale_json = {}
+        db.add(
+            HiringStageEvent(
+                organization_id=organization.id,
+                application_id=existing.id,
+                actor_user_id=current_user.id,
+                from_stage=previous_stage,
+                to_stage="screening",
+                reason="Candidate reapplied after the previous application was closed",
+            ),
+        )
+        _write_audit(db, organization.id, current_user.id, "application_reactivated", "application", existing.id)
+        db.commit()
+        return {"id": existing.id, "stage": existing.stage, "status": existing.status}
     application = HiringApplication(
         organization_id=organization.id,
         job_id=payload.job_id,
@@ -1223,6 +1681,7 @@ def import_ats_applications(
     created_jobs = 0
     created_applications = 0
     updated_applications = 0
+    skipped_inactive_jobs = 0
     for item in payload.applications:
         email = item.candidate_email.strip().lower()
         candidate = db.scalar(
@@ -1277,6 +1736,10 @@ def import_ats_applications(
             db.add(job)
             db.flush()
             created_jobs += 1
+
+        if job.status != "open":
+            skipped_inactive_jobs += 1
+            continue
 
         application = db.scalar(
             select(HiringApplication).where(
@@ -1342,6 +1805,7 @@ def import_ats_applications(
             "received": len(payload.applications),
             "applications_created": created_applications,
             "applications_updated": updated_applications,
+            "skipped_inactive_jobs": skipped_inactive_jobs,
         },
     )
     db.commit()
@@ -1353,6 +1817,7 @@ def import_ats_applications(
         "jobs_created": created_jobs,
         "applications_created": created_applications,
         "applications_updated": updated_applications,
+        "skipped_inactive_jobs": skipped_inactive_jobs,
         "synced_at": integration.last_synced_at,
     }
 
@@ -1403,7 +1868,7 @@ def get_application_detail(
         "status": application.status,
         "human_decision": application.human_decision,
         "candidate": _serialize_candidate(candidate),
-        "job": _serialize_job(job),
+        "job": _serialize_job(job, db),
         "screening": {
             "match_score": application.ai_match_score,
             "confidence": application.ai_confidence,
@@ -1470,6 +1935,8 @@ def update_application_stage(
     _require_permission(current_user, membership, "pipeline.manage")
     application = _application_or_404(db, organization.id, application_id)
     reason = payload.reason.strip()
+    if payload.stage == "rejected":
+        raise HTTPException(status_code=422, detail="Use the rejection workflow to record a reason and candidate communication")
     if application.status == "closed" and payload.stage != application.stage:
         raise HTTPException(status_code=409, detail="Closed applications cannot be moved to another stage")
     if payload.stage in {"offer", "hired", "rejected", "withdrawn"} and len(reason) < 10:
@@ -1487,6 +1954,19 @@ def update_application_stage(
     if payload.stage in {"rejected", "withdrawn", "hired"}:
         application.status = "closed"
         application.human_decision = payload.stage
+    if payload.stage == "hired":
+        db.flush()
+        job = _job_or_404(db, organization.id, application.job_id)
+        hired_count = int(
+            db.scalar(
+                select(func.count(HiringApplication.id)).where(
+                    HiringApplication.job_id == job.id,
+                    HiringApplication.stage == "hired",
+                ),
+            ) or 0,
+        )
+        if hired_count >= job.headcount:
+            job.status = "paused"
     db.add(HiringStageEvent(organization_id=organization.id, application_id=application.id, actor_user_id=current_user.id, from_stage=previous_stage, to_stage=payload.stage, reason=reason))
     _write_audit(
         db,
@@ -1499,6 +1979,45 @@ def update_application_stage(
     )
     db.commit()
     return {"id": application.id, "stage": application.stage, "status": application.status}
+
+
+@router.post("/applications/{application_id}/reject")
+def reject_application(
+    application_id: int,
+    payload: RejectionRequest,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "pipeline.manage")
+    application = _application_or_404(db, organization.id, application_id)
+    if application.status != "active":
+        raise HTTPException(status_code=409, detail="Only an active application can be rejected")
+    candidate = _candidate_or_404(db, organization.id, application.candidate_id)
+    job = _job_or_404(db, organization.id, application.job_id)
+    communication = _reject_application(
+        db,
+        organization=organization,
+        application=application,
+        candidate=candidate,
+        job=job,
+        actor=current_user,
+        reason_code=payload.reason_code,
+        notes=payload.notes.strip(),
+        sender_mode=payload.sender_mode,
+        subject=payload.subject,
+        body=payload.body,
+        should_send=payload.send_email,
+    )
+    db.commit()
+    return {
+        "id": application.id,
+        "stage": application.stage,
+        "status": application.status,
+        "email_status": communication.status,
+        "communication_id": communication.id,
+    }
 
 
 @router.post("/applications/{application_id}/screen")
@@ -1521,6 +2040,285 @@ def screen_application(
     _write_audit(db, organization.id, current_user.id, "application_screened", "application", application.id, {"score": score, "recommendation": recommendation})
     db.commit()
     return {"match_score": score, "confidence": confidence, "recommendation": recommendation, "rationale": rationale, "human_review_required": True}
+
+
+@router.get("/offers")
+def list_offers(
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "offers.view")
+    rows = list(
+        db.scalars(
+            select(HiringOffer)
+            .where(HiringOffer.organization_id == organization.id)
+            .order_by(HiringOffer.updated_at.desc()),
+        ).all(),
+    )
+    return [_serialize_offer(item) for item in rows]
+
+
+@router.post("/offers", status_code=status.HTTP_201_CREATED)
+def create_offer(
+    payload: OfferCreate,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "offers.manage")
+    application = _application_or_404(db, organization.id, payload.application_id)
+    if application.status != "active" or application.stage not in {"interview", "offer"}:
+        raise HTTPException(status_code=409, detail="Offers can only be prepared for an active candidate in Interview or Offer")
+    if int(db.scalar(select(func.count(HiringScorecard.id)).where(HiringScorecard.application_id == application.id)) or 0) < 1:
+        raise HTTPException(status_code=409, detail="Complete a structured interview scorecard before preparing an offer")
+    existing = db.scalar(select(HiringOffer).where(HiringOffer.application_id == application.id))
+    if existing:
+        raise HTTPException(status_code=409, detail="An offer already exists for this application")
+    candidate = _candidate_or_404(db, organization.id, application.candidate_id)
+    job = _job_or_404(db, organization.id, application.job_id)
+    total = (
+        float(payload.base_compensation or 0)
+        + float(payload.variable_compensation)
+        + float(payload.benefits_value)
+    ) or None
+    offer = HiringOffer(
+        organization_id=organization.id,
+        application_id=application.id,
+        job_id=job.id,
+        candidate_id=candidate.id,
+        created_by_user_id=current_user.id,
+        offer_reference=f"VAL-OFR-{datetime.now(timezone.utc).strftime('%Y%m')}-{secrets.token_hex(4).upper()}",
+        job_title_snapshot=job.title,
+        candidate_name_snapshot=f"{candidate.first_name} {candidate.last_name}".strip(),
+        candidate_email_snapshot=candidate.email,
+        recruiter_email_snapshot=current_user.email,
+        currency=payload.currency.strip().upper(),
+        pay_frequency=payload.pay_frequency,
+        base_compensation=payload.base_compensation,
+        variable_compensation=payload.variable_compensation,
+        benefits_value=payload.benefits_value,
+        total_ctc=total,
+        start_date=payload.start_date,
+        expires_at=payload.expires_at or datetime.now(timezone.utc) + timedelta(days=7),
+        letter_body=payload.letter_body.strip() or f"We are pleased to offer you the position of {job.title} with {organization.name}.",
+        terms_text=payload.terms_text.strip() or "This offer is subject to the organization's employment policies, verification requirements, and applicable law.",
+        status="ready" if total else "draft",
+        payroll_reviewed_by_user_id=current_user.id if total and "offers.compensation" in _membership_permissions(current_user, membership) else None,
+    )
+    db.add(offer)
+    db.flush()
+    _write_audit(db, organization.id, current_user.id, "offer_created", "offer", offer.id)
+    db.commit()
+    db.refresh(offer)
+    return _serialize_offer(offer)
+
+
+@router.patch("/offers/{offer_id}")
+def update_offer(
+    offer_id: int,
+    payload: OfferUpdate,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    offer = db.scalar(select(HiringOffer).where(HiringOffer.id == offer_id, HiringOffer.organization_id == organization.id))
+    if not offer:
+        raise HTTPException(status_code=404, detail="Offer not found")
+    if offer.status not in {"draft", "ready"}:
+        raise HTTPException(status_code=409, detail="A released offer can no longer be edited")
+    values = payload.model_dump(exclude_unset=True)
+    compensation_fields = {"currency", "pay_frequency", "base_compensation", "variable_compensation", "benefits_value"}
+    content_fields = {"start_date", "expires_at", "letter_body", "terms_text"}
+    if compensation_fields & values.keys():
+        _require_permission(current_user, membership, "offers.compensation")
+    if content_fields & values.keys():
+        _require_permission(current_user, membership, "offers.manage")
+    for field, value in values.items():
+        setattr(offer, field, value.strip().upper() if field == "currency" and isinstance(value, str) else value)
+    offer.total_ctc = (
+        float(offer.base_compensation or 0)
+        + float(offer.variable_compensation or 0)
+        + float(offer.benefits_value or 0)
+    ) or None
+    if compensation_fields & values.keys():
+        offer.payroll_reviewed_by_user_id = current_user.id
+    offer.status = "ready" if offer.total_ctc and offer.letter_body.strip() and offer.terms_text.strip() else "draft"
+    _write_audit(db, organization.id, current_user.id, "offer_updated", "offer", offer.id, {"fields": sorted(values)})
+    db.commit()
+    db.refresh(offer)
+    return _serialize_offer(offer)
+
+
+@router.post("/offers/{offer_id}/release")
+def release_offer(
+    offer_id: int,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "offers.release")
+    offer = db.scalar(select(HiringOffer).where(HiringOffer.id == offer_id, HiringOffer.organization_id == organization.id))
+    if not offer:
+        raise HTTPException(status_code=404, detail="Offer not found")
+    if offer.status != "ready" or not offer.total_ctc or not offer.payroll_reviewed_by_user_id:
+        raise HTTPException(status_code=409, detail="Compensation must be reviewed before the offer can be released")
+    if _is_past(offer.expires_at):
+        raise HTTPException(status_code=409, detail="Set a future offer expiry date")
+    application = _application_or_404(db, organization.id, offer.application_id)
+    token = secrets.token_urlsafe(32)
+    offer.access_token_hash = hashlib.sha256(token.encode()).hexdigest()
+    offer.status = "released"
+    offer.released_at = datetime.now(timezone.utc)
+    offer.released_document_html = _offer_document_html(offer, organization)
+    offer.released_document_hash = hashlib.sha256(offer.released_document_html.encode()).hexdigest()
+    previous_stage = application.stage
+    application.stage = "offer"
+    db.add(HiringStageEvent(
+        organization_id=organization.id,
+        application_id=application.id,
+        actor_user_id=current_user.id,
+        from_stage=previous_stage,
+        to_stage="offer",
+        reason=f"Offer {offer.offer_reference} released",
+    ))
+    candidate_url = str(get_settings().candidate_app_base_url or "").strip().rstrip("/")
+    if not candidate_url:
+        raise HTTPException(status_code=503, detail="Candidate portal URL is not configured")
+    decision_url = f"{candidate_url}/?offer_key={token}"
+    body = (
+        f"Hello {offer.candidate_name_snapshot},\n\n"
+        f"{organization.name} has released an offer for the position of {offer.job_title_snapshot}.\n\n"
+        f"Review and respond securely: {decision_url}\n\n"
+        f"This offer expires on {offer.expires_at.strftime('%d %B %Y') if offer.expires_at else 'the date shown in the offer'}.\n\n"
+        f"Regards,\n{organization.name}"
+    )
+    try:
+        email_html, inline_images = _candidate_message_email_content(
+            organization.name,
+            organization_logo_url(organization.settings_json),
+            body,
+        )
+        delivery = send_email(
+            offer.candidate_email_snapshot,
+            f"Your offer from {organization.name}",
+            body,
+            html_body=email_html,
+            inline_images=inline_images,
+            reply_to=offer.recruiter_email_snapshot,
+        )
+    except Exception as exc:
+        delivery = {"sent": False, "reason": str(exc)}
+    _write_audit(db, organization.id, current_user.id, "offer_released", "offer", offer.id, {"email_sent": bool(delivery.get("sent"))})
+    db.commit()
+    return {**_serialize_offer(offer), "email_delivery": delivery}
+
+
+@router.get("/offers/{offer_id}/document", response_class=HTMLResponse)
+def get_offer_document(
+    offer_id: int,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "offers.view")
+    offer = db.scalar(select(HiringOffer).where(HiringOffer.id == offer_id, HiringOffer.organization_id == organization.id))
+    if not offer:
+        raise HTTPException(status_code=404, detail="Offer not found")
+    document = offer.signed_document_html or offer.released_document_html
+    if not document:
+        document = _offer_document_html(offer, organization)
+    return HTMLResponse(document, headers={"Content-Disposition": f'inline; filename="{offer.candidate_name_snapshot}-offer.html"'})
+
+
+def _public_offer_by_key(db: Session, offer_key: str) -> HiringOffer:
+    token_hash = hashlib.sha256(offer_key.strip().encode()).hexdigest()
+    offer = db.scalar(select(HiringOffer).where(HiringOffer.access_token_hash == token_hash))
+    if not offer:
+        raise HTTPException(status_code=404, detail="Offer link is invalid")
+    return offer
+
+
+@router.get("/offers/public/{offer_key}")
+def get_public_offer(offer_key: str, db: Session = Depends(get_db)):
+    offer = _public_offer_by_key(db, offer_key)
+    organization = db.get(Organization, offer.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    expired = _is_past(offer.expires_at)
+    return {
+        **_serialize_offer(offer),
+        "company_name": organization.name,
+        "company_logo_url": organization_logo_url(organization.settings_json),
+        "document_html": offer.signed_document_html or offer.released_document_html,
+        "can_respond": offer.status == "released" and not expired,
+        "expired": expired,
+    }
+
+
+@router.post("/offers/public/{offer_key}/decision")
+def decide_public_offer(
+    offer_key: str,
+    payload: OfferDecision,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not payload.consent:
+        raise HTTPException(status_code=422, detail="Confirm the electronic-signature consent")
+    offer = _public_offer_by_key(db, offer_key)
+    if offer.status != "released":
+        raise HTTPException(status_code=409, detail="This offer has already been answered")
+    if _is_past(offer.expires_at):
+        raise HTTPException(status_code=410, detail="This offer has expired")
+    organization = db.get(Organization, offer.organization_id)
+    application = db.get(HiringApplication, offer.application_id)
+    if not organization or not application:
+        raise HTTPException(status_code=404, detail="Offer record is incomplete")
+    now = datetime.now(timezone.utc)
+    offer.signature_name = payload.signature_name.strip()
+    offer.signature_ip = (
+        request.headers.get("x-vercel-forwarded-for")
+        or request.headers.get("x-forwarded-for")
+        or (request.client.host if request.client else "")
+    ).split(",", 1)[0].strip()[:120]
+    offer.signature_user_agent = request.headers.get("user-agent", "")[:500]
+    if payload.accepted:
+        offer.status = "accepted"
+        offer.signed_at = now
+        offer.signed_document_html = _offer_document_html(offer, organization, signed=True)
+        offer.signed_document_hash = hashlib.sha256(offer.signed_document_html.encode()).hexdigest()
+        subject = f"Signed offer copy | {offer.job_title_snapshot}"
+        body = f"The offer {offer.offer_reference} was accepted electronically by {offer.signature_name} on {now.isoformat()}."
+        for recipient in {offer.candidate_email_snapshot, offer.recruiter_email_snapshot}:
+            try:
+                send_email(recipient, subject, body, html_body=offer.signed_document_html)
+            except Exception:
+                pass
+        action = "offer_accepted"
+    else:
+        offer.status = "declined"
+        offer.declined_at = now
+        application.stage = "withdrawn"
+        application.status = "closed"
+        application.human_decision = "offer_declined"
+        db.add(HiringStageEvent(
+            organization_id=organization.id,
+            application_id=application.id,
+            actor_user_id=None,
+            from_stage="offer",
+            to_stage="withdrawn",
+            reason="Candidate declined the offer",
+        ))
+        action = "offer_declined"
+    offer.access_token_hash = None
+    _write_audit(db, organization.id, None, action, "offer", offer.id)
+    db.commit()
+    return {"status": offer.status, "signed_at": offer.signed_at}
 
 
 @router.get("/interviews")

@@ -1231,6 +1231,70 @@ class HiringStageEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class HiringCommunication(Base):
+    __tablename__ = "hiring_communications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("hiring_applications.id"), nullable=True, index=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("job_requisitions.id"), nullable=True, index=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("hiring_candidates.id"), index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    communication_type: Mapped[str] = mapped_column(String(60), index=True)
+    template_key: Mapped[str] = mapped_column(String(80), default="")
+    sender_mode: Mapped[str] = mapped_column(String(30), default="company")
+    recipient_email: Mapped[str] = mapped_column(String(320))
+    subject: Mapped[str] = mapped_column(String(500))
+    body_text: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
+    provider_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class HiringOffer(Base):
+    __tablename__ = "hiring_offers"
+    __table_args__ = (UniqueConstraint("application_id", name="uq_hiring_offer_application"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("hiring_applications.id"), unique=True, index=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("job_requisitions.id"), index=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("hiring_candidates.id"), index=True)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    payroll_reviewed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    offer_reference: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="draft", index=True)
+    job_title_snapshot: Mapped[str] = mapped_column(String(240))
+    candidate_name_snapshot: Mapped[str] = mapped_column(String(240))
+    candidate_email_snapshot: Mapped[str] = mapped_column(String(320))
+    recruiter_email_snapshot: Mapped[str] = mapped_column(String(320))
+    currency: Mapped[str] = mapped_column(String(8), default="INR")
+    pay_frequency: Mapped[str] = mapped_column(String(30), default="annual")
+    base_compensation: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variable_compensation: Mapped[float] = mapped_column(Float, default=0)
+    benefits_value: Mapped[float] = mapped_column(Float, default=0)
+    total_ctc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    letter_body: Mapped[str] = mapped_column(Text, default="")
+    terms_text: Mapped[str] = mapped_column(Text, default="")
+    released_document_html: Mapped[str] = mapped_column(Text, default="")
+    signed_document_html: Mapped[str] = mapped_column(Text, default="")
+    released_document_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    signed_document_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    access_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    signature_name: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    signature_ip: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    signature_user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    declined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class HiringInterview(Base):
     __tablename__ = "hiring_interviews"
 

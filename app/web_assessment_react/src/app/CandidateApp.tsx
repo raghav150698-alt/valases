@@ -1,10 +1,22 @@
 import { IssuedCandidatePanel } from "../features/issued/IssuedCandidatePanel";
 import type { ReactNode } from "react";
 import { BrandLogo } from "../components/BrandLogo";
+import { CandidateOfferPanel } from "../features/offers/CandidateOfferPanel";
 
 export function App() {
   const params = new URLSearchParams(window.location.search);
   const issuedAccessKey = String(params.get("issued_key") || "").trim();
+  const offerKey = String(params.get("offer_key") || "").trim();
+
+  if (offerKey) {
+    return (
+      <CandidatePortalFrame>
+        <main className="candidate-content">
+          <CandidateOfferPanel offerKey={offerKey} />
+        </main>
+      </CandidatePortalFrame>
+    );
+  }
 
   if (!issuedAccessKey) {
     return (
@@ -34,7 +46,7 @@ function CandidatePortalFrame({ children }: { children: ReactNode }) {
     <div className="candidate-portal-shell">
       <header className="candidate-portal-header">
         <a className="candidate-portal-brand" href="/" aria-label="Valases Assessments home"><BrandLogo className="candidate-header-logo" /><strong>Valases</strong></a>
-        <span>Candidate assessments</span>
+        <span>Candidate portal</span>
       </header>
       {children}
       <footer className="candidate-portal-footer">

@@ -74,14 +74,30 @@
 .hiring-table .hiring-row-command:hover { border-color: #91b9aa; background: #eff7f3; }
 .hiring-table .hiring-row-command.danger { border-color: transparent; color: #a33a32; }
 .hiring-table .hiring-row-command.danger:hover { background: #fff1f0; }
+.hiring-assign-button { width: 100%; min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 10px; border: 1px solid #b9d2c7; border-radius: 4px; background: #f3f8f5; color: #174f40; font: inherit; font-size: 11px; font-weight: 750; cursor: pointer; white-space: nowrap; }
+.hiring-assign-button > span { display: inline-flex; align-items: center; gap: 6px; }
+.hiring-assign-button:hover { border-color: #6fa58f; background: #e8f4ee; }
+.hiring-assign-button:focus-visible { outline: 2px solid #168062; outline-offset: 2px; }
 .hiring-status { display: inline-flex; width: max-content; align-items: center; min-height: 22px; padding: 0 8px; border-radius: 12px; font-size: 11px; font-weight: 700; color: #446274; background: #eef3f6; white-space: nowrap; }
 .hiring-status.open, .hiring-status.active, .hiring-status.granted, .hiring-status.passed, .hiring-status.connected, .hiring-status.scheduled { color: #14634f; background: #e7f5ef; }
 .hiring-status.draft, .hiring-status.pending, .hiring-status.ready_to_connect, .hiring-status.needs_review { color: #77530b; background: #fff6dd; }
 .hiring-status.closed, .hiring-status.rejected, .hiring-status.withdrawn, .hiring-status.paused { color: #8d3c3a; background: #fdeceb; }
+.hiring-status.ready, .hiring-status.released { color: #72540c; background: #fff5d8; }
+.hiring-status.accepted { color: #14634f; background: #e7f5ef; }
 .hiring-skills { display: flex !important; flex-wrap: wrap; gap: 4px; }
 .hiring-skills span { padding: 3px 6px; border: 1px solid #d4e0e7; background: #f6fafb; border-radius: 4px; font-size: 11px; color: #36556a; }
 .hiring-section-empty { min-height: 220px; display: grid; place-content: center; justify-items: center; gap: 13px; color: #6e8190; text-align: center; }
 .hiring-section-empty p { max-width: 440px; margin: 0; line-height: 1.5; }
+.hiring-decision-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #e3ebe7; }
+.hiring-offer-list { margin-top: 8px; overflow-x: auto; }
+.hiring-offer-head, .hiring-offer-row { min-width: 900px; display: grid; grid-template-columns: 1.2fr 1.15fr 1fr .55fr minmax(190px, .8fr); gap: 14px; align-items: center; padding: 0 8px; }
+.hiring-offer-head { min-height: 40px; color: #6c8192; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.hiring-offer-row { min-height: 72px; border-top: 1px solid #e5ece8; color: #435d53; font-size: 12px; }
+.hiring-offer-row > div:not(.hiring-row-actions) { min-width: 0; display: grid; gap: 4px; }
+.hiring-offer-row strong, .hiring-offer-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hiring-offer-row strong { color: #183b30; font-size: 13px; }
+.hiring-offer-row small { color: #74867e; }
+.hiring-offer-row a.hiring-row-command { min-height: 30px; display: inline-flex; align-items: center; padding: 0 9px; border: 1px solid #c9d9d2; border-radius: 5px; color: #245e4e; text-decoration: none; font-size: 11px; font-weight: 700; }
 .hiring-candidate-workspace { display: grid; gap: 16px; min-width: 0; }
 .hiring-candidate-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .hiring-candidate-tabs { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid #d6e1dc; border-radius: 6px; background: #edf2ef; }
