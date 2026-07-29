@@ -29,6 +29,7 @@ from app.api.routes.hiring import (
     get_application_detail,
     hiring_workspace,
     list_candidates,
+    list_applications,
     list_integrations,
     get_sso_configuration,
     import_ats_applications,
@@ -158,6 +159,17 @@ class HiringWorkspaceTest(unittest.TestCase):
             select(HiringApplication).where(HiringApplication.external_application_id == "gh-app-1001"),
         )
         self.assertEqual(application.stage, "applied")
+        self.assertIsNotNone(application.ai_match_score)
+        imported_rows = list_applications(
+            organization_id=organization_id,
+            job_id=None,
+            stage=None,
+            db=self.db,
+            current_user=self.recruiter,
+        )
+        self.assertEqual(len(imported_rows), 1)
+        self.assertIn("top_choice_score", imported_rows[0]["ranking"])
+        self.assertIn("resume_match_score", imported_rows[0]["ranking"])
         application.stage = "screening"
         self.db.commit()
 

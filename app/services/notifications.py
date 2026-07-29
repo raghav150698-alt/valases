@@ -13,6 +13,7 @@ def send_email(
     *,
     html_body: str | None = None,
     reply_to: str | None = None,
+    inline_images: dict[str, tuple[bytes, str, str]] | None = None,
 ) -> dict:
     settings = get_settings()
     if not settings.smtp_host or not settings.smtp_username or not settings.smtp_password:
@@ -27,6 +28,15 @@ def send_email(
     msg.set_content(body)
     if html_body:
         msg.add_alternative(html_body, subtype="html")
+        html_part = msg.get_payload()[-1]
+        for content_id, (content, maintype, subtype) in (inline_images or {}).items():
+            html_part.add_related(
+                content,
+                maintype=maintype,
+                subtype=subtype,
+                cid=f"<{content_id}>",
+                disposition="inline",
+            )
 
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
         server.starttls(context=ssl.create_default_context())

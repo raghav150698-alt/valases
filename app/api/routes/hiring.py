@@ -520,12 +520,26 @@ def _candidate_ranking(
     matched_skills = required_skills & (candidate_skills | {skill for skill in required_skills if skill in resume})
     skills_score = round(100.0 if not required_skills else len(matched_skills) / len(required_skills) * 100.0, 1)
     experience_score = round(min(100.0, max(0.0, float(candidate.experience_years or 0) * 10.0)), 1)
+    resume_match_score = round(
+        float(application.ai_match_score)
+        if application.ai_match_score is not None
+        else _screen_application(job, candidate)[0],
+        1,
+    )
+    top_choice_score = round(
+        resume_match_score * 0.45
+        + skills_score * 0.35
+        + experience_score * 0.20,
+        1,
+    )
     available_scores = [skills_score, experience_score]
     if assessment_score is not None:
         available_scores.append(float(assessment_score))
     average_score = round(sum(available_scores) / len(available_scores), 1)
     return {
         "average_score": average_score,
+        "top_choice_score": top_choice_score,
+        "resume_match_score": resume_match_score,
         "skills_score": skills_score,
         "experience_score": experience_score,
         "assessment_score": assessment_score,
@@ -1309,6 +1323,11 @@ def import_ats_applications(
                 ),
             )
             created_applications += 1
+        score, confidence, recommendation, rationale = _screen_application(job, candidate)
+        application.ai_match_score = score
+        application.ai_confidence = confidence
+        application.ai_recommendation = recommendation
+        application.ai_rationale_json = rationale
 
     integration.last_synced_at = datetime.now(timezone.utc)
     _write_audit(

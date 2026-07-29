@@ -122,6 +122,7 @@ type Candidate = {
   skills: string[];
   experience_years: number | null;
   consent_status: string;
+  created_at: string;
 };
 
 type Application = {
@@ -139,6 +140,8 @@ type Application = {
   ai_rationale: { matched_skills?: string[]; missing_skills?: string[]; limitations?: string };
   ranking: {
     average_score: number;
+    top_choice_score: number;
+    resume_match_score: number;
     skills_score: number;
     experience_score: number;
     assessment_score: number | null;
@@ -479,7 +482,11 @@ function CandidatesView({
   const [jobFilter, setJobFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState("all");
-  const [sortOrder, setSortOrder] = useState<"newest" | "rank">("newest");
+  type ApplicationSort = "top_choice" | "newest" | "oldest" | "resume" | "skills" | "experience" | "name" | "role";
+  type DirectorySort = "recent" | "oldest" | "name" | "experience";
+  const [sortOrder, setSortOrder] = useState<ApplicationSort>("top_choice");
+  const [directorySort, setDirectorySort] = useState<DirectorySort>("recent");
+  const [directorySource, setDirectorySource] = useState("all");
   const [page, setPage] = useState(1);
   const pageSize = 25;
   const roles = useMemo(
@@ -498,20 +505,39 @@ function CandidatesView({
     all: applications.length,
     new: applications.filter((application) => application.stage === "applied").length,
     needs_review: applications.filter((application) => ["applied", "screening"].includes(application.stage) && application.ai_match_score === null).length,
-    priority: applications.filter((application) => ["applied", "screening"].includes(application.stage) && application.ranking.average_score >= 70).length,
+    priority: applications.filter((application) => ["applied", "screening"].includes(application.stage) && application.ranking.top_choice_score >= 70).length,
   };
   const filtered = applications
     .filter((application) => {
       if (queue === "new" && application.stage !== "applied") return false;
       if (queue === "needs_review" && (!["applied", "screening"].includes(application.stage) || application.ai_match_score !== null)) return false;
-      if (queue === "priority" && (!["applied", "screening"].includes(application.stage) || application.ranking.average_score < 70)) return false;
+      if (queue === "priority" && (!["applied", "screening"].includes(application.stage) || application.ranking.top_choice_score < 70)) return false;
       if (jobFilter !== "all" && String(application.job_id) !== jobFilter) return false;
       if (sourceFilter !== "all" && (application.source || "manual") !== sourceFilter) return false;
       return stageFilter === "all" || application.stage === stageFilter;
     })
-    .sort((left, right) => sortOrder === "rank"
-      ? right.ranking.average_score - left.ranking.average_score
-      : new Date(right.applied_at).getTime() - new Date(left.applied_at).getTime());
+    .sort((left, right) => {
+      if (sortOrder === "top_choice") return right.ranking.top_choice_score - left.ranking.top_choice_score;
+      if (sortOrder === "oldest") return new Date(left.applied_at).getTime() - new Date(right.applied_at).getTime();
+      if (sortOrder === "resume") return right.ranking.resume_match_score - left.ranking.resume_match_score;
+      if (sortOrder === "skills") return right.ranking.skills_score - left.ranking.skills_score;
+      if (sortOrder === "experience") return right.ranking.experience_score - left.ranking.experience_score;
+      if (sortOrder === "name") return left.candidate.full_name.localeCompare(right.candidate.full_name);
+      if (sortOrder === "role") return left.job_title.localeCompare(right.job_title) || left.candidate.full_name.localeCompare(right.candidate.full_name);
+      return new Date(right.applied_at).getTime() - new Date(left.applied_at).getTime();
+    });
+  const directorySources = useMemo(
+    () => Array.from(new Set(candidates.map((candidate) => candidate.source || "manual"))).sort(),
+    [candidates],
+  );
+  const directoryRows = candidates
+    .filter((candidate) => directorySource === "all" || (candidate.source || "manual") === directorySource)
+    .sort((left, right) => {
+      if (directorySort === "oldest") return new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+      if (directorySort === "name") return left.full_name.localeCompare(right.full_name);
+      if (directorySort === "experience") return Number(right.experience_years || 0) - Number(left.experience_years || 0);
+      return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+    });
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -535,16 +561,16 @@ function CandidatesView({
         <label>Role<select value={jobFilter} onChange={(event) => changeFilter(setJobFilter, event.target.value)}><option value="all">All roles</option>{roles.map(([id, title]) => <option value={id} key={id}>{title}</option>)}</select></label>
         <label>Source<select value={sourceFilter} onChange={(event) => changeFilter(setSourceFilter, event.target.value)}><option value="all">All sources</option>{sources.map((source) => <option value={source} key={source}>{stageLabel(source)}</option>)}</select></label>
         <label>Stage<select value={stageFilter} onChange={(event) => changeFilter(setStageFilter, event.target.value)}><option value="all">All stages</option>{stages.map((stage) => <option value={stage} key={stage}>{stageLabel(stage)}</option>)}</select></label>
-        <label>Sort<select value={sortOrder} onChange={(event) => { setSortOrder(event.target.value as "newest" | "rank"); setPage(1); }}><option value="newest">Newest first</option><option value="rank">Best evidence match</option></select></label>
+        <label>Sort<select value={sortOrder} onChange={(event) => { setSortOrder(event.target.value as ApplicationSort); setPage(1); }}><option value="top_choice">Top choice</option><option value="newest">Most recent</option><option value="oldest">Oldest first</option><option value="resume">Resume match</option><option value="skills">Skills match</option><option value="experience">Most experienced</option><option value="name">Candidate name</option><option value="role">Role and candidate</option></select></label>
       </div>
       <div className="hiring-application-inbox">
-        <div className="hiring-inbox-head"><span>Candidate</span><span>Role</span><span>Source</span><span>Stage</span><span>Evidence</span><span>Applied</span><span /></div>
+        <div className="hiring-inbox-head"><span>Candidate</span><span>Role</span><span>Source</span><span>Stage</span><span>Top choice</span><span>Applied</span><span /></div>
         {pageRows.map((application) => <article className="hiring-inbox-row" key={application.id} onClick={() => onSelectApplication(application)}>
           <div><strong>{application.candidate.full_name}</strong><small>{application.candidate.email}</small></div>
           <span>{application.job_title}</span>
           <span className={`hiring-source${application.source !== "manual" ? " synced" : ""}`}>{application.source === "manual" ? "Manual" : stageLabel(application.source)}</span>
           <StatusPill status={application.stage} />
-          <strong className="hiring-application-score">{application.ranking.average_score.toFixed(0)}</strong>
+          <strong className="hiring-application-score" title={`Resume ${application.ranking.resume_match_score.toFixed(0)}% | Skills ${application.ranking.skills_score.toFixed(0)}% | Experience ${application.ranking.experience_score.toFixed(0)}%`}>{application.ranking.top_choice_score.toFixed(0)}</strong>
           <span>{new Date(application.applied_at).toLocaleDateString()}</span>
           <button type="button" className="hiring-row-command" onClick={(event) => { event.stopPropagation(); onSelectApplication(application); }}>Review<ArrowRight size={14} /></button>
         </article>)}
@@ -552,8 +578,9 @@ function CandidatesView({
       </div>
       {filtered.length > pageSize && <div className="hiring-pagination"><span>{(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}</span><div><button type="button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft size={16} /></button><strong>{currentPage} / {totalPages}</strong><button type="button" aria-label="Next page" disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}><ChevronRight size={16} /></button></div></div>}
     </>}
-    {activeTab === "directory" && <div className="hiring-panel hiring-full-panel hiring-directory-panel">
-      {candidates.length ? <div className="hiring-table"><div className="hiring-table-head candidates"><span>Candidate</span><span>Skills</span><span>Experience</span><span>Consent</span><span>Applications</span><span /></div>{candidates.map((candidate) => <div className="hiring-table-row candidates" key={candidate.id}><div><strong>{candidate.full_name}</strong><small>{candidate.headline || candidate.email}</small></div><div className="hiring-skills">{candidate.skills.length ? candidate.skills.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>) : <small>No skills added</small>}</div><span>{candidate.experience_years ?? "-"}{candidate.experience_years !== null ? " yrs" : ""}</span><StatusPill status={candidate.consent_status} /><span>{applications.filter((application) => application.candidate.id === candidate.id).length}</span><button type="button" className="hiring-row-command" onClick={onCreateApplication}><ArrowRight size={15} />Add to role</button></div>)}</div> : <Empty text="Add candidates manually or connect an ATS to build the directory." action="Add candidate" onClick={onNewCandidate} />}
+    {activeTab === "directory" && <div className="hiring-directory-panel">
+      <div className="hiring-directory-toolbar"><span>{directoryRows.length} candidates</span><div><label>Source<select value={directorySource} onChange={(event) => setDirectorySource(event.target.value)}><option value="all">All sources</option>{directorySources.map((source) => <option value={source} key={source}>{stageLabel(source)}</option>)}</select></label><label>Sort<select value={directorySort} onChange={(event) => setDirectorySort(event.target.value as DirectorySort)}><option value="recent">Most recent</option><option value="oldest">Oldest first</option><option value="name">Candidate name</option><option value="experience">Most experienced</option></select></label></div></div>
+      {directoryRows.length ? <div className="hiring-directory-table"><div className="hiring-directory-head"><span>Candidate</span><span>Source</span><span>Skills</span><span>Experience</span><span>Consent</span><span>Applications</span><span /></div>{directoryRows.map((candidate) => <div className="hiring-directory-row" key={candidate.id}><div><strong>{candidate.full_name}</strong><small>{candidate.email}</small><small>{candidate.headline || "No headline added"}</small></div><span className={`hiring-source${candidate.source !== "manual" ? " synced" : ""}`}>{candidate.source === "manual" ? "Manual" : stageLabel(candidate.source)}</span><div className="hiring-skills">{candidate.skills.length ? candidate.skills.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>) : <small>No skills added</small>}</div><span>{candidate.experience_years ?? "-"}{candidate.experience_years !== null ? " yrs" : ""}</span><StatusPill status={candidate.consent_status} /><span>{applications.filter((application) => application.candidate.id === candidate.id).length}</span><button type="button" className="hiring-row-command" onClick={onCreateApplication}><ArrowRight size={15} />Add to role</button></div>)}</div> : <Empty text="No candidates match this source." action="Add candidate" onClick={onNewCandidate} />}
     </div>}
   </section>;
 }

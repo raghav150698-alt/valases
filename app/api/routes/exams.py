@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from html import escape
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -39,6 +41,7 @@ from app.models.entities import (
     HiringCandidate,
     HiringStageEvent,
     Option,
+    Organization,
     OrganizationAuditEvent,
     OrganizationMembership,
     ProviderProfile,
@@ -54,6 +57,7 @@ from app.services.default_assessments import install_default_assessment_for_prov
 from app.services.desktop_session_broker import desktop_app_spec
 from app.services.desktop_session_lifecycle import desktop_session_artifact_payload, finalize_desktop_sessions_for_issue
 from app.services.notifications import send_email
+from app.services.organization_branding import organization_logo_url
 from app.services.rule_engine import evaluate_exam_rules
 
 router = APIRouter(prefix="/exams", tags=["exams"])
@@ -132,6 +136,21 @@ def _organization_user_ids(db: Session, current_user: User) -> list[int]:
 def _organization_provider_ids(db: Session, current_user: User) -> list[int]:
     user_ids = _organization_user_ids(db, current_user)
     return list(db.scalars(select(ProviderProfile.id).where(ProviderProfile.user_id.in_(user_ids))).all())
+
+
+def _organization_email_branding(
+    db: Session,
+    organization_id: int | None,
+    fallback_name: str,
+) -> tuple[str, str]:
+    fallback_name = str(fallback_name or "Your organization").strip()
+    organization = db.get(Organization, organization_id) if organization_id else None
+    if not organization:
+        return fallback_name, ""
+    return (
+        str(organization.name or fallback_name).strip(),
+        organization_logo_url(organization.settings_json),
+    )
 
 
 def _assessment_permissions(db: Session, current_user: User) -> set[str]:
@@ -725,6 +744,7 @@ def _safe_send_assessment_issue_email(
     temporary_password: str,
     expires_at: datetime | None,
     company_name: str,
+    company_logo_url: str,
     privacy_url: str,
     retention_url: str,
 ) -> dict:
@@ -748,22 +768,92 @@ def _safe_send_assessment_issue_email(
     safe_expiry = escape(expiry_text)
     safe_privacy = escape(privacy_url, quote=True)
     safe_retention = escape(retention_url, quote=True)
+    valases_logo_url = escape(
+        f"{login_link.split('/?issued_key=', 1)[0].rstrip('/')}/assets/brand/valases-logo.png",
+        quote=True,
+    )
+    inline_images: dict[str, tuple[bytes, str, str]] = {}
+    company_logo_markup = f"""
+      <div style="font-size:22px;line-height:28px;font-weight:700;color:#14251f">{safe_company}</div>
+    """
+    logo_match = re.fullmatch(
+        r"data:image/(png|jpeg|webp);base64,(.+)",
+        str(company_logo_url or "").strip(),
+        flags=re.DOTALL,
+    )
+    if logo_match:
+        try:
+            logo_content = base64.b64decode(logo_match.group(2), validate=True)
+        except (ValueError, binascii.Error):
+            logo_content = b""
+        if logo_content:
+            subtype = logo_match.group(1)
+            inline_images["company-logo"] = (logo_content, "image", subtype)
+            company_logo_markup = f"""
+      <img src="cid:company-logo" width="156" alt="{safe_company}" style="display:block;max-width:156px;max-height:64px;width:auto;height:auto;border:0">
+    """
     html_body = f"""<!doctype html>
-<html><body style=\"margin:0;background:#f3f5f7;font-family:Arial,sans-serif;color:#172033\">
-<div style=\"max-width:620px;margin:32px auto;padding:0 16px\">
-  <div style=\"background:#107c41;padding:22px 26px;color:#fff\"><strong style=\"font-size:20px\">{safe_company}</strong><div style=\"margin-top:4px;opacity:.86\">Assessment invitation</div></div>
-  <div style=\"background:#fff;padding:28px 26px;border:1px solid #d8e0ea\">
-    <p style=\"font-size:16px\">Hello {safe_name},</p>
-    <p>You have been invited by <strong>{safe_company}</strong> to complete <strong>{safe_title}</strong>.</p>
-    <p style=\"margin:26px 0\"><a href=\"{safe_link}\" style=\"display:inline-block;background:#107c41;color:#fff;text-decoration:none;padding:13px 20px;border-radius:6px;font-weight:bold\">Open assessment</a></p>
-    <table style=\"border-collapse:collapse;width:100%;background:#f8fafc\"><tr><td style=\"padding:12px;font-weight:bold\">Temporary password</td><td style=\"padding:12px\">{safe_password}</td></tr><tr><td style=\"padding:12px;font-weight:bold\">Access expires</td><td style=\"padding:12px\">{safe_expiry}</td></tr></table>
-    <p style=\"font-size:14px;color:#526071\">Please review the assessment instructions and privacy information before starting. The assessment link is personal to you.</p>
-    <p style=\"font-size:13px\"><a href=\"{safe_privacy}\">Privacy policy</a> &nbsp; <a href=\"{safe_retention}\">Data retention</a></p>
-  </div>
-  <p style=\"font-size:12px;color:#667085;text-align:center\">This invitation was sent by {safe_company} through Valases Assessments.</p>
-</div></body></html>"""
+<html lang="en">
+<body style="margin:0;padding:0;background:#f4f7f5;font-family:Arial,'Helvetica Neue',sans-serif;color:#17251f">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0">Your {safe_title} assessment invitation from {safe_company}.</div>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f4f7f5">
+  <tr>
+    <td align="center" style="padding:36px 16px">
+      <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px">
+        <tr>
+          <td style="padding:0 0 20px 4px">{company_logo_markup}</td>
+        </tr>
+        <tr>
+          <td style="height:4px;background:#14805e;font-size:0;line-height:0">&nbsp;</td>
+        </tr>
+        <tr>
+          <td style="padding:38px 40px 34px;background:#ffffff;border:1px solid #dce5e0;border-top:0">
+            <p style="margin:0 0 10px;font-size:13px;line-height:18px;font-weight:700;color:#14805e;text-transform:uppercase">Assessment invitation</p>
+            <h1 style="margin:0 0 24px;font-size:27px;line-height:35px;font-weight:700;color:#14251f">{safe_title}</h1>
+            <p style="margin:0 0 14px;font-size:16px;line-height:25px">Hello {safe_name},</p>
+            <p style="margin:0 0 26px;font-size:16px;line-height:25px;color:#41534b"><strong style="color:#14251f">{safe_company}</strong> has invited you to complete this assessment. Use the personal access details below when you are ready to begin.</p>
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+              <tr>
+                <td style="background:#14805e">
+                  <a href="{safe_link}" style="display:inline-block;padding:14px 22px;color:#ffffff;text-decoration:none;font-size:15px;line-height:20px;font-weight:700">Open assessment</a>
+                </td>
+              </tr>
+            </table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;margin-top:30px;border:1px solid #dce5e0">
+              <tr>
+                <td style="padding:13px 16px;border-bottom:1px solid #e5ece8;font-size:13px;line-height:19px;color:#617169">Temporary password</td>
+                <td align="right" style="padding:13px 16px;border-bottom:1px solid #e5ece8;font-family:'Courier New',monospace;font-size:14px;line-height:19px;font-weight:700;color:#14251f">{safe_password}</td>
+              </tr>
+              <tr>
+                <td style="padding:13px 16px;font-size:13px;line-height:19px;color:#617169">Access expires</td>
+                <td align="right" style="padding:13px 16px;font-size:13px;line-height:19px;font-weight:700;color:#14251f">{safe_expiry}</td>
+              </tr>
+            </table>
+            <p style="margin:24px 0 0;font-size:13px;line-height:21px;color:#617169">This link is assigned to you. Review the instructions before starting and plan to complete the assessment in one sitting.</p>
+            <p style="margin:16px 0 0;font-size:12px;line-height:18px"><a href="{safe_privacy}" style="color:#315f50;text-decoration:underline">Privacy policy</a><span style="padding:0 8px;color:#a0aca6">|</span><a href="{safe_retention}" style="color:#315f50;text-decoration:underline">Data retention</a></p>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:25px 16px 0">
+            <img src="{valases_logo_url}" width="68" alt="Valases" style="display:block;width:68px;height:auto;border:0;margin:0 auto 8px">
+            <p style="margin:0;font-size:11px;line-height:17px;color:#73817b">Assessment delivery powered by Valases</p>
+            <p style="margin:4px 0 0;font-size:11px;line-height:17px;color:#8a9691">Sent on behalf of {safe_company}</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>"""
     try:
-        return send_email(to_email, subject, body, html_body=html_body)
+        return send_email(
+            to_email,
+            subject,
+            body,
+            html_body=html_body,
+            inline_images=inline_images,
+        )
     except Exception as exc:
         return {"sent": False, "reason": str(exc)}
 
@@ -1406,6 +1496,11 @@ def issue_assessment_to_candidate(
     db.commit()
     db.refresh(issue)
     login_link = f"{base_url}/?issued_key={issue.access_key}"
+    company_name, company_logo_url = _organization_email_branding(
+        db,
+        application.organization_id,
+        (profile.display_name or settings.app_name or "Your organization").strip(),
+    )
     email_delivery = _safe_send_assessment_issue_email(
         to_email=candidate_email,
         candidate_name=candidate_name,
@@ -1413,7 +1508,8 @@ def issue_assessment_to_candidate(
         login_link=login_link,
         temporary_password=temp_password,
         expires_at=issue.access_expires_at,
-        company_name=(profile.display_name or settings.app_name or "Your organization").strip(),
+        company_name=company_name,
+        company_logo_url=company_logo_url,
         privacy_url=f"{base_url}/legal/privacy-policy",
         retention_url=f"{base_url}/legal/data-retention-and-deletion",
     )
@@ -1537,6 +1633,24 @@ def resend_issued_assessment_invitation(
     issue.completed_at = None
     issue.status = "issued"
     login_link = f"{base_url}/?issued_key={issue.access_key}"
+    application = db.get(HiringApplication, issue.hiring_application_id) if issue.hiring_application_id else None
+    issuer_user = db.get(User, issue.issuer_user_id) if not application else None
+    issuer_membership = _organization_membership(db, issuer_user) if issuer_user else None
+    organization_id = (
+        application.organization_id
+        if application
+        else issuer_membership.organization_id if issuer_membership else None
+    )
+    fallback_company_name = (
+        issuer_profile.display_name
+        if issuer_profile and issuer_profile.display_name
+        else settings.app_name
+    )
+    company_name, company_logo_url = _organization_email_branding(
+        db,
+        organization_id,
+        fallback_company_name,
+    )
     email_delivery = _safe_send_assessment_issue_email(
         to_email=issue.candidate_email,
         candidate_name=issue.candidate_name,
@@ -1544,11 +1658,8 @@ def resend_issued_assessment_invitation(
         login_link=login_link,
         temporary_password=temporary_password,
         expires_at=issue.access_expires_at,
-        company_name=(
-            issuer_profile.display_name
-            if issuer_profile and issuer_profile.display_name
-            else settings.app_name
-        ),
+        company_name=company_name,
+        company_logo_url=company_logo_url,
         privacy_url=f"{base_url}/legal/privacy-policy",
         retention_url=f"{base_url}/legal/data-retention-and-deletion",
     )
