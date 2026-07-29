@@ -3659,3 +3659,43 @@ select { min-height: 42px; padding: 9px 12px; border-radius: 6px; border: 1px so
     padding-bottom: 8px;
   }
 }
+.hiring-loading {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 13px;
+  background: #f5f7fa;
+  color: #526f82;
+}
+
+.hiring-loading img { width: 48px; }
+
+.hiring-loading-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.hiring-loading-copy p { margin: 0; }
+
+.hiring-loading-copy strong {
+  color: #176b57;
+  font-size: 13px;
+}
+
+.hiring-loading-track {
+  width: min(320px, 68vw);
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dce8e2;
+}
+
+.hiring-loading-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #176b57, #2b8f76);
+  transition: width .28s ease;
+}

@@ -5,7 +5,7 @@ export function createUiFeedback({ state, el }) {
     node.className = `toast ${type === "error" ? "error" : ""}`;
     node.textContent = message;
     el.toastStack.appendChild(node);
-    setTimeout(() => node.remove(), 2600);
+    setTimeout(() => node.remove(), 3000);
   }
 
   function showAuthProgress(title = "Signing you in", detail = "Please wait while we load your workspace.") {

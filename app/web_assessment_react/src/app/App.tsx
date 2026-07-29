@@ -15,7 +15,23 @@ const TaxTool = lazy(() => import("../features/tools/TaxTool").then((module) => 
 const CorporateTaxTool = lazy(() => import("../features/tools/CorporateTaxTool").then((module) => ({ default: module.CorporateTaxTool })));
 
 function WorkspaceLoader({ label = "Opening workspace..." }: { label?: string }) {
-  return <main className="hiring-loading" role="status"><BrandLogo /><p>{label}</p></main>;
+  const [progress, setProgress] = useState(8);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setProgress((value) => Math.min(96, value + Math.max(1, Math.round((96 - value) * 0.12))));
+    }, 280);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <main className="hiring-loading" role="status" aria-live="polite" aria-busy="true">
+      <BrandLogo />
+      <div className="hiring-loading-copy">
+        <p>{label}</p>
+        <strong>{progress}%</strong>
+      </div>
+      <div className="hiring-loading-track" aria-hidden="true"><span style={{ width: `${progress}%` }} /></div>
+    </main>
+  );
 }
 
 type View = "provider";
@@ -211,7 +227,7 @@ export function App() {
   if (embedded && ["coding", "code", "vscode", "vs-code"].includes(tool)) {
     return (
       <EmbeddedToolShell onSubmitAssessment={handleToolSubmit}>
-        <Suspense fallback={<div className="tool-loading-state" role="status">Loading coding workspace...</div>}>
+        <Suspense fallback={<WorkspaceLoader label="Loading coding workspace..." />}>
           <CodingEnv assessmentMode />
         </Suspense>
       </EmbeddedToolShell>

@@ -269,6 +269,30 @@ function apiError(error: unknown, fallback: string) {
   return typeof detail === "string" && detail ? detail : fallback;
 }
 
+function LoadingProgress({ label }: { label: string }) {
+  const [progress, setProgress] = useState(8);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setProgress((value) => Math.min(96, value + Math.max(1, Math.round((96 - value) * 0.12))));
+    }, 280);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <main className="hiring-loading" role="status" aria-live="polite" aria-busy="true">
+      <BrandLogo />
+      <div className="hiring-loading-copy">
+        <p>{label}</p>
+        <strong>{progress}%</strong>
+      </div>
+      <div className="hiring-loading-track" aria-hidden="true"><span style={{ width: `${progress}%` }} /></div>
+    </main>
+  );
+}
+
+function BusyLabel({ label }: { label: string }) {
+  return <><span className="hiring-button-spinner" aria-hidden="true" /><span>{label}</span></>;
+}
+
 function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   return (
     <div className="hiring-modal-backdrop" role="dialog" aria-modal="true" aria-label={title}>
@@ -328,6 +352,12 @@ export function HiringWorkspace() {
   const filteredOffers = searchTerm ? offers.filter((offer) => `${offer.candidate_name} ${offer.candidate_email} ${offer.job_title} ${offer.offer_reference} ${offer.status}`.toLowerCase().includes(searchTerm)) : offers;
   const filteredIntegrations = searchTerm ? (integrationsQuery.data || []).filter((integration) => `${integration.provider} ${integration.category} ${integration.status} ${integration.capabilities.join(" ")}`.toLowerCase().includes(searchTerm)) : (integrationsQuery.data || []);
   const busy = workspaceQuery.isLoading;
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 3000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   const screenMutation = useMutation({
     mutationFn: async (applicationId: number) => (await api.post(`/hiring/applications/${applicationId}/screen`)).data,
@@ -402,9 +432,7 @@ export function HiringWorkspace() {
     }
   };
 
-  if (busy && !workspace) {
-    return <main className="hiring-loading" role="status"><BrandLogo /><p>Opening hiring workspace...</p></main>;
-  }
+  if (busy && !workspace) return <LoadingProgress label="Opening hiring workspace..." />;
 
   return (
     <div className="hiring-shell">
@@ -436,7 +464,7 @@ export function HiringWorkspace() {
         {tab === "jobs" && <JobsView jobs={filteredJobs} applications={applications} onNewJob={() => setDialog("job")} onCreateApplication={(jobId) => { setApplicationJobId(jobId); setApplicationCandidateId(null); setDialog("application"); }} onStatusChange={(id, status) => jobStatusMutation.mutate({ id, status })} onCloseVacancies={(job) => { setSelectedJob(job); setDialog("close-vacancies"); }} onDelete={(job) => { if (window.confirm(`Delete ${job.title}? Jobs with active applications must be closed first.`)) jobDeleteMutation.mutate(job.id); }} />}
         {tab === "candidates" && <CandidatesView candidates={filteredCandidates} applications={filteredApplications} onNewCandidate={() => setDialog("candidate")} onCreateApplication={(candidateId) => { setApplicationCandidateId(candidateId); setApplicationJobId(null); setDialog("application"); }} onSelectApplication={(application) => { setStageError(""); setSelectedApplication(application); }} />}
         {tab === "pipeline" && <PipelineView stages={pipelineStages} applications={filteredApplications} canManage={can("pipeline.manage")} movingId={stageMutation.isPending ? stageMutation.variables?.id : undefined} onSelect={(application) => { setStageError(""); setSelectedApplication(application); }} onMove={(id, stage) => stageMutation.mutate({ id, stage })} onOpenAssessments={() => setTab("assessments")} />}
-        {tab === "interviews" && <InterviewsView interviews={filteredInterviews} applications={filteredApplications} onSchedule={() => setDialog("interview")} onScorecard={(interview) => { setSelectedInterview(interview); setDialog("scorecard"); }} />}
+        {tab === "interviews" && <InterviewsView interviews={filteredInterviews} applications={filteredApplications} scheduling={dialog === "interview"} onSchedule={() => setDialog("interview")} onScorecard={(interview) => { setSelectedInterview(interview); setDialog("scorecard"); }} />}
         {tab === "offers" && <OffersView offers={filteredOffers} applications={applications} canCreate={can("offers.manage")} canRelease={can("offers.release")} onNew={() => setDialog("offer")} onRefresh={refresh} onNotice={setNotice} />}
         {tab === "assessments" && <Suspense fallback={<div className="hiring-section-empty">Loading assessment workspace...</div>}><ProviderAssessments embedded /></Suspense>}
         {tab === "integrations" && <IntegrationsView integrations={filteredIntegrations} canManage={can("integrations.manage")} onConnect={(integration) => void connectIntegration(integration)} onConfigure={(integration) => { setSelectedIntegration(integration); setDialog("integration"); }} />}
@@ -444,7 +472,7 @@ export function HiringWorkspace() {
         {tab === "settings" && <SettingsView organization={workspace?.organization} currentUser={workspace?.current_user} role={workspace?.membership_role || "recruiter"} permissions={workspace?.permissions || []} onRefresh={refresh} onSignOut={async () => { try { if (supabase) await supabase.auth.signOut(); } finally { clearSession(); } }} />}
       </main>
 
-      {selectedDetails && <ApplicationDrawer key={selectedDetails.id} application={selectedDetails} detail={applicationDetailQuery.data} loading={applicationDetailQuery.isLoading} transitionError={stageError} stages={pipelineStages} onClose={() => { setStageError(""); setSelectedApplication(null); }} onScreen={() => screenMutation.mutate(selectedDetails.id)} onCompliance={() => complianceMutation.mutate(selectedDetails.id)} onOpenInterviews={() => { setSelectedApplication(null); setTab("interviews"); }} onAddScorecard={() => {
+      {selectedDetails && <ApplicationDrawer key={selectedDetails.id} application={selectedDetails} detail={applicationDetailQuery.data} loading={applicationDetailQuery.isLoading} screeningBusy={screenMutation.isPending && screenMutation.variables === selectedDetails.id} checkingCompliance={complianceMutation.isPending && complianceMutation.variables === selectedDetails.id} moving={stageMutation.isPending && stageMutation.variables?.id === selectedDetails.id} transitionError={stageError} stages={pipelineStages} onClose={() => { setStageError(""); setSelectedApplication(null); }} onScreen={() => { if (!screenMutation.isPending) screenMutation.mutate(selectedDetails.id); }} onCompliance={() => { if (!complianceMutation.isPending) complianceMutation.mutate(selectedDetails.id); }} onOpenInterviews={() => { setSelectedApplication(null); setTab("interviews"); }} onAddScorecard={() => {
         const interview = interviews.find((item) => item.application_id === selectedDetails.id);
         if (interview) {
           setSelectedInterview(interview);
@@ -666,12 +694,12 @@ function PipelineView({ stages, applications, canManage, movingId, onSelect, onM
   </section>;
 }
 
-function InterviewsView({ interviews, applications, onSchedule, onScorecard }: { interviews: Interview[]; applications: Application[]; onSchedule: () => void; onScorecard: (interview: Interview) => void }) {
+function InterviewsView({ interviews, applications, scheduling, onSchedule, onScorecard }: { interviews: Interview[]; applications: Application[]; scheduling: boolean; onSchedule: () => void; onScorecard: (interview: Interview) => void }) {
   const ranked = applications
     .filter((application) => application.stage === "interview" && application.status === "active")
     .sort((left, right) => right.ranking.average_score - left.ranking.average_score);
   return <section className="hiring-panel hiring-full-panel">
-    <div className="hiring-panel-header"><div><h2>Interview plan</h2><p>Schedule structured conversations and capture comparable evidence before a decision.</p></div><button type="button" className="hiring-button primary" disabled={!applications.length} onClick={onSchedule}><CalendarPlus size={16} />Schedule interview</button></div>
+    <div className="hiring-panel-header"><div><h2>Interview plan</h2><p>Schedule structured conversations and capture comparable evidence before a decision.</p></div><button type="button" className="hiring-button primary" disabled={!applications.length || scheduling} onClick={onSchedule}>{scheduling ? <BusyLabel label="Opening..." /> : <><CalendarPlus size={16} />Schedule interview</>}</button></div>
     {ranked.length > 0 && <div className="hiring-shortlist">
       <div className="hiring-shortlist-head"><div><h3>Recommended interview order</h3><p>Ranked by the average of relevant skills, experience, and finalized assessment score.</p></div></div>
       {ranked.slice(0, 5).map((application, index) => <div className="hiring-shortlist-row" key={application.id}><strong>{index + 1}</strong><div><b>{application.candidate.full_name}</b><small>{application.job_title}</small></div><span>Skills <b>{application.ranking.skills_score.toFixed(0)}%</b></span><span>Experience <b>{application.ranking.experience_score.toFixed(0)}%</b></span><span>Assessment <b>{application.ranking.assessment_score !== null ? `${application.ranking.assessment_score.toFixed(0)}%` : "--"}</b></span><em>{application.ranking.average_score.toFixed(0)}</em></div>)}
@@ -976,10 +1004,13 @@ function OrganizationProfileForm({ organization, onSaved }: { organization: Work
   </form>;
 }
 
-function ApplicationDrawer({ application, detail, loading, transitionError, stages, onClose, onScreen, onCompliance, onAddScorecard, onOpenInterviews, canManage, canPrepareOffer, onReject, onPrepareOffer, onMove }: {
+function ApplicationDrawer({ application, detail, loading, screeningBusy, checkingCompliance, moving, transitionError, stages, onClose, onScreen, onCompliance, onAddScorecard, onOpenInterviews, canManage, canPrepareOffer, onReject, onPrepareOffer, onMove }: {
   application: Application;
   detail?: ApplicationDetail;
   loading: boolean;
+  screeningBusy: boolean;
+  checkingCompliance: boolean;
+  moving: boolean;
   transitionError: string;
   stages: string[];
   onClose: () => void;
@@ -1008,16 +1039,16 @@ function ApplicationDrawer({ application, detail, loading, transitionError, stag
       <p>{detail.evidence_summary.message}</p>
       <div className="hiring-evidence-metrics"><span>Screening<strong>{detail.evidence_summary.screening_complete ? "Complete" : "Missing"}</strong></span><span>Scorecards<strong>{detail.evidence_summary.scorecard_count}</strong></span><span>Compliance<strong>{detail.evidence_summary.blocking_checks.length ? `${detail.evidence_summary.blocking_checks.length} open` : detail.evidence_summary.compliance_complete ? "Passed" : "Not run"}</strong></span></div>
     </section>}
-    <section><h3>Screening signal</h3>{screening.match_score !== null ? <><strong className="hiring-score">{screening.match_score}%</strong><p>{screening.recommendation?.replace(/_/g, " ")}</p><div className="hiring-skill-detail"><span>Matched</span>{(screening.rationale.matched_skills || []).join(", ") || "No matched skills recorded"}</div><div className="hiring-skill-detail"><span>Still to verify</span>{(screening.rationale.missing_skills || []).join(", ") || "No gaps recorded"}</div></> : <p>No screening signal yet. Use it as a review aid, never a decision-maker.</p>}{canManage && <button type="button" className="hiring-button secondary" onClick={onScreen}>Run evidence screen</button>}</section>
+    <section><h3>Screening signal</h3>{screening.match_score !== null ? <><strong className="hiring-score">{screening.match_score}%</strong><p>{screening.recommendation?.replace(/_/g, " ")}</p><div className="hiring-skill-detail"><span>Matched</span>{(screening.rationale.matched_skills || []).join(", ") || "No matched skills recorded"}</div><div className="hiring-skill-detail"><span>Still to verify</span>{(screening.rationale.missing_skills || []).join(", ") || "No gaps recorded"}</div></> : <p>No screening signal yet. Use it as a review aid, never a decision-maker.</p>}{canManage && <button type="button" className="hiring-button secondary" disabled={screeningBusy} onClick={onScreen}>{screeningBusy ? <BusyLabel label="Screening..." /> : "Run evidence screen"}</button>}</section>
     <section><h3>Interview evidence</h3>{detail?.scorecards.length ? detail.scorecards.map((scorecard) => <article className="hiring-scorecard-summary" key={scorecard.id}><div><strong>{scorecard.overall_score?.toFixed(1) || "-"} / 5</strong><StatusPill status={scorecard.recommendation} /></div><p>{scorecard.evidence}</p></article>) : <p>No structured scorecard has been submitted.</p>}</section>
-    <section><h3>Compliance</h3>{detail?.compliance_checks.length ? <div className="hiring-check-list">{detail.compliance_checks.map((check) => <div key={check.check_type}><span>{stageLabel(check.check_type)}</span><StatusPill status={check.status} /></div>)}</div> : <p>Consent, structured evidence and automated-decision guardrails have not been checked yet.</p>}{canManage && <button type="button" className="hiring-button secondary" onClick={onCompliance}>Run checks</button>}</section>
+    <section><h3>Compliance</h3>{detail?.compliance_checks.length ? <div className="hiring-check-list">{detail.compliance_checks.map((check) => <div key={check.check_type}><span>{stageLabel(check.check_type)}</span><StatusPill status={check.status} /></div>)}</div> : <p>Consent, structured evidence and automated-decision guardrails have not been checked yet.</p>}{canManage && <button type="button" className="hiring-button secondary" disabled={checkingCompliance} onClick={onCompliance}>{checkingCompliance ? <BusyLabel label="Checking..." /> : "Run checks"}</button>}</section>
     {canManage && <section>
       <h3>Record stage decision</h3>
       <select value={nextStage} disabled={application.status === "closed"} onChange={(event) => setNextStage(event.target.value)}>{stages.filter((stage) => stage !== "rejected").map((stage) => <option key={stage} value={stage}>{stageLabel(stage)}</option>)}</select>
       {missingScorecard && <div className="hiring-transition-blocker" role="note"><strong>Interview scorecard required</strong><p>Add structured interview evidence before moving this candidate to {stageLabel(nextStage)}.</p><div><button type="button" className="hiring-button secondary" onClick={onAddScorecard}>Add scorecard</button><button type="button" className="hiring-button secondary" onClick={onOpenInterviews}>Open interviews</button></div></div>}
       <textarea rows={3} value={reason} disabled={application.status === "closed"} onChange={(event) => setReason(event.target.value)} placeholder="Reason and supporting evidence" />
       {transitionError && <p className="hiring-transition-error" role="alert">{transitionError}</p>}
-      <button type="button" className="hiring-button primary" disabled={application.status === "closed" || nextStage === application.stage || checkingScorecard || missingScorecard || (terminal && reason.trim().length < 10)} onClick={() => onMove(nextStage, reason.trim() || "Progressed by the recruiter from the hiring workspace")}>{checkingScorecard ? "Checking evidence..." : "Save stage"}</button>
+      <button type="button" className="hiring-button primary" disabled={moving || application.status === "closed" || nextStage === application.stage || checkingScorecard || missingScorecard || (terminal && reason.trim().length < 10)} onClick={() => onMove(nextStage, reason.trim() || "Progressed by the recruiter from the hiring workspace")}>{moving ? <BusyLabel label="Saving..." /> : checkingScorecard ? <BusyLabel label="Checking evidence..." /> : "Save stage"}</button>
       {terminal && reason.trim().length < 10 && <small>Offer and final decisions require a rationale of at least 10 characters.</small>}
       {application.status === "active" && <div className="hiring-decision-actions">{canPrepareOffer && ["interview", "offer"].includes(application.stage) && <button type="button" className="hiring-button secondary" onClick={onPrepareOffer}><FileSignature size={15} />Prepare offer</button>}<button type="button" className="hiring-button quiet-danger" onClick={onReject}>Reject candidate</button></div>}
     </section>}
@@ -1075,7 +1106,28 @@ function CandidateForm({ jobs, onClose, onSaved }: { jobs: Job[]; onClose: () =>
 
 function ApplicationForm({ jobs, candidates, onClose, onSaved }: { jobs: Job[]; candidates: Candidate[]; onClose: () => void; onSaved: () => void }) { const [jobId, setJobId] = useState(""); const [candidateId, setCandidateId] = useState(""); const [error, setError] = useState(""); const submit = async (event: React.FormEvent) => { event.preventDefault(); try { await api.post("/hiring/applications", { job_id: Number(jobId), candidate_id: Number(candidateId) }); onSaved(); } catch (reason) { setError(apiError(reason, "Could not create the application.")); } }; return <Modal title="Add candidate to role" onClose={onClose}><form className="hiring-form" onSubmit={submit}>{jobs.length && candidates.length ? <><label>Job<select required value={jobId} onChange={(event) => setJobId(event.target.value)}><option value="">Select job</option>{jobs.map((job) => <option value={job.id} key={job.id}>{job.title}</option>)}</select></label><label>Candidate<select required value={candidateId} onChange={(event) => setCandidateId(event.target.value)}><option value="">Select candidate</option>{candidates.map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.full_name}</option>)}</select></label></> : <p className="hiring-form-error">Create at least one job and one candidate first.</p>}{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={!jobs.length || !candidates.length}>Add to pipeline</button></footer></form></Modal>; }
 
-function InterviewForm({ applications, onClose, onSaved }: { applications: Application[]; onClose: () => void; onSaved: () => void }) { const [applicationId, setApplicationId] = useState(""); const [scheduledAt, setScheduledAt] = useState(""); const [error, setError] = useState(""); const eligible = applications.filter((application) => application.status === "active" && application.stage === "interview").sort((left, right) => right.ranking.average_score - left.ranking.average_score); const submit = async (event: React.FormEvent) => { event.preventDefault(); try { await api.post("/hiring/interviews", { application_id: Number(applicationId), interview_type: "structured", scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null }); onSaved(); } catch (reason) { setError(apiError(reason, "Could not schedule the interview.")); } }; return <Modal title="Schedule structured interview" onClose={onClose}><form className="hiring-form" onSubmit={submit}><label>Candidate<select required value={applicationId} onChange={(event) => setApplicationId(event.target.value)}><option value="">Select candidate</option>{eligible.map((application) => <option key={application.id} value={application.id}>{application.candidate.full_name} | {application.job_title} | {application.ranking.average_score.toFixed(0)} average</option>)}</select></label><label>When<input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></label><p className="hiring-form-hint">Calendar and voice scheduling connectors can be enabled per organization after OAuth configuration.</p>{!eligible.length && <p className="hiring-form-error">No candidates have cleared assessment and reached Interview.</p>}{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={!eligible.length || !applicationId}>Schedule interview</button></footer></form></Modal>; }
+function InterviewForm({ applications, onClose, onSaved }: { applications: Application[]; onClose: () => void; onSaved: () => void }) {
+  const [applicationId, setApplicationId] = useState("");
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const eligible = applications.filter((application) => application.status === "active" && application.stage === "interview").sort((left, right) => right.ranking.average_score - left.ranking.average_score);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      await api.post("/hiring/interviews", { application_id: Number(applicationId), interview_type: "structured", scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null });
+      onSaved();
+    } catch (reason) {
+      setError(apiError(reason, "Could not schedule the interview."));
+    } finally {
+      setLoading(false);
+    }
+  };
+  return <Modal title="Schedule structured interview" onClose={onClose}><form className="hiring-form" onSubmit={submit}><label>Candidate<select required value={applicationId} disabled={loading} onChange={(event) => setApplicationId(event.target.value)}><option value="">Select candidate</option>{eligible.map((application) => <option key={application.id} value={application.id}>{application.candidate.full_name} | {application.job_title} | {application.ranking.average_score.toFixed(0)} average</option>)}</select></label><label>When<input type="datetime-local" value={scheduledAt} disabled={loading} onChange={(event) => setScheduledAt(event.target.value)} /></label><p className="hiring-form-hint">Calendar and voice scheduling connectors can be enabled per organization after OAuth configuration.</p>{!eligible.length && <p className="hiring-form-error">No candidates have cleared assessment and reached Interview.</p>}{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" disabled={loading} onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading || !eligible.length || !applicationId}>{loading ? <BusyLabel label="Scheduling..." /> : "Schedule interview"}</button></footer></form></Modal>;
+}
 
 function ScorecardForm({ interview, onClose, onSaved }: { interview: Interview; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({
@@ -1134,6 +1186,7 @@ function ScorecardForm({ interview, onClose, onSaved }: { interview: Interview; 
 function ApplicationFormWithRules({ jobs, candidates, applications, initialCandidateId, initialJobId, onClose, onSaved }: { jobs: Job[]; candidates: Candidate[]; applications: Application[]; initialCandidateId: number | null; initialJobId: number | null; onClose: () => void; onSaved: () => void }) {
   const [jobId, setJobId] = useState(initialJobId ? String(initialJobId) : "");
   const [candidateId, setCandidateId] = useState(initialCandidateId ? String(initialCandidateId) : "");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const unavailableCandidateIds = new Set(
     jobId ? applications.filter((item) => item.status === "active" && String(item.job_id) === jobId).map((item) => item.candidate.id) : [],
@@ -1141,12 +1194,16 @@ function ApplicationFormWithRules({ jobs, candidates, applications, initialCandi
   const availableCandidates = candidates.filter((candidate) => !unavailableCandidateIds.has(candidate.id));
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (loading) return;
+    setLoading(true);
     setError("");
     try {
       await api.post("/hiring/applications", { job_id: Number(jobId), candidate_id: Number(candidateId) });
       onSaved();
     } catch (reason) {
       setError(apiError(reason, "Could not create the application."));
+    } finally {
+      setLoading(false);
     }
   };
   return <Modal title="Assign candidate to role" onClose={onClose}><form className="hiring-form" onSubmit={submit}>
@@ -1156,7 +1213,7 @@ function ApplicationFormWithRules({ jobs, candidates, applications, initialCandi
       <p className="hiring-form-hint">A candidate can apply to several roles. An active duplicate application for the same role is blocked automatically.</p>
     </> : <p className="hiring-form-error">Create an open job and candidate first.</p>}
     {error && <p className="hiring-form-error">{error}</p>}
-    <footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={!jobId || !candidateId}>Assign role</button></footer>
+    <footer><button type="button" className="hiring-button secondary" disabled={loading} onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary" disabled={loading || !jobId || !candidateId}>{loading ? <BusyLabel label="Assigning..." /> : "Assign role"}</button></footer>
   </form></Modal>;
 }
 
