@@ -15,6 +15,7 @@ from app.api.routes.hiring import (
     JobCreate,
     OfferCreate,
     OfferDecision,
+    PayrollLineItem,
     RejectionRequest,
     close_job_vacancies,
     create_application,
@@ -30,9 +31,7 @@ from app.core.config import Settings
 from app.models.entities import (
     Base,
     HiringApplication,
-    HiringInterview,
     HiringOffer,
-    HiringScorecard,
     JobRequisition,
     User,
     UserRole,
@@ -130,23 +129,12 @@ class HiringLifecycleOffersTest(unittest.TestCase):
         self.assertEqual(result["drafts_created"], 2)
         self.assertEqual(self.db.get(JobRequisition, job["id"]).status, "paused")
 
-    def test_offer_release_and_candidate_signature_retains_signed_copy(self) -> None:
+    def test_hired_candidate_offer_release_and_signature_retains_pdf_copy(self) -> None:
         job, candidate = self._job_and_candidate("ACC-501")
         application_result = create_application(ApplicationCreate(job_id=job["id"], candidate_id=candidate["id"]), self.organization_id, self.db, self.recruiter)
         application = self.db.get(HiringApplication, application_result["id"])
-        application.stage = "interview"
-        interview = HiringInterview(organization_id=self.organization_id, application_id=application.id, status="ended")
-        self.db.add(interview)
-        self.db.flush()
-        self.db.add(HiringScorecard(
-            organization_id=self.organization_id,
-            interview_id=interview.id,
-            application_id=application.id,
-            reviewer_user_id=self.recruiter.id,
-            recommendation="yes",
-            overall_score=4.2,
-            evidence="Strong role-relevant accounting evidence.",
-        ))
+        application.stage = "hired"
+        application.status = "closed"
         self.db.commit()
 
         offer_data = create_offer(
@@ -154,6 +142,9 @@ class HiringLifecycleOffersTest(unittest.TestCase):
                 application_id=application.id,
                 base_compensation=900000,
                 variable_compensation=100000,
+                benefits_value=50000,
+                earnings=[PayrollLineItem(label="Housing allowance", amount=120000)],
+                deductions=[PayrollLineItem(label="Employee retirement contribution", amount=48000)],
                 expires_at=datetime.now(timezone.utc) + timedelta(days=5),
             ),
             self.organization_id,
@@ -168,6 +159,7 @@ class HiringLifecycleOffersTest(unittest.TestCase):
         ):
             released = release_offer(offer_data["id"], self.organization_id, self.db, self.recruiter)
         self.assertEqual(released["status"], "released")
+        self.assertEqual(self.db.get(HiringApplication, application.id).stage, "hired")
 
         request = Request({"type": "http", "method": "POST", "path": "/", "headers": [(b"user-agent", b"test")], "client": ("127.0.0.1", 1000)})
         with patch("app.api.routes.hiring.send_email", return_value={"sent": True}):
@@ -180,6 +172,10 @@ class HiringLifecycleOffersTest(unittest.TestCase):
         self.assertEqual(accepted["status"], "accepted")
         offer = self.db.get(HiringOffer, offer_data["id"])
         self.assertIn("Accepted electronically by Jordan Lee", offer.signed_document_html)
+        self.assertTrue(offer.released_document_pdf.startswith(b"%PDF"))
+        self.assertTrue(offer.signed_document_pdf.startswith(b"%PDF"))
+        self.assertEqual(offer.total_ctc, 1_170_000)
+        self.assertEqual(offer.estimated_net_compensation, 1_072_000)
         self.assertEqual(len(offer.released_document_hash), 64)
         self.assertEqual(len(offer.signed_document_hash), 64)
         self.assertIsNone(offer.access_token_hash)

@@ -2056,6 +2056,9 @@ body { margin: 0; background: #f6f8fb; }
 .candidate-offer-summary > div:last-child { border-right: 0; }
 .candidate-offer-summary strong { overflow-wrap: anywhere; font-size: 13px; }
 .candidate-offer-document { width: 100%; height: min(680px, 70vh); border: 1px solid #d8e3de; background: #fff; }
+.candidate-offer-document-action { display: flex; justify-content: flex-end; }
+.candidate-offer-document-action button { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 13px; border: 1px solid #b9ccc4; border-radius: 5px; background: #fff; color: #155d49; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.candidate-offer-document-action button:hover { border-color: #17805f; background: #f2f8f5; }
 .candidate-offer-signature { display: grid; gap: 16px; padding: 22px; border: 1px solid #cbdcd4; background: #fff; }
 .candidate-offer-signature > div:first-child { display: flex; align-items: center; gap: 10px; }
 .candidate-offer-signature > div:first-child > span { display: grid; gap: 3px; }

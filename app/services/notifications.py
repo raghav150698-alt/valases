@@ -14,6 +14,7 @@ def send_email(
     html_body: str | None = None,
     reply_to: str | None = None,
     inline_images: dict[str, tuple[bytes, str, str]] | None = None,
+    attachments: list[tuple[str, bytes, str, str]] | None = None,
 ) -> dict:
     settings = get_settings()
     if not settings.smtp_host or not settings.smtp_username or not settings.smtp_password:
@@ -37,6 +38,8 @@ def send_email(
                 cid=f"<{content_id}>",
                 disposition="inline",
             )
+    for filename, content, maintype, subtype in attachments or []:
+        msg.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
 
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
         server.starttls(context=ssl.create_default_context())

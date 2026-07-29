@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -1276,12 +1276,23 @@ class HiringOffer(Base):
     variable_compensation: Mapped[float] = mapped_column(Float, default=0)
     benefits_value: Mapped[float] = mapped_column(Float, default=0)
     total_ctc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    earnings_json: Mapped[list] = mapped_column(JSON, default=list)
+    deductions_json: Mapped[list] = mapped_column(JSON, default=list)
+    gross_cash_compensation: Mapped[float | None] = mapped_column(Float, nullable=True)
+    estimated_net_compensation: Mapped[float | None] = mapped_column(Float, nullable=True)
+    employment_type: Mapped[str] = mapped_column(String(80), default="Full-time")
+    work_location: Mapped[str] = mapped_column(String(240), default="")
+    reporting_manager: Mapped[str] = mapped_column(String(240), default="")
+    probation_months: Mapped[int] = mapped_column(Integer, default=6)
+    notice_period_days: Mapped[int] = mapped_column(Integer, default=30)
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     letter_body: Mapped[str] = mapped_column(Text, default="")
     terms_text: Mapped[str] = mapped_column(Text, default="")
     released_document_html: Mapped[str] = mapped_column(Text, default="")
     signed_document_html: Mapped[str] = mapped_column(Text, default="")
+    released_document_pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    signed_document_pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     released_document_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     signed_document_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     access_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)

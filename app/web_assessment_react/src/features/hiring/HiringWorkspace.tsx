@@ -178,12 +178,23 @@ type Offer = {
   base_compensation: number | null;
   variable_compensation: number;
   benefits_value: number;
+  earnings: PayrollItem[];
+  deductions: PayrollItem[];
+  gross_cash_compensation: number | null;
+  estimated_net_compensation: number | null;
   total_ctc: number | null;
+  employment_type: string;
+  work_location: string;
+  reporting_manager: string;
+  probation_months: number;
+  notice_period_days: number;
   start_date: string | null;
   expires_at: string | null;
   released_at: string | null;
   signed_at: string | null;
 };
+
+type PayrollItem = { label: string; amount: number; description: string };
 
 type ApplicationDetail = {
   id: number;
@@ -1207,8 +1218,9 @@ function CloseVacanciesForm({ job, activeCount, onClose, onSaved }: { job: Job; 
 }
 
 function OfferForm({ applications, initialApplicationId, onClose, onSaved }: { applications: Application[]; initialApplicationId: number | null; onClose: () => void; onSaved: () => void }) {
-  const eligible = applications.filter((item) => item.status === "active" && ["interview", "offer"].includes(item.stage));
-  const [form, setForm] = useState({ application_id: initialApplicationId ? String(initialApplicationId) : "", currency: "INR", pay_frequency: "annual", base_compensation: "", variable_compensation: "0", benefits_value: "0", start_date: "", expires_at: "", letter_body: "", terms_text: "" });
+  const eligible = applications.filter((item) => ["interview", "offer", "hired"].includes(item.stage) && (item.status === "active" || item.stage === "hired"));
+  const selectedInitial = eligible.some((item) => item.id === initialApplicationId) ? String(initialApplicationId) : "";
+  const [form, setForm] = useState({ application_id: selectedInitial, currency: "INR", pay_frequency: "annual", base_compensation: "", variable_compensation: "0", benefits_value: "0", employment_type: "Full-time", work_location: "", reporting_manager: "", probation_months: "6", notice_period_days: "30", start_date: "", expires_at: "", letter_body: "", terms_text: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const submit = async (event: React.FormEvent) => {
@@ -1222,6 +1234,8 @@ function OfferForm({ applications, initialApplicationId, onClose, onSaved }: { a
         base_compensation: form.base_compensation ? Number(form.base_compensation) : null,
         variable_compensation: Number(form.variable_compensation || 0),
         benefits_value: Number(form.benefits_value || 0),
+        probation_months: Number(form.probation_months || 0),
+        notice_period_days: Number(form.notice_period_days || 0),
         start_date: form.start_date ? new Date(form.start_date).toISOString() : null,
         expires_at: form.expires_at ? new Date(form.expires_at).toISOString() : null,
       });
@@ -1234,7 +1248,7 @@ function OfferForm({ applications, initialApplicationId, onClose, onSaved }: { a
   };
   return <Modal title="Prepare offer" onClose={onClose}><form className="hiring-form" onSubmit={submit}>
     <label>Candidate<select required value={form.application_id} onChange={(event) => setForm({ ...form, application_id: event.target.value })}><option value="">Select candidate</option>{eligible.map((item) => <option value={item.id} key={item.id}>{item.candidate.full_name} · {item.job_title}</option>)}</select></label>
-    <div className="hiring-form-grid"><label>Currency<input value={form.currency} maxLength={8} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })} /></label><label>Pay frequency<select value={form.pay_frequency} onChange={(event) => setForm({ ...form, pay_frequency: event.target.value })}><option value="annual">Annual</option><option value="monthly">Monthly</option><option value="hourly">Hourly</option></select></label><label>Base compensation<input type="number" min="0" value={form.base_compensation} onChange={(event) => setForm({ ...form, base_compensation: event.target.value })} /></label><label>Variable pay<input type="number" min="0" value={form.variable_compensation} onChange={(event) => setForm({ ...form, variable_compensation: event.target.value })} /></label><label>Benefits value<input type="number" min="0" value={form.benefits_value} onChange={(event) => setForm({ ...form, benefits_value: event.target.value })} /></label><label>Start date<input type="date" value={form.start_date} onChange={(event) => setForm({ ...form, start_date: event.target.value })} /></label><label>Offer expiry<input type="date" value={form.expires_at} onChange={(event) => setForm({ ...form, expires_at: event.target.value })} /></label></div>
+    <div className="hiring-form-grid"><label>Employment type<select value={form.employment_type} onChange={(event) => setForm({ ...form, employment_type: event.target.value })}><option>Full-time</option><option>Part-time</option><option>Fixed-term</option><option>Contract</option></select></label><label>Work location<input value={form.work_location} onChange={(event) => setForm({ ...form, work_location: event.target.value })} placeholder="Mumbai / Hybrid" /></label><label>Reporting manager<input value={form.reporting_manager} onChange={(event) => setForm({ ...form, reporting_manager: event.target.value })} placeholder="Name or designation" /></label><label>Probation<input type="number" min="0" max="24" value={form.probation_months} onChange={(event) => setForm({ ...form, probation_months: event.target.value })} /><small>Months</small></label><label>Notice period<input type="number" min="0" max="365" value={form.notice_period_days} onChange={(event) => setForm({ ...form, notice_period_days: event.target.value })} /><small>Days</small></label><label>Start date<input type="date" value={form.start_date} onChange={(event) => setForm({ ...form, start_date: event.target.value })} /></label><label>Offer expiry<input type="date" value={form.expires_at} onChange={(event) => setForm({ ...form, expires_at: event.target.value })} /></label></div>
     <label>Offer introduction<textarea value={form.letter_body} onChange={(event) => setForm({ ...form, letter_body: event.target.value })} placeholder="Leave blank to use the standard drafted introduction." /></label>
     <label>Terms<textarea value={form.terms_text} onChange={(event) => setForm({ ...form, terms_text: event.target.value })} placeholder="Leave blank to use the standard terms." /></label>
     {error && <p className="hiring-form-error">{error}</p>}
@@ -1272,17 +1286,36 @@ function OffersView({ offers, applications, canCreate, canRelease, onNew, onRefr
 
 function OfferCompensationForm({ offer, onClose, onSaved }: { offer: Offer; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({ currency: offer.currency, pay_frequency: offer.pay_frequency, base_compensation: String(offer.base_compensation ?? ""), variable_compensation: String(offer.variable_compensation || 0), benefits_value: String(offer.benefits_value || 0) });
+  const [earnings, setEarnings] = useState<PayrollItem[]>(offer.earnings || []);
+  const [deductions, setDeductions] = useState<PayrollItem[]>(offer.deductions || []);
   const [error, setError] = useState("");
+  const base = Number(form.base_compensation || 0);
+  const variable = Number(form.variable_compensation || 0);
+  const benefits = Number(form.benefits_value || 0);
+  const additionsTotal = earnings.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const deductionsTotal = deductions.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const gross = base + variable + additionsTotal;
+  const ctc = gross + benefits;
+  const net = Math.max(0, gross - deductionsTotal);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
-      await api.patch(`/hiring/offers/${offer.id}`, { ...form, base_compensation: Number(form.base_compensation || 0), variable_compensation: Number(form.variable_compensation || 0), benefits_value: Number(form.benefits_value || 0) });
+      await api.patch(`/hiring/offers/${offer.id}`, { ...form, base_compensation: base, variable_compensation: variable, benefits_value: benefits, earnings, deductions });
       onSaved();
     } catch (reason) {
       setError(apiError(reason, "Could not update the offer."));
     }
   };
-  return <Modal title="Review offer compensation" onClose={onClose}><form className="hiring-form" onSubmit={submit}><div className="hiring-form-context"><strong>{offer.candidate_name}</strong><span>{offer.job_title}</span></div><div className="hiring-form-grid"><label>Currency<input value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })} /></label><label>Frequency<select value={form.pay_frequency} onChange={(event) => setForm({ ...form, pay_frequency: event.target.value })}><option value="annual">Annual</option><option value="monthly">Monthly</option><option value="hourly">Hourly</option></select></label><label>Base compensation<input required type="number" min="0" value={form.base_compensation} onChange={(event) => setForm({ ...form, base_compensation: event.target.value })} /></label><label>Variable pay<input type="number" min="0" value={form.variable_compensation} onChange={(event) => setForm({ ...form, variable_compensation: event.target.value })} /></label><label>Benefits value<input type="number" min="0" value={form.benefits_value} onChange={(event) => setForm({ ...form, benefits_value: event.target.value })} /></label></div>{error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary">Approve compensation</button></footer></form></Modal>;
+  return <Modal title="Review offer compensation" onClose={onClose}><form className="hiring-form hiring-payroll-form" onSubmit={submit}><div className="hiring-form-context"><strong>{offer.candidate_name}</strong><span>{offer.job_title} · Enter annual values</span></div><div className="hiring-form-grid"><label>Currency<input value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })} /></label><label>Frequency<select value={form.pay_frequency} onChange={(event) => setForm({ ...form, pay_frequency: event.target.value })}><option value="annual">Annual</option><option value="monthly">Monthly</option><option value="hourly">Hourly</option></select></label><label>Base compensation<input required type="number" min="0" value={form.base_compensation} onChange={(event) => setForm({ ...form, base_compensation: event.target.value })} /></label><label>Variable pay<input type="number" min="0" value={form.variable_compensation} onChange={(event) => setForm({ ...form, variable_compensation: event.target.value })} /></label><label>Employer benefits / contributions<input type="number" min="0" value={form.benefits_value} onChange={(event) => setForm({ ...form, benefits_value: event.target.value })} /></label></div>
+    <PayrollLines title="Additional earnings" items={earnings} onChange={setEarnings} addLabel="Add earning" />
+    <PayrollLines title="Employee deductions" items={deductions} onChange={setDeductions} addLabel="Add deduction" />
+    <div className="hiring-payroll-summary"><div><small>Gross cash</small><strong>{form.currency} {gross.toLocaleString()}</strong><span>{form.currency} {(gross / 12).toLocaleString()} monthly</span></div><div><small>Total CTC</small><strong>{form.currency} {ctc.toLocaleString()}</strong><span>Includes employer benefits</span></div><div><small>Estimated net</small><strong>{form.currency} {net.toLocaleString()}</strong><span>Before unconfigured tax/statutory items</span></div></div>
+    {error && <p className="hiring-form-error">{error}</p>}<footer><button type="button" className="hiring-button secondary" onClick={onClose}>Cancel</button><button type="submit" className="hiring-button primary">Approve compensation</button></footer></form></Modal>;
+}
+
+function PayrollLines({ title, items, onChange, addLabel }: { title: string; items: PayrollItem[]; onChange: (items: PayrollItem[]) => void; addLabel: string }) {
+  const update = (index: number, patch: Partial<PayrollItem>) => onChange(items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+  return <section className="hiring-payroll-lines"><header><div><strong>{title}</strong><small>Annual values included in the compensation annexure</small></div><button type="button" className="hiring-button secondary" onClick={() => onChange([...items, { label: "", amount: 0, description: "" }])}><Plus size={15} />{addLabel}</button></header>{items.length ? items.map((item, index) => <div className="hiring-payroll-line" key={`${title}-${index}`}><label>Component<input required value={item.label} onChange={(event) => update(index, { label: event.target.value })} placeholder="Housing allowance" /></label><label>Annual amount<input required type="number" min="1" value={item.amount || ""} onChange={(event) => update(index, { amount: Number(event.target.value) })} /></label><label>Description<input value={item.description} onChange={(event) => update(index, { description: event.target.value })} placeholder="Eligibility or payroll note" /></label><button type="button" className="hiring-icon-danger" aria-label={`Remove ${item.label || "line item"}`} onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={16} /></button></div>) : <p>No additional line items.</p>}</section>;
 }
 
 const permissionDescription: Record<string, string> = {

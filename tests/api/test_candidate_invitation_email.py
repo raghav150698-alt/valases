@@ -62,6 +62,7 @@ class CandidateInvitationEmailTest(unittest.TestCase):
                 "Open your assessment.",
                 html_body='<html><body><img src="cid:company-logo"></body></html>',
                 inline_images={"company-logo": (b"logo-content", "image", "png")},
+                attachments=[("offer.pdf", b"%PDF-test", "application", "pdf")],
             )
 
         self.assertTrue(result["sent"])
@@ -69,6 +70,9 @@ class CandidateInvitationEmailTest(unittest.TestCase):
         related_image = next(part for part in message.walk() if part.get_content_type() == "image/png")
         self.assertEqual(related_image["Content-ID"], "<company-logo>")
         self.assertEqual(related_image.get_payload(decode=True), b"logo-content")
+        attachment = next(part for part in message.walk() if part.get_content_disposition() == "attachment")
+        self.assertEqual(attachment.get_filename(), "offer.pdf")
+        self.assertEqual(attachment.get_payload(decode=True), b"%PDF-test")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, FileSignature } from "lucide-react";
+import { CheckCircle2, Download, FileSignature } from "lucide-react";
 import { api } from "../../lib/api";
 
 type PublicOffer = {
@@ -56,6 +56,17 @@ export function CandidateOfferPanel({ offerKey }: { offerKey: string }) {
     }
   };
 
+  const openPdf = async () => {
+    try {
+      const { data } = await api.get(`/hiring/offers/public/${encodeURIComponent(offerKey)}/document.pdf`, { responseType: "blob" });
+      const url = URL.createObjectURL(data);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      setError("The PDF copy could not be opened. Please try again.");
+    }
+  };
+
   if (loading) return <section className="candidate-offer-state"><span className="candidate-loading-spinner" /><p>Loading your offer...</p></section>;
   if (error && !offer) return <section className="candidate-offer-state"><h1>Offer unavailable</h1><p>{error}</p></section>;
   if (!offer) return null;
@@ -72,6 +83,7 @@ export function CandidateOfferPanel({ offerKey }: { offerKey: string }) {
       <div><small>Offer reference</small><strong>{offer.offer_reference}</strong></div>
       <div><small>Respond by</small><strong>{offer.expires_at ? new Date(offer.expires_at).toLocaleDateString() : "No expiry"}</strong></div>
     </section>
+    <div className="candidate-offer-document-action"><button type="button" onClick={() => void openPdf()}><Download size={17} />Open complete offer PDF</button></div>
     <iframe className="candidate-offer-document" title="Offer letter" sandbox="" srcDoc={offer.document_html} />
     {offer.can_respond ? <section className="candidate-offer-signature">
       <div><FileSignature size={22} /><span><strong>Electronic signature</strong><small>Type your full legal name and confirm your consent.</small></span></div>

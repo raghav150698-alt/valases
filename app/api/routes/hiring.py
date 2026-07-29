@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 import httpx
 from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 import jwt
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -46,6 +46,7 @@ from app.models.entities import (
     UserRole,
 )
 from app.services.notifications import send_email
+from app.services.offer_documents import compensation_totals, public_offer_reference, render_offer_pdf
 from app.services.supabase_auth import invite_supabase_user
 from app.services.organization_branding import (
     member_avatar_url,
@@ -271,6 +272,12 @@ class JobCloseVacanciesRequest(BaseModel):
     send_email: bool = True
 
 
+class PayrollLineItem(BaseModel):
+    label: str = Field(min_length=2, max_length=120)
+    amount: float = Field(gt=0)
+    description: str = Field(default="", max_length=500)
+
+
 class OfferCreate(BaseModel):
     application_id: int = Field(gt=0)
     currency: str = Field(default="INR", min_length=3, max_length=8)
@@ -278,6 +285,13 @@ class OfferCreate(BaseModel):
     base_compensation: float | None = Field(default=None, ge=0)
     variable_compensation: float = Field(default=0, ge=0)
     benefits_value: float = Field(default=0, ge=0)
+    earnings: list[PayrollLineItem] = Field(default_factory=list, max_length=30)
+    deductions: list[PayrollLineItem] = Field(default_factory=list, max_length=30)
+    employment_type: str = Field(default="Full-time", min_length=2, max_length=80)
+    work_location: str = Field(default="", max_length=240)
+    reporting_manager: str = Field(default="", max_length=240)
+    probation_months: int = Field(default=6, ge=0, le=24)
+    notice_period_days: int = Field(default=30, ge=0, le=365)
     start_date: datetime | None = None
     expires_at: datetime | None = None
     letter_body: str = Field(default="", max_length=30000)
@@ -290,6 +304,13 @@ class OfferUpdate(BaseModel):
     base_compensation: float | None = Field(default=None, ge=0)
     variable_compensation: float | None = Field(default=None, ge=0)
     benefits_value: float | None = Field(default=None, ge=0)
+    earnings: list[PayrollLineItem] | None = Field(default=None, max_length=30)
+    deductions: list[PayrollLineItem] | None = Field(default=None, max_length=30)
+    employment_type: str | None = Field(default=None, min_length=2, max_length=80)
+    work_location: str | None = Field(default=None, max_length=240)
+    reporting_manager: str | None = Field(default=None, max_length=240)
+    probation_months: int | None = Field(default=None, ge=0, le=24)
+    notice_period_days: int | None = Field(default=None, ge=0, le=365)
     start_date: datetime | None = None
     expires_at: datetime | None = None
     letter_body: str | None = Field(default=None, max_length=30000)
@@ -766,7 +787,7 @@ def _serialize_offer(offer: HiringOffer) -> dict:
         "application_id": offer.application_id,
         "job_id": offer.job_id,
         "candidate_id": offer.candidate_id,
-        "offer_reference": offer.offer_reference,
+        "offer_reference": public_offer_reference(offer.offer_reference),
         "status": offer.status,
         "job_title": offer.job_title_snapshot,
         "candidate_name": offer.candidate_name_snapshot,
@@ -776,7 +797,16 @@ def _serialize_offer(offer: HiringOffer) -> dict:
         "base_compensation": offer.base_compensation,
         "variable_compensation": offer.variable_compensation,
         "benefits_value": offer.benefits_value,
+        "earnings": offer.earnings_json or [],
+        "deductions": offer.deductions_json or [],
+        "gross_cash_compensation": offer.gross_cash_compensation,
+        "estimated_net_compensation": offer.estimated_net_compensation,
         "total_ctc": offer.total_ctc,
+        "employment_type": offer.employment_type,
+        "work_location": offer.work_location,
+        "reporting_manager": offer.reporting_manager,
+        "probation_months": offer.probation_months,
+        "notice_period_days": offer.notice_period_days,
         "start_date": offer.start_date,
         "expires_at": offer.expires_at,
         "letter_body": offer.letter_body,
@@ -793,6 +823,13 @@ def _serialize_offer(offer: HiringOffer) -> dict:
 
 def _offer_document_html(offer: HiringOffer, organization: Organization, *, signed: bool = False) -> str:
     company_name, company_logo = _organization_branding(organization)
+    totals = compensation_totals(
+        base_compensation=offer.base_compensation,
+        variable_compensation=offer.variable_compensation,
+        benefits_value=offer.benefits_value,
+        earnings=offer.earnings_json,
+        deductions=offer.deductions_json,
+    )
     logo = (
         f'<img src="{escape(company_logo, quote=True)}" alt="{escape(company_name)}" style="max-width:160px;max-height:64px">'
         if company_logo.startswith("data:image/")
@@ -805,15 +842,30 @@ def _offer_document_html(offer: HiringOffer, organization: Organization, *, sign
         </section>"""
         if signed else ""
     )
-    return f"""<!doctype html><html><head><meta charset="utf-8"><title>{escape(offer.offer_reference)}</title></head>
+    rows = [
+        ("Position", offer.job_title_snapshot),
+        ("Employment type", offer.employment_type or "Full-time"),
+        ("Start date", offer.start_date.strftime("%d %B %Y") if offer.start_date else "To be mutually agreed"),
+        ("Work location", offer.work_location or "As assigned by the company"),
+        ("Reporting manager", offer.reporting_manager or "As notified by the company"),
+        ("Probation", f"{int(offer.probation_months or 0)} months"),
+        ("Notice period", f"{int(offer.notice_period_days or 0)} days"),
+        ("Annual gross cash", f"{offer.currency} {totals['gross_cash']:,.2f}"),
+        ("Annual total CTC", f"{offer.currency} {totals['total_ctc']:,.2f}"),
+    ]
+    detail_rows = "".join(
+        f'<tr><td style="padding:10px;border:1px solid #d8e2dd;color:#5d6e66">{escape(label)}</td>'
+        f'<td style="padding:10px;border:1px solid #d8e2dd"><strong>{escape(value)}</strong></td></tr>'
+        for label, value in rows
+    )
+    return f"""<!doctype html><html><head><meta charset="utf-8"><title>{escape(public_offer_reference(offer.offer_reference))}</title></head>
 <body style="font-family:Arial,sans-serif;color:#1b2a24;max-width:760px;margin:40px auto;padding:24px;line-height:1.6">
-{logo}<p style="color:#65766e">{escape(offer.offer_reference)}</p>
+{logo}<p style="color:#65766e">Private and confidential · {escape(public_offer_reference(offer.offer_reference))}</p>
 <h1>Offer of employment</h1><p>Dear {escape(offer.candidate_name_snapshot)},</p>
 <div>{'<br>'.join(escape(offer.letter_body).splitlines())}</div>
-<table style="width:100%;margin:28px 0;border-collapse:collapse">
-<tr><td style="padding:10px;border:1px solid #d8e2dd">Position</td><td style="padding:10px;border:1px solid #d8e2dd"><strong>{escape(offer.job_title_snapshot)}</strong></td></tr>
-<tr><td style="padding:10px;border:1px solid #d8e2dd">Total CTC</td><td style="padding:10px;border:1px solid #d8e2dd"><strong>{escape(offer.currency)} {float(offer.total_ctc or 0):,.2f} ({escape(offer.pay_frequency)})</strong></td></tr>
-</table><div>{'<br>'.join(escape(offer.terms_text).splitlines())}</div>{signature}
+<table style="width:100%;margin:28px 0;border-collapse:collapse">{detail_rows}</table>
+<h2>Principal terms</h2><p>{'<br>'.join(escape(offer.terms_text).splitlines())}</p>
+<p>The attached PDF contains the complete appointment terms and detailed compensation schedule. Review both documents before responding.</p>{signature}
 </body></html>"""
 
 
@@ -2070,27 +2122,34 @@ def create_offer(
     organization, membership = _organization_context(db, current_user, organization_id)
     _require_permission(current_user, membership, "offers.manage")
     application = _application_or_404(db, organization.id, payload.application_id)
-    if application.status != "active" or application.stage not in {"interview", "offer"}:
-        raise HTTPException(status_code=409, detail="Offers can only be prepared for an active candidate in Interview or Offer")
-    if int(db.scalar(select(func.count(HiringScorecard.id)).where(HiringScorecard.application_id == application.id)) or 0) < 1:
+    if application.stage not in {"interview", "offer", "hired"} or (
+        application.stage != "hired" and application.status != "active"
+    ):
+        raise HTTPException(status_code=409, detail="Offers can only be prepared for candidates in Interview, Offer, or Hired")
+    if application.stage != "hired" and int(
+        db.scalar(select(func.count(HiringScorecard.id)).where(HiringScorecard.application_id == application.id)) or 0,
+    ) < 1:
         raise HTTPException(status_code=409, detail="Complete a structured interview scorecard before preparing an offer")
     existing = db.scalar(select(HiringOffer).where(HiringOffer.application_id == application.id))
     if existing:
         raise HTTPException(status_code=409, detail="An offer already exists for this application")
     candidate = _candidate_or_404(db, organization.id, application.candidate_id)
     job = _job_or_404(db, organization.id, application.job_id)
-    total = (
-        float(payload.base_compensation or 0)
-        + float(payload.variable_compensation)
-        + float(payload.benefits_value)
-    ) or None
+    totals = compensation_totals(
+        base_compensation=payload.base_compensation,
+        variable_compensation=payload.variable_compensation,
+        benefits_value=payload.benefits_value,
+        earnings=[item.model_dump() for item in payload.earnings],
+        deductions=[item.model_dump() for item in payload.deductions],
+    )
+    total = totals["total_ctc"] or None
     offer = HiringOffer(
         organization_id=organization.id,
         application_id=application.id,
         job_id=job.id,
         candidate_id=candidate.id,
         created_by_user_id=current_user.id,
-        offer_reference=f"VAL-OFR-{datetime.now(timezone.utc).strftime('%Y%m')}-{secrets.token_hex(4).upper()}",
+        offer_reference=f"OFR-{datetime.now(timezone.utc).strftime('%Y%m')}-{secrets.token_hex(4).upper()}",
         job_title_snapshot=job.title,
         candidate_name_snapshot=f"{candidate.first_name} {candidate.last_name}".strip(),
         candidate_email_snapshot=candidate.email,
@@ -2100,11 +2159,28 @@ def create_offer(
         base_compensation=payload.base_compensation,
         variable_compensation=payload.variable_compensation,
         benefits_value=payload.benefits_value,
+        earnings_json=totals["earnings"],
+        deductions_json=totals["deductions"],
+        gross_cash_compensation=totals["gross_cash"],
+        estimated_net_compensation=totals["estimated_net"],
         total_ctc=total,
+        employment_type=payload.employment_type.strip(),
+        work_location=payload.work_location.strip(),
+        reporting_manager=payload.reporting_manager.strip(),
+        probation_months=payload.probation_months,
+        notice_period_days=payload.notice_period_days,
         start_date=payload.start_date,
         expires_at=payload.expires_at or datetime.now(timezone.utc) + timedelta(days=7),
-        letter_body=payload.letter_body.strip() or f"We are pleased to offer you the position of {job.title} with {organization.name}.",
-        terms_text=payload.terms_text.strip() or "This offer is subject to the organization's employment policies, verification requirements, and applicable law.",
+        letter_body=payload.letter_body.strip() or (
+            f"Following our discussions and selection process, {organization.name} is pleased to offer you "
+            f"the position of {job.title}. We were impressed by the experience and perspective you demonstrated, "
+            "and we look forward to the contribution you can make to our team."
+        ),
+        terms_text=payload.terms_text.strip() or (
+            "This offer is subject to satisfactory pre-employment verification, your continuing eligibility to work, "
+            "and the policies of the company. Your employment will be governed by applicable law and the company's "
+            "code of conduct, confidentiality, information-security, intellectual-property, privacy, leave, and workplace policies."
+        ),
         status="ready" if total else "draft",
         payroll_reviewed_by_user_id=current_user.id if total and "offers.compensation" in _membership_permissions(current_user, membership) else None,
     )
@@ -2131,19 +2207,47 @@ def update_offer(
     if offer.status not in {"draft", "ready"}:
         raise HTTPException(status_code=409, detail="A released offer can no longer be edited")
     values = payload.model_dump(exclude_unset=True)
-    compensation_fields = {"currency", "pay_frequency", "base_compensation", "variable_compensation", "benefits_value"}
-    content_fields = {"start_date", "expires_at", "letter_body", "terms_text"}
+    compensation_fields = {
+        "currency",
+        "pay_frequency",
+        "base_compensation",
+        "variable_compensation",
+        "benefits_value",
+        "earnings",
+        "deductions",
+    }
+    content_fields = {
+        "start_date",
+        "expires_at",
+        "letter_body",
+        "terms_text",
+        "employment_type",
+        "work_location",
+        "reporting_manager",
+        "probation_months",
+        "notice_period_days",
+    }
     if compensation_fields & values.keys():
         _require_permission(current_user, membership, "offers.compensation")
     if content_fields & values.keys():
         _require_permission(current_user, membership, "offers.manage")
     for field, value in values.items():
-        setattr(offer, field, value.strip().upper() if field == "currency" and isinstance(value, str) else value)
-    offer.total_ctc = (
-        float(offer.base_compensation or 0)
-        + float(offer.variable_compensation or 0)
-        + float(offer.benefits_value or 0)
-    ) or None
+        target = {"earnings": "earnings_json", "deductions": "deductions_json"}.get(field, field)
+        if field in {"earnings", "deductions"}:
+            value = [item.model_dump() if isinstance(item, PayrollLineItem) else item for item in value or []]
+        setattr(offer, target, value.strip().upper() if field == "currency" and isinstance(value, str) else value)
+    totals = compensation_totals(
+        base_compensation=offer.base_compensation,
+        variable_compensation=offer.variable_compensation,
+        benefits_value=offer.benefits_value,
+        earnings=offer.earnings_json,
+        deductions=offer.deductions_json,
+    )
+    offer.earnings_json = totals["earnings"]
+    offer.deductions_json = totals["deductions"]
+    offer.gross_cash_compensation = totals["gross_cash"]
+    offer.estimated_net_compensation = totals["estimated_net"]
+    offer.total_ctc = totals["total_ctc"] or None
     if compensation_fields & values.keys():
         offer.payroll_reviewed_by_user_id = current_user.id
     offer.status = "ready" if offer.total_ctc and offer.letter_body.strip() and offer.terms_text.strip() else "draft"
@@ -2175,27 +2279,36 @@ def release_offer(
     offer.status = "released"
     offer.released_at = datetime.now(timezone.utc)
     offer.released_document_html = _offer_document_html(offer, organization)
-    offer.released_document_hash = hashlib.sha256(offer.released_document_html.encode()).hexdigest()
-    previous_stage = application.stage
-    application.stage = "offer"
-    db.add(HiringStageEvent(
-        organization_id=organization.id,
-        application_id=application.id,
-        actor_user_id=current_user.id,
-        from_stage=previous_stage,
-        to_stage="offer",
-        reason=f"Offer {offer.offer_reference} released",
-    ))
+    offer.released_document_pdf = render_offer_pdf(
+        offer,
+        organization,
+        company_logo_url=organization_logo_url(organization.settings_json),
+    )
+    offer.released_document_hash = hashlib.sha256(offer.released_document_pdf).hexdigest()
+    if application.stage != "hired":
+        previous_stage = application.stage
+        application.stage = "offer"
+        db.add(HiringStageEvent(
+            organization_id=organization.id,
+            application_id=application.id,
+            actor_user_id=current_user.id,
+            from_stage=previous_stage,
+            to_stage="offer",
+            reason=f"Offer {public_offer_reference(offer.offer_reference)} released",
+        ))
     candidate_url = str(get_settings().candidate_app_base_url or "").strip().rstrip("/")
     if not candidate_url:
         raise HTTPException(status_code=503, detail="Candidate portal URL is not configured")
     decision_url = f"{candidate_url}/?offer_key={token}"
     body = (
-        f"Hello {offer.candidate_name_snapshot},\n\n"
-        f"{organization.name} has released an offer for the position of {offer.job_title_snapshot}.\n\n"
+        f"Dear {offer.candidate_name_snapshot},\n\n"
+        f"We are delighted to share your formal offer to join {organization.name} as {offer.job_title_snapshot}.\n\n"
+        "Your complete offer letter and compensation schedule are attached as a PDF. "
+        "Please review the appointment terms, detailed annual and monthly compensation, benefits, deductions, and acceptance conditions carefully.\n\n"
         f"Review and respond securely: {decision_url}\n\n"
-        f"This offer expires on {offer.expires_at.strftime('%d %B %Y') if offer.expires_at else 'the date shown in the offer'}.\n\n"
-        f"Regards,\n{organization.name}"
+        f"Please respond by {offer.expires_at.strftime('%d %B %Y') if offer.expires_at else 'the acceptance date stated in your offer'}."
+        "\n\nIf you have any questions, reply to this email and our team will be happy to help.\n\n"
+        f"Warm regards,\nPeople Team\n{organization.name}"
     )
     try:
         email_html, inline_images = _candidate_message_email_content(
@@ -2209,6 +2322,14 @@ def release_offer(
             body,
             html_body=email_html,
             inline_images=inline_images,
+            attachments=[
+                (
+                    f"{offer.candidate_name_snapshot}-offer.pdf",
+                    offer.released_document_pdf,
+                    "application",
+                    "pdf",
+                ),
+            ],
             reply_to=offer.recruiter_email_snapshot,
         )
     except Exception as exc:
@@ -2218,7 +2339,7 @@ def release_offer(
     return {**_serialize_offer(offer), "email_delivery": delivery}
 
 
-@router.get("/offers/{offer_id}/document", response_class=HTMLResponse)
+@router.get("/offers/{offer_id}/document")
 def get_offer_document(
     offer_id: int,
     organization_id: int | None = Query(default=None, gt=0),
@@ -2230,10 +2351,41 @@ def get_offer_document(
     offer = db.scalar(select(HiringOffer).where(HiringOffer.id == offer_id, HiringOffer.organization_id == organization.id))
     if not offer:
         raise HTTPException(status_code=404, detail="Offer not found")
-    document = offer.signed_document_html or offer.released_document_html
+    document = offer.signed_document_pdf or offer.released_document_pdf
     if not document:
-        document = _offer_document_html(offer, organization)
-    return HTMLResponse(document, headers={"Content-Disposition": f'inline; filename="{offer.candidate_name_snapshot}-offer.html"'})
+        document = render_offer_pdf(
+            offer,
+            organization,
+            company_logo_url=organization_logo_url(organization.settings_json),
+            signed=offer.status == "accepted",
+        )
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", offer.candidate_name_snapshot).strip("-") or "candidate"
+    return Response(
+        document,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}-offer.pdf"'},
+    )
+
+
+@router.get("/offers/public/{offer_key}/document.pdf")
+def get_public_offer_document(offer_key: str, db: Session = Depends(get_db)):
+    offer = _public_offer_by_key(db, offer_key)
+    organization = db.get(Organization, offer.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    document = offer.signed_document_pdf or offer.released_document_pdf
+    if not document:
+        document = render_offer_pdf(
+            offer,
+            organization,
+            company_logo_url=organization_logo_url(organization.settings_json),
+            signed=offer.status == "accepted",
+        )
+    return Response(
+        document,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="employment-offer.pdf"'},
+    )
 
 
 def _public_offer_by_key(db: Session, offer_key: str) -> HiringOffer:
@@ -2291,12 +2443,51 @@ def decide_public_offer(
         offer.status = "accepted"
         offer.signed_at = now
         offer.signed_document_html = _offer_document_html(offer, organization, signed=True)
-        offer.signed_document_hash = hashlib.sha256(offer.signed_document_html.encode()).hexdigest()
-        subject = f"Signed offer copy | {offer.job_title_snapshot}"
-        body = f"The offer {offer.offer_reference} was accepted electronically by {offer.signature_name} on {now.isoformat()}."
+        offer.signed_document_pdf = render_offer_pdf(
+            offer,
+            organization,
+            company_logo_url=organization_logo_url(organization.settings_json),
+            signed=True,
+        )
+        offer.signed_document_hash = hashlib.sha256(offer.signed_document_pdf).hexdigest()
+        subject = f"Signed employment offer | {offer.job_title_snapshot}"
+        candidate_body = (
+            f"Dear {offer.candidate_name_snapshot},\n\n"
+            f"Thank you for accepting the offer to join {organization.name} as {offer.job_title_snapshot}. "
+            f"Your electronically signed offer letter and compensation schedule are attached for your records.\n\n"
+            f"Acceptance recorded: {now.strftime('%d %B %Y at %H:%M UTC')}\n"
+            f"Document reference: {public_offer_reference(offer.offer_reference)}\n\n"
+            f"We look forward to welcoming you.\n\nPeople Team\n{organization.name}"
+        )
+        recruiter_body = (
+            f"{offer.candidate_name_snapshot} accepted the offer for {offer.job_title_snapshot} "
+            f"on {now.strftime('%d %B %Y at %H:%M UTC')}.\n\n"
+            "The signed offer and compensation schedule are attached for the organization's records."
+        )
         for recipient in {offer.candidate_email_snapshot, offer.recruiter_email_snapshot}:
             try:
-                send_email(recipient, subject, body, html_body=offer.signed_document_html)
+                body = candidate_body if recipient == offer.candidate_email_snapshot else recruiter_body
+                email_html, inline_images = _candidate_message_email_content(
+                    organization.name,
+                    organization_logo_url(organization.settings_json),
+                    body,
+                )
+                send_email(
+                    recipient,
+                    subject,
+                    body,
+                    html_body=email_html,
+                    inline_images=inline_images,
+                    attachments=[
+                        (
+                            f"{offer.candidate_name_snapshot}-signed-offer.pdf",
+                            offer.signed_document_pdf,
+                            "application",
+                            "pdf",
+                        ),
+                    ],
+                    reply_to=offer.recruiter_email_snapshot,
+                )
             except Exception:
                 pass
         action = "offer_accepted"
