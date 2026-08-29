@@ -1,0 +1,440 @@
+{
+  "completed_at": "2026-08-29T00:12:15.077843+00:00",
+  "framework": "RF-DETR Nano / DINOv2 / PyTorch Lightning",
+  "framework_version": "1.9.4",
+  "python": "3.12.14",
+  "pytorch": "2.13.0+cu130",
+  "cuda": "13.0",
+  "gpu": {
+    "name": "NVIDIA GeForce RTX 4050 Laptop GPU",
+    "memory_gib": 5.99658203125
+  },
+  "dataset": {
+    "created_at": "2026-08-28T22:12:20.205046+00:00",
+    "source_root": "data/proctoring/external_licensed/zenodo_students_behavior",
+    "selected_dataset_root": "data/proctoring/external_licensed/zenodo_students_behavior/Dataset_Students_Behavior_Online_Exam_Org/dataset_Students_Behavior_Online_Exam_org",
+    "output_root": "local-cache-not-committed/zenodo_original_grouped_seed_42",
+    "classes": [
+      "eye_movement",
+      "hand_move",
+      "mobile_use",
+      "side_watching",
+      "mouth_open"
+    ],
+    "seed": 42,
+    "fractions": {
+      "train": 0.72,
+      "valid": 0.14,
+      "test": 0.14
+    },
+    "collection": {
+      "images_seen": 5575,
+      "invalid_boxes_removed": 1,
+      "empty_labels_kept": 1,
+      "unlabeled_images_skipped": 81,
+      "unique_labeled_images": 5494
+    },
+    "splits": {
+      "train": {
+        "image_count": 4188,
+        "group_count": 28,
+        "groups": [
+          "11",
+          "12",
+          "12(1)",
+          "g_5",
+          "h_8",
+          "m_2",
+          "m_4",
+          "m_5",
+          "m_scenario_5",
+          "m_scenario_8",
+          "m_senario_2",
+          "m_senario_4",
+          "satu-12",
+          "satu-12(1)",
+          "satu-12_2",
+          "satu-12_6",
+          "satu-13",
+          "satu-4",
+          "satu-4(1)",
+          "satu-scenario_12",
+          "scenario_11",
+          "senario_12",
+          "t_2",
+          "t_4",
+          "t_5",
+          "t_8",
+          "t_scenario_2",
+          "t_scenario_4"
+        ],
+        "objects": {
+          "eye_movement": 932,
+          "hand_move": 1086,
+          "mobile_use": 536,
+          "side_watching": 923,
+          "mouth_open": 726
+        },
+        "source_split_counts": {
+          "train": 3349,
+          "valid": 839
+        }
+      },
+      "valid": {
+        "image_count": 699,
+        "group_count": 5,
+        "groups": [
+          "g_2",
+          "m_11",
+          "m_8",
+          "ms_senario_5",
+          "satu-seekable-recordrtc (12)"
+        ],
+        "objects": {
+          "eye_movement": 105,
+          "hand_move": 102,
+          "mobile_use": 285,
+          "side_watching": 105,
+          "mouth_open": 101
+        },
+        "source_split_counts": {
+          "train": 558,
+          "valid": 141
+        }
+      },
+      "test": {
+        "image_count": 607,
+        "group_count": 5,
+        "groups": [
+          "g_4",
+          "g_8",
+          "h_5",
+          "msenario_11",
+          "satu-senario_12"
+        ],
+        "objects": {
+          "eye_movement": 122,
+          "hand_move": 41,
+          "mobile_use": 221,
+          "side_watching": 151,
+          "mouth_open": 74
+        },
+        "source_split_counts": {
+          "train": 488,
+          "valid": 119
+        }
+      }
+    },
+    "leakage_checks": {
+      "source_group_overlap": 0,
+      "exact_image_hash_overlap": 0,
+      "status": "passed"
+    },
+    "notes": [
+      "Only the publisher's original labeled dataset variant is used.",
+      "Source recording groups never cross train, validation, and test.",
+      "Exact duplicate images are retained only once.",
+      "Invalid zero-size or out-of-range boxes are removed from cleaned labels.",
+      "The staged dataset links image bytes and writes only small sanitized label files."
+    ]
+  },
+  "training": {
+    "epochs_max": 40,
+    "resolution": 448,
+    "batch_size": 1,
+    "grad_accum_steps": 16,
+    "effective_batch_size": 16,
+    "gradient_checkpointing": true,
+    "ema": true,
+    "mixed_precision": true,
+    "source_grouped_split": true,
+    "exact_deduplication": true,
+    "seed": 42
+  },
+  "best_checkpoint": "data/proctoring/models/proctor_vision_ultra/rfdetr_nano_grouped_v1/checkpoint_best_total.pth",
+  "validation_metrics": {
+    "val/loss_ce": 0.9367210268974304,
+    "val/class_error": 7.582260608673096,
+    "val/loss_bbox": 0.07704352587461472,
+    "val/loss_giou": 0.17981821298599243,
+    "val/cardinality_error": 0.16165950894355774,
+    "val/loss_ce_0": 1.0247621536254883,
+    "val/loss_bbox_0": 0.07218558341264725,
+    "val/loss_giou_0": 0.1710706353187561,
+    "val/cardinality_error_0": 0.1201716735959053,
+    "val/loss_ce_enc": 0.8416246175765991,
+    "val/loss_bbox_enc": 0.08219953626394272,
+    "val/loss_giou_enc": 0.18899452686309814,
+    "val/cardinality_error_enc": 0.3032904267311096,
+    "val/loss": 5.04001522064209,
+    "val/mAP_50_95": 0.5974430441856384,
+    "val/mAP_50": 0.8773379325866699,
+    "val/mAP_75": 0.6879836320877075,
+    "val/mAR": 0.7399976253509521,
+    "val/F1": 0.6098155975341797,
+    "val/precision": 0.7297919392585754,
+    "val/recall": 0.7212600708007812,
+    "val/AP/eye_movement": 0.6874973773956299,
+    "val/AP/hand_move": 0.6984758377075195,
+    "val/AP/mobile_use": 0.383297860622406,
+    "val/AP/side_watching": 0.89171302318573,
+    "val/AP/mouth_open": 0.3262311816215515
+  },
+  "held_out_test_metrics": {
+    "val/loss_ce": 0.7888149619102478,
+    "val/class_error": 10.378912925720215,
+    "val/loss_bbox": 0.07904835790395737,
+    "val/loss_giou": 0.20706917345523834,
+    "val/cardinality_error": 0.057660624384880066,
+    "val/loss_ce_0": 0.7735788822174072,
+    "val/loss_bbox_0": 0.0689525231719017,
+    "val/loss_giou_0": 0.18244218826293945,
+    "val/cardinality_error_0": 0.02800658904016018,
+    "val/loss_ce_enc": 0.7932697534561157,
+    "val/loss_bbox_enc": 0.07304118573665619,
+    "val/loss_giou_enc": 0.18817253410816193,
+    "val/cardinality_error_enc": 0.15485996007919312,
+    "val/loss": 4.616243362426758,
+    "val/mAP_50_95": 0.5144534111022949,
+    "val/mAP_50": 0.781889796257019,
+    "val/mAP_75": 0.5502546429634094,
+    "val/mAR": 0.669985830783844,
+    "val/F1": 0.6459925174713135,
+    "val/precision": 0.8103465437889099,
+    "val/recall": 0.7400375008583069,
+    "val/AP/eye_movement": 0.5466015338897705,
+    "val/AP/hand_move": 0.6616176962852478,
+    "val/AP/mobile_use": 0.48337405920028687,
+    "val/AP/side_watching": 0.8508831858634949,
+    "val/AP/mouth_open": 0.02979063056409359
+  },
+  "review_thresholds": {
+    "target_precision": 0.97,
+    "iou_threshold": 0.5,
+    "calibration_split": "valid",
+    "final_evaluation_split": "test",
+    "review_only": true,
+    "auto_penalty": false,
+    "classes": {
+      "eye_movement": {
+        "target_precision_met_on_validation": true,
+        "selected_threshold": 0.8,
+        "validation": {
+          "threshold": 0.8,
+          "true_positive": 100,
+          "false_positive": 3,
+          "false_negative": 5,
+          "precision": 0.970873786407767,
+          "recall": 0.9523809523809523,
+          "f1": 0.9615384615384616,
+          "flagged_frames": 103,
+          "false_flags_per_1000_frames": 4.291845493562231
+        },
+        "test": {
+          "threshold": 0.8,
+          "true_positive": 109,
+          "false_positive": 17,
+          "false_negative": 13,
+          "precision": 0.8650793650793651,
+          "recall": 0.8934426229508197,
+          "f1": 0.8790322580645162,
+          "flagged_frames": 126,
+          "false_flags_per_1000_frames": 28.00658978583196
+        },
+        "runtime_policy": {
+          "minimum_consecutive_positive_frames": 3,
+          "minimum_event_duration_seconds": 1.5,
+          "destination": "recruiter_review_queue"
+        }
+      },
+      "hand_move": {
+        "target_precision_met_on_validation": true,
+        "selected_threshold": 0.87,
+        "validation": {
+          "threshold": 0.87,
+          "true_positive": 88,
+          "false_positive": 2,
+          "false_negative": 14,
+          "precision": 0.9777777777777777,
+          "recall": 0.8627450980392157,
+          "f1": 0.9166666666666665,
+          "flagged_frames": 90,
+          "false_flags_per_1000_frames": 2.8612303290414878
+        },
+        "test": {
+          "threshold": 0.87,
+          "true_positive": 30,
+          "false_positive": 1,
+          "false_negative": 11,
+          "precision": 0.967741935483871,
+          "recall": 0.7317073170731707,
+          "f1": 0.8333333333333334,
+          "flagged_frames": 31,
+          "false_flags_per_1000_frames": 1.6474464579901154
+        },
+        "runtime_policy": {
+          "minimum_consecutive_positive_frames": 3,
+          "minimum_event_duration_seconds": 1.5,
+          "destination": "recruiter_review_queue"
+        }
+      },
+      "mobile_use": {
+        "target_precision_met_on_validation": true,
+        "selected_threshold": 0.47,
+        "validation": {
+          "threshold": 0.47,
+          "true_positive": 68,
+          "false_positive": 2,
+          "false_negative": 217,
+          "precision": 0.9714285714285714,
+          "recall": 0.23859649122807017,
+          "f1": 0.38309859154929576,
+          "flagged_frames": 70,
+          "false_flags_per_1000_frames": 2.8612303290414878
+        },
+        "test": {
+          "threshold": 0.47,
+          "true_positive": 171,
+          "false_positive": 10,
+          "false_negative": 50,
+          "precision": 0.9447513812154696,
+          "recall": 0.7737556561085973,
+          "f1": 0.8507462686567164,
+          "flagged_frames": 180,
+          "false_flags_per_1000_frames": 16.474464579901152
+        },
+        "runtime_policy": {
+          "minimum_consecutive_positive_frames": 3,
+          "minimum_event_duration_seconds": 1.5,
+          "destination": "recruiter_review_queue"
+        }
+      },
+      "side_watching": {
+        "target_precision_met_on_validation": true,
+        "selected_threshold": 0.18,
+        "validation": {
+          "threshold": 0.18,
+          "true_positive": 105,
+          "false_positive": 0,
+          "false_negative": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "flagged_frames": 105,
+          "false_flags_per_1000_frames": 0.0
+        },
+        "test": {
+          "threshold": 0.18,
+          "true_positive": 149,
+          "false_positive": 3,
+          "false_negative": 2,
+          "precision": 0.9802631578947368,
+          "recall": 0.9867549668874173,
+          "f1": 0.9834983498349835,
+          "flagged_frames": 152,
+          "false_flags_per_1000_frames": 4.942339373970346
+        },
+        "runtime_policy": {
+          "minimum_consecutive_positive_frames": 3,
+          "minimum_event_duration_seconds": 1.5,
+          "destination": "recruiter_review_queue"
+        }
+      },
+      "mouth_open": {
+        "target_precision_met_on_validation": true,
+        "selected_threshold": 0.07,
+        "validation": {
+          "threshold": 0.07,
+          "true_positive": 41,
+          "false_positive": 1,
+          "false_negative": 60,
+          "precision": 0.9761904761904762,
+          "recall": 0.40594059405940597,
+          "f1": 0.5734265734265734,
+          "flagged_frames": 42,
+          "false_flags_per_1000_frames": 1.4306151645207439
+        },
+        "test": {
+          "threshold": 0.07,
+          "true_positive": 2,
+          "false_positive": 6,
+          "false_negative": 72,
+          "precision": 0.25,
+          "recall": 0.02702702702702703,
+          "f1": 0.04878048780487805,
+          "flagged_frames": 8,
+          "false_flags_per_1000_frames": 9.884678747940692
+        },
+        "runtime_policy": {
+          "minimum_consecutive_positive_frames": 3,
+          "minimum_event_duration_seconds": 1.5,
+          "destination": "recruiter_review_queue"
+        }
+      }
+    }
+  },
+  "threshold_calibration_error": null,
+  "onnx_model": "data/proctoring/models/proctor_vision_ultra/rfdetr_nano_grouped_v1/export/rfdetr-nano.onnx",
+  "onnx_export_error": null,
+  "deployment_policy": {
+    "status": "evaluation_only_not_promoted",
+    "decision": "flag_for_recruiter_review_only",
+    "automatic_rejection": false,
+    "automatic_score_deduction": false
+  },
+  "onnx_exported_at": "2026-08-29T07:33:25.142448+00:00",
+  "onnx_validation": {
+    "status": "passed",
+    "checker": "onnx.checker.check_model",
+    "size_bytes": 115545223,
+    "inputs": [
+      "input"
+    ],
+    "outputs": [
+      "dets",
+      "labels"
+    ],
+    "resolution": [
+      448,
+      448
+    ],
+    "batch_size": 1
+  },
+  "onnx_runtime_validation": {
+    "status": "passed",
+    "runtime": "onnxruntime 1.29.0",
+    "provider": "CPUExecutionProvider",
+    "input": {
+      "name": "input",
+      "shape": [
+        1,
+        3,
+        448,
+        448
+      ],
+      "type": "tensor(float)"
+    },
+    "outputs": [
+      {
+        "name": "dets",
+        "shape": [
+          1,
+          300,
+          4
+        ],
+        "type": "tensor(float)"
+      },
+      {
+        "name": "labels",
+        "shape": [
+          1,
+          300,
+          6
+        ],
+        "type": "tensor(float)"
+      }
+    ],
+    "smoke_inference_ms": 189.96138700001097,
+    "checked_at": "2026-08-29T07:34:55.979938+00:00"
+  }
+}

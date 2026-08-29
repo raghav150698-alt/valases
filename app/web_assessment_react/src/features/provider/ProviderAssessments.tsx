@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { X } from "lucide-react";
+import { ArrowRight, RefreshCw, X } from "lucide-react";
 import { BrandLogo } from "../../components/BrandLogo";
 import { AssessmentToolIcon } from "../../components/AssessmentToolIcon";
 import { api } from "../../lib/api";
 import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
 import type { ExcelAssessmentSubmission } from "../tools/ExcelSimulator";
+import { ProctorEventReviewControls } from "./ProctorEventReviewControls";
 
 const ExcelSimulator = lazy(() => import("../tools/ExcelSimulator").then((module) => ({ default: module.ExcelSimulator })));
 
@@ -16,6 +17,15 @@ function apiErrorMessage(error: unknown, fallback: string): string {
   if (typeof detail === "string" && detail.trim()) return detail;
   if (detail && typeof detail === "object") return JSON.stringify(detail);
   return fallback;
+}
+
+function readableReviewValue(value: unknown): string {
+  if (value == null || value === "") return "Not provided";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  if (Array.isArray(value)) return value.map(readableReviewValue).join(", ");
+  if (typeof value === "object") return Object.entries(value as Record<string, unknown>).map(([key, item]) => `${key.replaceAll("_", " ")}: ${readableReviewValue(item)}`).join(" · ");
+  return String(value);
 }
 
 type Assessment = {
@@ -88,6 +98,15 @@ type ScreeningApplication = {
 type WorkspaceTab = "dashboard" | "assessments" | "publish" | "results";
 type AssessmentToolFilter = "all" | "spreadsheet" | "coding" | "accounting" | "tax_simulator" | "tax_1120";
 
+const WORKSPACE_TABS: WorkspaceTab[] = ["dashboard", "assessments", "publish", "results"];
+const WORKSPACE_TAB_LABELS: Record<WorkspaceTab, string> = {
+  dashboard: "Overview",
+  assessments: "Library",
+  publish: "Invitations",
+  results: "Review queue",
+};
+const BUILDER_DRAFT_KEY = "valases:assessment-builder-draft";
+
 type AccountContext = {
   full_name: string;
 };
@@ -106,7 +125,22 @@ type DefaultAssessment = {
 };
 
 type DefaultAssessmentDetail = DefaultAssessment & {
-  task?: { expected_output?: Record<string, unknown>; grading_config?: { checkpoints?: BuilderCheckpoint[] } };
+  task?: {
+    expected_output?: Record<string, unknown>;
+    grading_config?: { checkpoints?: BuilderCheckpoint[] };
+    metadata?: {
+      sections?: Array<{
+        id: string;
+        label: string;
+        minutes?: number;
+        description?: string;
+        passage?: string;
+        prompt?: string;
+        audio?: Array<{ id: string; label: string }>;
+        questions?: Array<{ id: string; prompt: string; options?: string[] }>;
+      }>;
+    };
+  };
   scoring?: { checkpoints?: Array<{ id: string; label: string; weight: number; threshold: number }> };
   questions?: Array<{ question_text: string; competency?: string; difficulty?: string; options: Array<{ option_text: string; is_correct: boolean }> }>;
 };
@@ -187,6 +221,21 @@ function EmptyState({ title, detail, action }: { title: string; detail: string; 
   );
 }
 
+function AssessmentLoadError({ retrying, onRetry }: { retrying: boolean; onRetry: () => void }) {
+  return (
+    <div className="assessment-service-error" role="alert">
+      <div>
+        <strong>Assessment service unavailable</strong>
+        <span>We could not load your assessments. Check the service connection, then try again.</span>
+      </div>
+      <button type="button" onClick={onRetry} disabled={retrying}>
+        <RefreshCw size={14} aria-hidden="true" />
+        {retrying ? "Retrying..." : "Try again"}
+      </button>
+    </div>
+  );
+}
+
 function ButtonBusyLabel({ label }: { label: string }) {
   return <><span className="workspace-button-spinner" aria-hidden="true" /><span>{label}</span></>;
 }
@@ -219,7 +268,7 @@ function formatResultDate(value?: string | null) {
   return Number.isNaN(date.getTime()) ? "--" : date.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }
 
-export function ProviderAssessments({ embedded = false }: { embedded?: boolean }) {
+export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embedded?: boolean; onOpenPipeline?: () => void }) {
   const qc = useQueryClient();
   const clearSession = useSessionStore((state) => state.clear);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("dashboard");
@@ -248,7 +297,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     tools: "",
     topics: "",
     pass_score: 70,
-    assessment_type: "mcq" as "mcq" | "spreadsheet" | "coding" | "accounting" | "tax_simulator" | "tax_1120" | "case_study",
+    assessment_type: "mcq" as "mcq" | "spreadsheet" | "coding" | "accounting" | "tax_simulator" | "tax_1120" | "case_study" | "english_language",
     max_attempts: 3,
     questions_per_attempt: 25,
     timing_mode: "question" as "question" | "assessment",
@@ -280,6 +329,10 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   const [reviewScore, setReviewScore] = useState(0);
   const [reviewNotes, setReviewNotes] = useState("");
   const [previewDefaultId, setPreviewDefaultId] = useState<string | null>(null);
+  const [previewAssessmentId, setPreviewAssessmentId] = useState<number | null>(null);
+  const [selectedDefaultId, setSelectedDefaultId] = useState("");
+  const [toolMenuOpen, setToolMenuOpen] = useState(false);
+  const [builderSaveState, setBuilderSaveState] = useState<"saved" | "saving">("saved");
 
   const account = useQuery({
     queryKey: ["auth-me-context"],
@@ -333,13 +386,26 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   }, [review.data]);
 
   useEffect(() => {
-    if (!reviewIssueId) return;
+    if (!reviewIssueId && !previewAssessmentId) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setReviewIssueId(null);
+      if (event.key === "Escape") {
+        setReviewIssueId(null);
+        setPreviewAssessmentId(null);
+      }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [reviewIssueId]);
+  }, [previewAssessmentId, reviewIssueId]);
+
+  useEffect(() => {
+    if (!showBuilder) return;
+    setBuilderSaveState("saving");
+    const saveTimer = window.setTimeout(() => {
+      window.sessionStorage.setItem(BUILDER_DRAFT_KEY, JSON.stringify({ form, checkpoints, builderStep }));
+      setBuilderSaveState("saved");
+    }, 500);
+    return () => window.clearTimeout(saveTimer);
+  }, [builderStep, checkpoints, form, showBuilder]);
 
   const installDefault = useMutation({
     mutationFn: async (templateId: string) => (await api.post(`/exams/default-library/${templateId}/install`)).data,
@@ -485,6 +551,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
       setSelectedExamId(Number(data.id));
       setShowBuilder(false);
       setActiveTab("publish");
+      window.sessionStorage.removeItem(BUILDER_DRAFT_KEY);
       await qc.invalidateQueries({ queryKey: ["provider-assessments"] });
     },
   });
@@ -587,6 +654,19 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
     () => (defaultAssessments.data || []).filter((row) => toolFilter === "all" || row.assessment_type === toolFilter),
     [defaultAssessments.data, toolFilter],
   );
+  const selectedDefaultTemplate = useMemo(
+    () => filteredDefaultAssessments.find((template) => template.id === selectedDefaultId) || null,
+    [filteredDefaultAssessments, selectedDefaultId],
+  );
+  const previewAssessment = useMemo(
+    () => assessmentRows.find((assessment) => assessment.exam_id === previewAssessmentId) || null,
+    [assessmentRows, previewAssessmentId],
+  );
+
+  const switchAssessmentTab = (tab: WorkspaceTab) => {
+    setActiveTab(tab);
+    setToolMenuOpen(false);
+  };
   const filteredIssued = useMemo(
     () =>
       searchToken
@@ -627,7 +707,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
       || (resultStatusFilter === "review" && row.status === "review_pending")
       || row.status === resultStatusFilter;
     return assessmentMatches && statusMatches;
-  });
+  }).sort((left, right) => Number(right.status === "review_pending") - Number(left.status === "review_pending"));
   const assessmentMetrics = assessmentRows.map((assessment) => {
     const attempts = issuedRows.filter((row) => row.exam_id === assessment.exam_id);
     const completed = attempts.filter((row) => ["review_pending", "reviewed", "completed"].includes(row.status));
@@ -640,6 +720,20 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   const isMcqForm = form.assessment_type === "mcq";
   const checkpointWeight = checkpoints.reduce((sum, checkpoint) => sum + Number(checkpoint.weight || 0), 0);
   const checkpointsAreComplete = checkpoints.length > 0 && checkpoints.every((checkpoint) => checkpoint.label.trim() && checkpoint.source.trim() && checkpoint.expected.trim() && checkpoint.weight > 0);
+  const builderBasicsComplete = form.title.trim().length >= 3
+    && form.about.trim().length >= 3
+    && form.topics.trim().length >= 2
+    && form.duration_minutes > 0;
+  const builderTaskComplete = form.instructions.trim().length >= 3
+    && (isMcqForm || (form.task_prompt.trim().length >= 10 && form.task_marks > 0));
+  const builderKeyComplete = isMcqForm || (checkpointsAreComplete && checkpointWeight === 100);
+  const builderStepCanContinue = builderStep === 1
+    ? builderBasicsComplete
+    : builderStep === 2
+      ? builderTaskComplete
+      : builderStep === 3
+        ? builderKeyComplete
+        : true;
   const canCreateAssessment = form.title.trim().length >= 3
     && form.instructions.trim().length >= 3
     && form.about.trim().length >= 3
@@ -654,16 +748,35 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   const accountInitials = accountName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 
   const pageCopy = {
-    dashboard: ["Dashboard", "Monitor assessment activity and move work forward."],
-    assessments: ["Assessments", "Browse defaults and manage your assessment library."],
-    publish: ["Publish", "Prepare an assessment and send it to an eligible candidate."],
-    results: ["Results", "Review completed candidate outcomes."],
+    dashboard: ["Overview", "See what needs attention and move assessment work forward."],
+    assessments: ["Assessment library", "Create, organize, and prepare assessments for candidates."],
+    publish: ["Invitations", "Send published assessments and monitor active candidate sessions."],
+    results: ["Review queue", "Resolve submissions that need a recruiter decision first."],
   } as const;
   const tabCounts: Record<WorkspaceTab, number> = {
-    dashboard: issuedRows.length,
+    dashboard: pendingReviewCount + draftCount,
     assessments: assessmentRows.length,
     publish: activeIssueCount,
-    results: completedIssueCount,
+    results: pendingReviewCount,
+  };
+
+  const startAssessmentBuilder = () => {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(BUILDER_DRAFT_KEY) || "null") as { form?: Partial<typeof form>; checkpoints?: BuilderCheckpoint[]; builderStep?: number } | null;
+      if (saved?.form) setForm((current) => ({ ...current, ...saved.form }));
+      if (Array.isArray(saved?.checkpoints) && saved.checkpoints.length) setCheckpoints(saved.checkpoints);
+      setBuilderStep(Math.min(4, Math.max(1, Number(saved?.builderStep || 1))));
+    } catch {
+      setBuilderStep(1);
+    }
+    switchAssessmentTab("assessments");
+    setShowBuilder(true);
+  };
+
+  const openInvitationFlow = (assessment: Assessment) => {
+    setSelectedExamId(assessment.exam_id);
+    setIssueExamId(assessment.status === "published" ? assessment.exam_id : null);
+    switchAssessmentTab("publish");
   };
 
   const logout = async () => {
@@ -675,19 +788,18 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
   };
 
   return (
-    <section className={`provider-workspace hrms-shell ${embedded ? "provider-embedded" : ""}`}>
+    <section className={`provider-workspace hrms-shell ${embedded ? "provider-embedded" : ""}${showBuilder ? " assessment-builder-mode" : ""}`}>
       {!embedded && <aside className="workspace-rail">
         <div className="workspace-rail-brand">
           <BrandLogo className="workspace-brand-logo" />
-          <div><strong>Valases</strong><small>Recruiting</small></div>
         </div>
         <div className="workspace-rail-label">Workspace</div>
         <nav className="workspace-rail-nav" aria-label="Workspace navigation">
-          {(["dashboard", "assessments", "publish", "results"] as WorkspaceTab[]).map((tab) => (
-            <button key={tab} type="button" className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
+          {WORKSPACE_TABS.map((tab) => (
+            <button key={tab} type="button" className={activeTab === tab ? "active" : ""} onClick={() => switchAssessmentTab(tab)}>
               <NavIcon type={tab} />
-              <span>{tab[0].toUpperCase() + tab.slice(1)}</span>
-              {tab === "assessments" && assessmentRows.length > 0 && <em>{assessmentRows.length}</em>}
+              <span>{WORKSPACE_TAB_LABELS[tab]}</span>
+              {tabCounts[tab] > 0 && <em>{tabCounts[tab]}</em>}
             </button>
           ))}
         </nav>
@@ -697,15 +809,16 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
         </div>
       </aside>}
 
-      <main className="workspace-product-main">
-      {embedded && <nav className="assessment-horizontal-tabs" aria-label="Assessment workspace navigation">
-        {(["dashboard", "assessments", "publish", "results"] as WorkspaceTab[]).map((tab) => (
-          <button key={tab} type="button" role="tab" aria-selected={activeTab === tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
-            <span>{tab[0].toUpperCase() + tab.slice(1)}</span>
-            <strong>{tabCounts[tab]}</strong>
+      <main className={`workspace-product-main${embedded ? " assessment-section-page" : ""}`}>
+      {embedded && <nav className="assessment-section-nav" aria-label="Assessment workspace navigation">
+        {WORKSPACE_TABS.map((tab) => (
+          <button key={tab} type="button" aria-current={activeTab === tab ? "page" : undefined} className={activeTab === tab ? "active" : ""} onClick={() => switchAssessmentTab(tab)}>
+            <span>{WORKSPACE_TAB_LABELS[tab]}</span>
+            <strong aria-label={`${tabCounts[tab]} items`}>{tabCounts[tab]}</strong>
           </button>
         ))}
       </nav>}
+      <div className="assessment-section-content">
       <header className="workspace-appbar">
         <div className="workspace-appbar-left">
           <div className="workspace-appbar-title">
@@ -714,12 +827,12 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
           </div>
         </div>
         <div className="workspace-appbar-right">
-          <details className="workspace-tool-menu">
+          {activeTab === "assessments" && <details className="workspace-tool-menu" open={toolMenuOpen} onToggle={(event) => setToolMenuOpen(event.currentTarget.open)}>
             <summary className={`workspace-tools-mark${toolFilter !== "all" ? " active" : ""}`} title="Filter by assessment tool" aria-label="Filter by assessment tool">
               <ToolGridIcon />
             </summary>
             <div className="workspace-tool-menu-panel" role="menu" aria-label="Assessment tools">
-              <button type="button" role="menuitem" className={toolFilter === "all" ? "active" : ""} onClick={(event) => { setToolFilter("all"); event.currentTarget.closest("details")?.removeAttribute("open"); }}>
+              <button type="button" role="menuitem" className={toolFilter === "all" ? "active" : ""} onClick={() => { setToolFilter("all"); setSelectedDefaultId(""); setToolMenuOpen(false); }}>
                 <span className="workspace-tool-menu-glyph"><ToolGridIcon /></span>
                 <span><strong>All tools</strong><small>Show every assessment</small></span>
               </button>
@@ -730,57 +843,58 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 ["tax_simulator", "1040 Individual Tax"],
                 ["tax_1120", "1120 Corporate Tax"],
               ] as Array<[Exclude<AssessmentToolFilter, "all">, string]>).map(([assessmentType, label]) => (
-                <button type="button" role="menuitem" key={assessmentType} className={toolFilter === assessmentType ? "active" : ""} onClick={(event) => { setToolFilter(assessmentType); setActiveTab("assessments"); event.currentTarget.closest("details")?.removeAttribute("open"); }}>
+                <button type="button" role="menuitem" key={assessmentType} className={toolFilter === assessmentType ? "active" : ""} onClick={() => { setToolFilter(assessmentType); setSelectedDefaultId(""); switchAssessmentTab("assessments"); }}>
                   <AssessmentToolIcon assessmentType={assessmentType} />
                   <span><strong>{label}</strong><small>Filter assessment library</small></span>
                 </button>
               ))}
             </div>
-          </details>
-          <label className="workspace-search">
+          </details>}
+          {activeTab !== "publish" && <label className="workspace-search">
             <SearchIcon />
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search assessments, candidates, or issued IDs"
+              placeholder={activeTab === "results" ? "Search candidates or assessments" : "Search assessments"}
               aria-label="Search workspace"
             />
-          </label>
-          <button
+          </label>}
+          {(activeTab === "dashboard" || activeTab === "assessments") && <button
             type="button"
             className="workspace-new-btn"
             aria-label="Create new assessment"
-            onClick={() => {
-              setActiveTab("assessments");
-              setShowBuilder(true);
-              setBuilderStep(1);
-            }}
+            onClick={startAssessmentBuilder}
             title="New assessment"
           >
             <PlusIcon />
             <span>New assessment</span>
-          </button>
+          </button>}
         </div>
       </header>
 
       {activeTab === "dashboard" && (
         <section className="workspace-dashboard">
           <div className="workspace-kpi-grid">
-            <article className="workspace-kpi-card">
-              <span>Total assessments</span>
-              <strong>{assessmentRows.length}</strong>
-              <small>{publishedCount} published, {draftCount} in setup</small>
-            </article>
-            <article className="workspace-kpi-card">
-              <span>Issued candidates</span>
-              <strong>{issuedRows.length}</strong>
-              <small>{activeIssueCount} active sessions</small>
-            </article>
-            <article className="workspace-kpi-card">
-              <span>Completed reviews</span>
+            <button type="button" className={`workspace-kpi-card${pendingReviewCount ? " attention" : ""}`} onClick={() => { setResultStatusFilter("review"); switchAssessmentTab("results"); }}>
+              <span>Needs review</span>
+              <strong>{pendingReviewCount}</strong>
+              <small>{pendingReviewCount ? "Recruiter decisions required" : "No submissions waiting"}</small>
+            </button>
+            <button type="button" className="workspace-kpi-card" onClick={() => switchAssessmentTab("assessments")}>
+              <span>Drafts to finish</span>
+              <strong>{draftCount}</strong>
+              <small>{publishedCount} assessments are ready to send</small>
+            </button>
+            <button type="button" className="workspace-kpi-card" onClick={() => switchAssessmentTab("publish")}>
+              <span>Active invitations</span>
+              <strong>{activeIssueCount}</strong>
+              <small>{issuedRows.length} total candidates issued</small>
+            </button>
+            <button type="button" className="workspace-kpi-card" onClick={() => { setResultStatusFilter("all"); switchAssessmentTab("results"); }}>
+              <span>Completed attempts</span>
               <strong>{completedIssueCount}</strong>
-              <small>Submitted attempts ready for analysis</small>
-            </article>
+              <small>Open scored and reviewed outcomes</small>
+            </button>
           </div>
 
           <div className="workspace-dashboard-grid">
@@ -793,16 +907,13 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
               </div>
               <div className="assessment-table">
                 {exams.isLoading && <WorkspaceSkeleton rows={5} />}
-                {exams.isError && <div className="workspace-error">Assessments could not be loaded. Check the service connection and retry.</div>}
-                {filteredAssessments.slice(0, 6).map((assessment) => (
+                {exams.isError && <AssessmentLoadError retrying={exams.isFetching} onRetry={() => void exams.refetch()} />}
+                {!exams.isError && filteredAssessments.slice(0, 6).map((assessment) => (
                   <button
                     key={assessment.exam_id}
                     type="button"
                     className="assessment-table-row"
-                    onClick={() => {
-                      setSelectedExamId(assessment.exam_id);
-                      setActiveTab("publish");
-                    }}
+                    onClick={() => assessment.status === "published" ? openInvitationFlow(assessment) : setPreviewAssessmentId(assessment.exam_id)}
                   >
                     <div>
                       <strong>{assessment.title}</strong>
@@ -813,7 +924,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   </button>
                 ))}
                 {!exams.isLoading && !exams.isError && filteredAssessments.length === 0 && (
-                  <EmptyState title="No assessments yet" detail="Create your first assessment to begin inviting candidates." action={<button type="button" onClick={() => { setActiveTab("assessments"); setShowBuilder(true); }}>Create assessment</button>} />
+                  <EmptyState title="No assessments yet" detail="Create your first assessment to begin inviting candidates." action={<button type="button" onClick={startAssessmentBuilder}>Create assessment</button>} />
                 )}
               </div>
             </section>
@@ -862,7 +973,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                     </div>
                   </article>
                 ))}
-                {!issued.isLoading && filteredIssued.length === 0 && <EmptyState title="No candidate activity" detail="Issued assessments and submissions will appear here." />}
+                {!issued.isLoading && filteredIssued.length === 0 && <EmptyState title="No candidate activity" detail="Send a published assessment to a screening candidate." action={<button type="button" onClick={() => switchAssessmentTab("publish")}>Open invitations</button>} />}
               </div>
             </section>
           </div>
@@ -870,72 +981,77 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
       )}
 
       {activeTab === "assessments" && (
-        <section className="workspace-library">
+        <section className={`workspace-library${showBuilder ? " assessment-builder-only" : ""}`}>
           <div className="workspace-main-column">
             <section className="workspace-surface">
               <div className="workspace-surface-head">
-                <div><h3>Assessment library</h3><p>Open an assessment to edit, publish, or send it.</p></div>
+                <div><h3>Your assessments</h3><p>Keep drafts moving and send published assessments from one place.</p></div>
               </div>
               <div className="assessment-library-list">
                 {exams.isLoading && <WorkspaceSkeleton rows={6} />}
-                {filteredAssessments.map((assessment) => (
+                {exams.isError && <AssessmentLoadError retrying={exams.isFetching} onRetry={() => void exams.refetch()} />}
+                {!exams.isLoading && !exams.isError && filteredAssessments.length > 0 && <div className="assessment-library-header" aria-hidden="true"><span /><span>Assessment</span><span>Content</span><span>Status</span><span>Action</span></div>}
+                {!exams.isError && filteredAssessments.map((assessment) => (
                   <article className="assessment-library-row" key={assessment.exam_id}>
                     <AssessmentToolIcon assessmentType={assessment.assessment_type} title={assessment.title} />
-                    <div><strong>{assessment.title}</strong><small>{assessment.assessment_type.replaceAll("_", " ")} | {assessment.duration_minutes} min</small></div>
+                    <div><button type="button" className="assessment-title-button" onClick={() => setPreviewAssessmentId(assessment.exam_id)}>{assessment.title}</button><small>{assessment.assessment_type.replaceAll("_", " ")} | {assessment.duration_minutes} min</small></div>
                     <span>{assessment.assessment_type === "mcq" ? `${assessment.question_count} questions` : `${assessment.checkpoint_count || 0} checkpoints`}</span>
                     <StatusBadge value={assessment.status} />
-                    <button type="button" className="secondary-btn" onClick={() => { setSelectedExamId(assessment.exam_id); setActiveTab("publish"); }}>
-                      {assessment.status === "published" ? "View" : "Edit"}
-                    </button>
-                    <button type="button" onClick={() => { setSelectedExamId(assessment.exam_id); setIssueExamId(assessment.exam_id); setActiveTab("publish"); }}>
-                      {assessment.status === "published" ? "Send" : "Publish"}
+                    <button type="button" onClick={() => openInvitationFlow(assessment)}>
+                      {assessment.status === "published" ? "Send invitation" : "Continue setup"}
                     </button>
                   </article>
                 ))}
-                {!exams.isLoading && filteredAssessments.length === 0 && <EmptyState title="No matching assessments" detail="Clear the search or create a new assessment." />}
+                {!exams.isLoading && !exams.isError && filteredAssessments.length === 0 && <EmptyState title="No matching assessments" detail="Clear the search or create a new assessment." action={<button type="button" onClick={startAssessmentBuilder}>Create assessment</button>} />}
               </div>
             </section>
 
             <section className="workspace-surface default-library">
-              <div className="workspace-surface-head"><div><h3>Default assessments</h3><p>Challenging templates with answer keys and deterministic scoring checkpoints.</p></div></div>
-              <div className="default-assessment-list">
-                {defaultAssessments.isLoading && <WorkspaceSkeleton rows={4} />}
-                {filteredDefaultAssessments.map((template) => (
-                  <article className={`default-assessment-row${previewDefaultId === template.id ? " active" : ""}`} key={template.id}>
-                    <button type="button" className="default-assessment-main" onClick={() => setPreviewDefaultId((current) => current === template.id ? null : template.id)}>
-                      <AssessmentToolIcon assessmentType={template.assessment_type} title={template.title} />
-                      <span><strong>{template.title}</strong><small>{template.summary}</small></span>
-                    </button>
-                    <span>{template.duration_minutes} min</span>
-                    <span>{template.question_count ? `${template.question_count} questions` : `${template.checkpoint_count} checkpoints`}</span>
-                    <button type="button" onClick={() => installDefault.mutate(template.id)} disabled={installDefault.isPending}>{installDefault.isPending && installDefault.variables === template.id ? <ButtonBusyLabel label="Adding..." /> : "Add"}</button>
-                  </article>
-                ))}
+              <div className="workspace-surface-head"><div><h3>Create from a template</h3><p>Start with a validated assessment and tailor it to the role.</p></div></div>
+              <div className="default-template-bar">
+                <div><strong>Validated templates</strong><span>{filteredDefaultAssessments.length} available{toolFilter !== "all" ? ` for ${toolFilter.replaceAll("_", " ")}` : ""}</span></div>
+                <label>
+                  <span>Default assessment</span>
+                  <select value={selectedDefaultId} onChange={(event) => { setSelectedDefaultId(event.target.value); setPreviewDefaultId(""); }}>
+                    <option value="">Select a template</option>
+                    {filteredDefaultAssessments.map((template) => <option key={template.id} value={template.id}>{template.title}</option>)}
+                  </select>
+                </label>
+                <button type="button" className="secondary-btn" disabled={!selectedDefaultTemplate} onClick={() => selectedDefaultTemplate && setPreviewDefaultId((current) => current === selectedDefaultTemplate.id ? null : selectedDefaultTemplate.id)}>Preview</button>
+                <button type="button" disabled={!selectedDefaultTemplate || installDefault.isPending} onClick={() => selectedDefaultTemplate && installDefault.mutate(selectedDefaultTemplate.id)}>{installDefault.isPending && installDefault.variables === selectedDefaultTemplate?.id ? <ButtonBusyLabel label="Adding..." /> : "Add"}</button>
               </div>
+              {defaultAssessments.isLoading && <WorkspaceSkeleton rows={2} />}
+              {selectedDefaultTemplate && <div className="default-template-summary">
+                <AssessmentToolIcon assessmentType={selectedDefaultTemplate.assessment_type} title={selectedDefaultTemplate.title} />
+                <div><strong>{selectedDefaultTemplate.title}</strong><small>{selectedDefaultTemplate.summary}</small></div>
+                <span>{selectedDefaultTemplate.duration_minutes} min</span>
+                <span>{selectedDefaultTemplate.question_count ? `${selectedDefaultTemplate.question_count} questions` : `${selectedDefaultTemplate.checkpoint_count} checkpoints`}</span>
+              </div>}
               {previewDefaultId && defaultAssessmentDetail.data && <div className="default-key-preview"><div className="workspace-surface-head"><div><strong>{defaultAssessmentDetail.data.title}</strong><p>Answer key and scoring checkpoints</p></div><button type="button" className="workspace-icon-btn" aria-label="Close scoring key" onClick={() => setPreviewDefaultId(null)}><X size={17} /></button></div>
                 {(defaultAssessmentDetail.data.scoring?.checkpoints || []).length > 0 && <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.scoring?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>Minimum checkpoint score: {checkpoint.threshold}%</small></div>)}</div>}
-                {defaultAssessmentDetail.data.questions ? <ol>{defaultAssessmentDetail.data.questions.map((question, questionIndex) => <li key={`${question.question_text}-${questionIndex}`}><strong>{question.question_text}</strong><span>{question.options.find((option) => option.is_correct)?.option_text || "No answer configured"}</span>{question.competency && <small>{question.competency}{question.difficulty ? ` | ${question.difficulty}` : ""}</small>}</li>)}</ol> : <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.task?.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>{checkpoint.source} = {JSON.stringify(checkpoint.expected)}</small></div>)}</div>}
+                {defaultAssessmentDetail.data.questions ? <ol>{defaultAssessmentDetail.data.questions.map((question, questionIndex) => <li key={`${question.question_text}-${questionIndex}`}><strong>{question.question_text}</strong><span>{question.options.find((option) => option.is_correct)?.option_text || "No answer configured"}</span>{question.competency && <small>{question.competency}{question.difficulty ? ` | ${question.difficulty}` : ""}</small>}</li>)}</ol> : <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.task?.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>Expected answer: {readableReviewValue(checkpoint.expected)}</small></div>)}</div>}
+                {defaultAssessmentDetail.data.task?.metadata?.sections && <div className="english-preview-sections"><strong>Candidate experience</strong>{defaultAssessmentDetail.data.task.metadata.sections.map((section) => <article key={section.id}><div><strong>{section.label}</strong><span>{section.minutes ? `${section.minutes} minutes` : "Response section"}</span></div><p>{section.description}</p>{section.passage && <blockquote>{section.passage}</blockquote>}{section.prompt && <div className="preview-prompt">{section.prompt}</div>}{section.audio?.map((clip) => <small key={clip.id}>Audio clip: {clip.label}</small>)}{section.questions && <small>{section.questions.length} comprehension questions</small>}</article>)}</div>}
               </div>}
               {installDefault.isError && <div className="workspace-error">{apiErrorMessage(installDefault.error, "The default assessment could not be added.")}</div>}
             </section>
 
             {showBuilder && <section className="workspace-surface assessment-builder-v2">
-              <div className="workspace-surface-head"><div><h3>New assessment</h3><p>Define the candidate task and its scoring evidence.</p></div><button type="button" className="workspace-icon-btn" aria-label="Close assessment builder" onClick={() => setShowBuilder(false)}><X size={17} /></button></div>
+              <div className="workspace-surface-head"><div><button type="button" className="builder-back-link" onClick={() => setShowBuilder(false)}>← Back to library</button><h3>New assessment</h3><p>Define the candidate experience and the evidence recruiters will use.</p></div><span className={`builder-save-state ${builderSaveState}`}>{builderSaveState === "saving" ? "Saving…" : "Saved for this session"}</span></div>
               <div className="builder-stepper" aria-label="Assessment builder progress">
-                {["Basics", "Candidate task", "Answer key", "Review"].map((label, stepIndex) => <button type="button" key={label} className={builderStep === stepIndex + 1 ? "active" : builderStep > stepIndex + 1 ? "complete" : ""} onClick={() => setBuilderStep(stepIndex + 1)}><span>{stepIndex + 1}</span>{label}</button>)}
+                {["Basics", "Candidate task", "Answer key", "Review"].map((label, stepIndex) => <button type="button" key={label} disabled={stepIndex + 1 > builderStep} aria-current={builderStep === stepIndex + 1 ? "step" : undefined} className={builderStep === stepIndex + 1 ? "active" : builderStep > stepIndex + 1 ? "complete" : ""} onClick={() => setBuilderStep(stepIndex + 1)}><span>{stepIndex + 1}</span>{label}</button>)}
               </div>
 
               {builderStep === 1 && <div className="builder-stage workspace-form-grid">
-                <label className="field-stack"><span>Assessment title</span><input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Senior accountant practical" /></label>
-                <label className="field-stack"><span>Format</span><select value={form.assessment_type} onChange={(e) => setForm((p) => ({ ...p, assessment_type: e.target.value as typeof form.assessment_type }))}><option value="mcq">Multiple choice</option><option value="spreadsheet">Excel</option><option value="coding">Coding</option><option value="accounting">Accounting</option><option value="tax_simulator">1040 Individual Tax</option><option value="tax_1120">1120 Corporate Tax</option><option value="case_study">Case study</option></select></label>
-                <label className="field-stack workspace-span-2"><span>Internal purpose</span><input value={form.about} onChange={(e) => setForm((p) => ({ ...p, about: e.target.value }))} placeholder="Role, seniority, and what this assessment should prove" /></label>
-                <label className="field-stack"><span>Topics</span><input value={form.topics} onChange={(e) => setForm((p) => ({ ...p, topics: e.target.value }))} placeholder="Close, reconciliations, controls" /></label>
-                <label className="field-stack"><span>Duration</span><div className="input-with-suffix"><input type="number" min="1" value={form.duration_minutes} onChange={(e) => setForm((p) => ({ ...p, duration_minutes: Number(e.target.value) }))} /><span>minutes</span></div></label>
+                <label className="field-stack"><span>Assessment title <b aria-hidden="true">*</b></span><input required value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Senior accountant practical" /></label>
+                <label className="field-stack"><span>Format <b aria-hidden="true">*</b></span><select required value={form.assessment_type} onChange={(e) => setForm((p) => ({ ...p, assessment_type: e.target.value as typeof form.assessment_type }))}><option value="mcq">Multiple choice</option><option value="spreadsheet">Excel</option><option value="coding">Coding</option><option value="accounting">Accounting</option><option value="tax_simulator">1040 Individual Tax</option><option value="tax_1120">1120 Corporate Tax</option><option value="case_study">Case study</option></select></label>
+                <label className="field-stack workspace-span-2"><span>Internal purpose <b aria-hidden="true">*</b></span><input required value={form.about} onChange={(e) => setForm((p) => ({ ...p, about: e.target.value }))} placeholder="Role, seniority, and what this assessment should prove" /><small>Visible to your hiring team, not candidates.</small></label>
+                <label className="field-stack"><span>Topics <b aria-hidden="true">*</b></span><input required value={form.topics} onChange={(e) => setForm((p) => ({ ...p, topics: e.target.value }))} placeholder="Close, reconciliations, controls" /></label>
+                <label className="field-stack"><span>Duration <b aria-hidden="true">*</b></span><div className="input-with-suffix"><input required type="number" min="1" value={form.duration_minutes} onChange={(e) => setForm((p) => ({ ...p, duration_minutes: Number(e.target.value) }))} /><span>minutes</span></div></label>
               </div>}
 
               {builderStep === 2 && <div className="builder-stage workspace-form-grid">
-                <label className="field-stack workspace-span-2"><span>Candidate instructions</span><textarea rows={3} value={form.instructions} onChange={(e) => setForm((p) => ({ ...p, instructions: e.target.value }))} placeholder="What the candidate should know before starting" /></label>
-                {isMcqForm ? <div className="builder-info workspace-span-2"><strong>Question builder comes next</strong><span>Create this assessment, then add the 25 or more scored questions from its assessment setup page.</span></div> : <label className="field-stack workspace-span-2"><span>Task brief</span><textarea rows={7} value={form.task_prompt} onChange={(e) => setForm((p) => ({ ...p, task_prompt: e.target.value }))} placeholder="State the facts, required outputs, constraints, and acceptable assumptions." /></label>}
+                <label className="field-stack workspace-span-2"><span>Candidate instructions <b aria-hidden="true">*</b></span><textarea required rows={3} value={form.instructions} onChange={(e) => setForm((p) => ({ ...p, instructions: e.target.value }))} placeholder="What the candidate should know before starting" /></label>
+                {isMcqForm ? <div className="builder-info workspace-span-2"><strong>Build the question set after saving</strong><span>Save the assessment as a draft, then add, score, and validate every question before publishing.</span></div> : <label className="field-stack workspace-span-2"><span>Task brief <b aria-hidden="true">*</b></span><textarea required rows={7} value={form.task_prompt} onChange={(e) => setForm((p) => ({ ...p, task_prompt: e.target.value }))} placeholder="State the facts, required outputs, constraints, and acceptable assumptions." /></label>}
                 {!isMcqForm && <label className="field-stack workspace-span-2"><span>Reference links</span><textarea rows={2} value={form.attachment_links} onChange={(e) => setForm((p) => ({ ...p, attachment_links: e.target.value }))} placeholder="One URL per line" /></label>}
                 {form.assessment_type === "coding" && <><label className="field-stack"><span>Language</span><select value={form.coding_language} onChange={(e) => setForm((p) => ({ ...p, coding_language: e.target.value }))}><option value="python">Python</option><option value="javascript">JavaScript</option><option value="typescript">TypeScript</option><option value="java">Java</option><option value="sql">SQL</option></select></label><label className="field-stack workspace-span-2"><span>Starter code</span><textarea className="code-input" rows={5} value={form.starter_code} onChange={(e) => setForm((p) => ({ ...p, starter_code: e.target.value }))} /></label></>}
                 {form.assessment_type === "spreadsheet" && <div className="workspace-span-2 builder-workbook">
@@ -953,16 +1069,16 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
 
               {builderStep === 3 && <div className="builder-stage">
                 {isMcqForm ? <div className="builder-info"><strong>MCQ answer keys are set per question</strong><span>Correct options and marks are configured while adding each question.</span></div> : <>
-                  <div className="checkpoint-heading"><div><strong>Deterministic checkpoints</strong><span>Each check compares submitted evidence with the answer key. Weights must total 100.</span></div><strong className={checkpointWeight === 100 ? "weight-valid" : "weight-invalid"}>{checkpointWeight}%</strong></div>
+                  <div className="checkpoint-heading"><div><strong>Scoring checkpoints</strong><span>Describe what a correct response contains. Weights must total 100%.</span></div><strong className={checkpointWeight === 100 ? "weight-valid" : "weight-invalid"}>{checkpointWeight}%</strong></div>
                   <div className="checkpoint-list">{checkpoints.map((checkpoint, checkpointIndex) => <article className="checkpoint-row" key={checkpoint.id}>
-                    <label className="field-stack"><span>Checkpoint</span><input value={checkpoint.label} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, label: event.target.value } : item))} /></label>
-                    <label className="field-stack"><span>Evidence source</span><input value={checkpoint.source} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, source: event.target.value } : item))} placeholder={form.assessment_type === "spreadsheet" ? "spreadsheet_value:B12" : form.assessment_type === "coding" ? "code" : "field:taxable_income"} /></label>
-                    <label className="field-stack"><span>Compare as</span><select value={checkpoint.comparator} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, comparator: event.target.value as BuilderCheckpoint["comparator"] } : item))}><option value="numeric">Number</option><option value="exact">Exact value</option><option value="contains">Contains text</option><option value="contains_all">Contains all</option><option value="regex">Pattern</option><option value="set_contains_all">Selected items</option></select></label>
-                    <label className="field-stack"><span>Correct answer</span><input value={checkpoint.expected} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, expected: event.target.value } : item))} /></label>
-                    <label className="field-stack"><span>Weight</span><input type="number" min="1" max="100" value={checkpoint.weight} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, weight: Number(event.target.value) } : item))} /></label>
+                    <label className="field-stack"><span>What are you scoring? <b aria-hidden="true">*</b></span><input required value={checkpoint.label} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, label: event.target.value } : item))} placeholder="Calculated gross margin" /></label>
+                    <label className="field-stack"><span>How should it match?</span><select value={checkpoint.comparator} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, comparator: event.target.value as BuilderCheckpoint["comparator"] } : item))}><option value="numeric">Matches the number</option><option value="exact">Matches exactly</option><option value="contains">Includes this text</option><option value="contains_all">Includes every item</option><option value="regex">Matches a pattern</option><option value="set_contains_all">Includes every selection</option></select></label>
+                    <label className="field-stack"><span>Correct answer <b aria-hidden="true">*</b></span><input required value={checkpoint.expected} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, expected: event.target.value } : item))} placeholder="49,000" /></label>
+                    <label className="field-stack"><span>Weight</span><div className="input-with-suffix"><input type="number" min="1" max="100" value={checkpoint.weight} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, weight: Number(event.target.value) } : item))} /><span>%</span></div></label>
+                    <details className="checkpoint-advanced-source"><summary>Advanced evidence source</summary><label className="field-stack"><span>Submitted value reference</span><input value={checkpoint.source} onChange={(event) => setCheckpoints((items) => items.map((item, indexValue) => indexValue === checkpointIndex ? { ...item, source: event.target.value } : item))} placeholder={form.assessment_type === "spreadsheet" ? "spreadsheet_value:B12" : form.assessment_type === "coding" ? "code" : "field:taxable_income"} /></label></details>
                     <button type="button" className="checkpoint-remove" aria-label="Remove checkpoint" onClick={() => setCheckpoints((items) => items.filter((_, indexValue) => indexValue !== checkpointIndex))}>Remove</button>
                   </article>)}</div>
-                  <button type="button" className="secondary-btn" onClick={() => setCheckpoints((items) => [...items, { id: `checkpoint-${Date.now()}`, label: "", source: "", comparator: "numeric", expected: "", weight: 0, tolerance: 0.01 }])}>Add checkpoint</button>
+                  <button type="button" className="secondary-btn" onClick={() => setCheckpoints((items) => [...items, { id: `checkpoint-${Date.now()}`, label: "", source: `field:result_${items.length + 1}`, comparator: "numeric", expected: "", weight: 0, tolerance: 0.01 }])}>Add scoring checkpoint</button>
                 </>}
               </div>}
 
@@ -971,32 +1087,52 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 <details className="builder-advanced"><summary>Advanced settings</summary><div className="workspace-form-grid compact"><label className="field-stack"><span>Pass score</span><input type="number" min="70" max="100" value={form.pass_score} onChange={(e) => setForm((p) => ({ ...p, pass_score: Number(e.target.value) }))} /></label><label className="field-stack"><span>Maximum attempts</span><input type="number" min="1" max="3" value={form.max_attempts} onChange={(e) => setForm((p) => ({ ...p, max_attempts: Number(e.target.value) }))} /></label></div></details>
               </div>}
 
-              <div className="workspace-form-footer builder-footer">{builderStep < 4 ? <button type="button" onClick={() => setBuilderStep((step) => Math.min(4, step + 1))}>Next</button> : <button onClick={() => createAssessment.mutate()} disabled={createAssessment.isPending || !canCreateAssessment}>{createAssessment.isPending ? <ButtonBusyLabel label="Creating..." /> : "Create draft"}</button>}</div>
+              <div className="workspace-form-footer builder-footer">
+                <span>{builderSaveState === "saving" ? "Saving progress…" : "Progress saved in this browser session"}</span>
+                {builderStep > 1 && <button type="button" className="secondary-btn" onClick={() => setBuilderStep((step) => Math.max(1, step - 1))}>Back</button>}
+                {builderStep < 4 ? <button type="button" disabled={!builderStepCanContinue} onClick={() => setBuilderStep((step) => Math.min(4, step + 1))}>Continue</button> : <button onClick={() => createAssessment.mutate()} disabled={createAssessment.isPending || !canCreateAssessment}>{createAssessment.isPending ? <ButtonBusyLabel label="Creating..." /> : "Create draft"}</button>}
+              </div>
+              {!builderStepCanContinue && builderStep < 4 && <div className="workspace-form-note builder-validation-note">Complete the required fields to continue.</div>}
               {!canCreateAssessment && builderStep === 4 && <div className="workspace-form-note">Complete the required fields{isMcqForm ? "." : " and make checkpoint weights total 100%."}</div>}
               {createAssessment.isError && <div className="workspace-error">{apiErrorMessage(createAssessment.error, "The assessment could not be created. Review the fields and try again.")}</div>}
             </section>}
           </div>
+          {previewAssessment && <div className="workspace-modal-backdrop" role="presentation" onMouseDown={() => setPreviewAssessmentId(null)}>
+            <section className="assessment-preview-modal" role="dialog" aria-modal="true" aria-labelledby="assessment-preview-title" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="workspace-surface-head"><div><h3 id="assessment-preview-title">{previewAssessment.title}</h3><p>Recruiter-ready assessment summary</p></div><button type="button" className="workspace-icon-btn" aria-label="Close assessment preview" onClick={() => setPreviewAssessmentId(null)}><X size={17} /></button></div>
+              <div className="assessment-preview-summary">
+                <div><span>Status</span><StatusBadge value={previewAssessment.status} /></div>
+                <div><span>Format</span><strong>{previewAssessment.assessment_type.replaceAll("_", " ")}</strong></div>
+                <div><span>Duration</span><strong>{previewAssessment.duration_minutes} minutes</strong></div>
+                <div><span>Pass score</span><strong>{previewAssessment.pass_score}%</strong></div>
+              </div>
+              {previewAssessment.task && <div className="assessment-preview-copy"><span>Candidate task</span><strong>{previewAssessment.task.title}</strong><p>{previewAssessment.task.description || previewAssessment.task.instructions}</p></div>}
+              <div className="assessment-preview-key"><div><strong>Scoring key</strong><span>Shown in plain language for recruiter review.</span></div>{previewAssessment.assessment_type === "mcq" ? <p>{previewAssessment.question_count} questions. Correct answers and marks are stored with each question.</p> : <div className="key-checkpoint-list">{(previewAssessment.task?.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>Expected answer: {readableReviewValue(checkpoint.expected)}</small></div>)}</div>}</div>
+              <div className="workspace-form-footer"><button type="button" className="secondary-btn" onClick={() => setPreviewAssessmentId(null)}>Close</button><button type="button" onClick={() => { setPreviewAssessmentId(null); openInvitationFlow(previewAssessment); }}>{previewAssessment.status === "published" ? "Send invitation" : "Continue setup"}</button></div>
+            </section>
+          </div>}
         </section>
       )}
 
       {activeTab === "publish" && (
         <section className="workspace-publish">
           <div className="workspace-main-column">
-            <section className="workspace-surface">
+            {selectedExam && selectedExam.status !== "published" && <section className="workspace-surface setup-attention-surface">
               <div className="workspace-surface-head">
                 <div>
-                  <h3>Assessment setup</h3>
-                  <p>Select an assessment, continue the build, then publish and issue it.</p>
+                  <h3>Finish assessment setup</h3>
+                  <p>Complete the scoring content and publish this draft before inviting candidates.</p>
                 </div>
+                <StatusBadge value={selectedExam.status} />
               </div>
               <div className="workspace-form-grid compact">
                 <label className="field-stack workspace-span-2">
-                  <span>Selected assessment</span>
+                  <span>Draft assessment</span>
                   <span className="assessment-select-with-icon">
                     {selectedExam && <AssessmentToolIcon assessmentType={selectedExam.assessment_type} title={selectedExam.title} />}
                     <select value={selectedExamId ?? ""} onChange={(e) => setSelectedExamId(Number(e.target.value))}>
                       <option value="">Select assessment</option>
-                      {filteredAssessments.map((x) => (
+                      {filteredAssessments.filter((assessment) => assessment.status !== "published").map((x) => (
                         <option key={x.exam_id} value={x.exam_id}>
                           {x.title} ({x.status}) {x.assessment_type === "mcq" ? `${x.question_count} questions` : `${x.checkpoint_count || 0} checkpoints`}
                         </option>
@@ -1016,7 +1152,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 <div className="assessment-definition">
                   <div><span>Practical task</span><strong>{selectedExam.task.title}</strong><p>{selectedExam.task.description}</p></div>
                   <div className="assessment-definition-stats"><span><strong>{Object.keys((selectedExam.task.metadata?.initial_spreadsheet_data as Record<string, unknown>) || {}).length}</strong> workbook cells</span><span><strong>{selectedExam.checkpoint_count || 0}</strong> scored checkpoints</span><span><strong>{selectedExam.task.marks}</strong> total marks</span></div>
-                  <details><summary>View answer key and checkpoints</summary><div className="key-checkpoint-list">{(selectedExam.task.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>{checkpoint.source} = {JSON.stringify(checkpoint.expected)}</small></div>)}</div></details>
+                  <details><summary>View recruiter scoring key</summary><div className="key-checkpoint-list">{(selectedExam.task.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>Expected answer: {readableReviewValue(checkpoint.expected)}</small></div>)}</div></details>
                 </div>
               )}
 
@@ -1104,13 +1240,13 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   </article>
                 ))}
               </div>
-            </section>
+            </section>}
 
             <section className="workspace-surface">
               <div className="workspace-surface-head">
                 <div>
-                  <h3>Issue assessment</h3>
-                  <p>Send the published assessment to a candidate and keep review connected to the same record.</p>
+                  <h3>Send an invitation</h3>
+                  <p>Choose a ready assessment and a candidate currently in Screening.</p>
                 </div>
               </div>
               <div className="workspace-form-grid compact">
@@ -1156,7 +1292,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 </button>
               </div>
               {!screeningApplications.isLoading && !(screeningApplications.data || []).length && (
-                <div className="workspace-form-note">No candidates are currently in Screening. Add a candidate to an open role or move an existing application to Screening.</div>
+                <div className="workspace-form-note workspace-form-note-action"><span>No candidates are currently in Screening. Add a candidate to an open role or move an existing application to Screening.</span>{onOpenPipeline && <button type="button" className="secondary-btn" onClick={onOpenPipeline}>Open candidate pipeline</button>}</div>
               )}
               {!canIssueAssessment && Boolean((screeningApplications.data || []).length) && <div className="workspace-form-note">Choose a published assessment and a screening candidate.</div>}
               {issueMutation.isError && <div className="workspace-error">The invite could not be issued. Check the candidate details and try again.</div>}
@@ -1164,7 +1300,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
             </section>
 
             <section className="workspace-surface">
-              <div className="workspace-surface-head"><div><h3>Published activity</h3><p>Invitations and assessments that are not yet complete.</p></div></div>
+              <div className="workspace-surface-head"><div><h3>Active invitations</h3><p>Monitor delivery, candidate progress, and access that may need action.</p></div></div>
               <div className="published-activity-list">
                 {issued.isLoading && <WorkspaceSkeleton rows={4} />}
                 {activeIssuedRows.map((row) => (
@@ -1181,7 +1317,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                     </div>
                   </article>
                 ))}
-                {!issued.isLoading && activeIssuedRows.length === 0 && <EmptyState title="No active invitations" detail="Send a published assessment to a candidate in Screening." />}
+                {!issued.isLoading && activeIssuedRows.length === 0 && <EmptyState title="No active invitations" detail="Choose a published assessment and a screening candidate above." />}
               </div>
             </section>
           </div>
@@ -1193,10 +1329,10 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
             <article className="results-kpi-card"><span>Completed attempts</span><strong>{completedIssueCount}</strong><small>of {issuedRows.length} issued assessments</small></article>
             <article className="results-kpi-card"><span>Average score</span><strong>{averageScore.toFixed(1)}%</strong><small>Across {scoredResults.length} scored attempts</small></article>
             <article className="results-kpi-card"><span>Pass rate</span><strong>{passRate.toFixed(0)}%</strong><small>{passedResults.length} candidates passed</small></article>
-            <article className={`results-kpi-card${pendingReviewCount ? " attention" : ""}`}><span>Pending review</span><strong>{pendingReviewCount}</strong><small>Manual decisions still required</small></article>
+            <button type="button" className={`results-kpi-card${pendingReviewCount ? " attention" : ""}`} onClick={() => setResultStatusFilter("review")}><span>Pending review</span><strong>{pendingReviewCount}</strong><small>Show manual decisions first</small></button>
           </div>
 
-          <section className="workspace-surface">
+          <section className="workspace-surface results-performance-surface">
             <div className="workspace-surface-head">
               <div><h3>Assessment performance</h3><p>Compare participation, completion, average score, and pass rate by assessment.</p></div>
             </div>
@@ -1214,9 +1350,9 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
             </div> : <EmptyState title="No assessment results yet" detail="Performance metrics will appear after candidates begin completing issued assessments." />}
           </section>
 
-          <section className="workspace-surface">
+          <section className="workspace-surface review-queue-surface">
             <div className="workspace-surface-head results-list-head">
-              <div><h3>Candidate results</h3><p>Review outcomes, completion time, and submissions for every candidate.</p></div>
+              <div><h3>Candidate review queue</h3><p>Submissions awaiting a decision are pinned to the top.</p></div>
               <div className="results-filters">
                 <select aria-label="Filter results by assessment" value={resultAssessmentFilter} onChange={(event) => setResultAssessmentFilter(event.target.value)}>
                   <option value="all">All assessments</option>
@@ -1237,10 +1373,10 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                   <span>{formatDuration(row.time_taken_seconds)}</span>
                   <strong className="result-score">{row.score_pct == null ? "Pending" : `${Number(row.score_pct).toFixed(1)}%`}</strong>
                   {row.status === "review_pending" ? <StatusBadge value="Needs review" /> : row.passed === true ? <StatusBadge value="Passed" /> : row.passed === false ? <StatusBadge value="Failed" /> : <StatusBadge value={row.status} />}
-                  <button type="button" className="secondary-btn" onClick={() => setReviewIssueId(row.issued_id)}>View result</button>
+                  <button type="button" className={`candidate-review-action${row.status === "review_pending" ? " priority" : ""}`} onClick={() => setReviewIssueId(row.issued_id)}><span>{row.status === "review_pending" ? "Review candidate" : "View result"}</span><ArrowRight size={14} aria-hidden="true" /></button>
                 </div>
               ))}
-            </div> : <EmptyState title="No matching candidates" detail="Change the filters or issue an assessment to a candidate." />}
+            </div> : <EmptyState title="No matching candidates" detail="Change the filters or send an assessment to a candidate." action={<button type="button" onClick={() => switchAssessmentTab("publish")}>Open invitations</button>} />}
           </section>
 
           {reviewIssueId && (
@@ -1258,9 +1394,11 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
                 <div><span>Submitted</span><strong>{formatResultDate(review.data.submission?.submitted_at)}</strong></div>
               </div>
               <div className="review-panels">
-                <div className="review-panel checkpoint-review"><strong>Checkpoint evidence</strong>{Array.isArray(review.data.result?.detail?.checkpoints) ? review.data.result.detail.checkpoints.map((checkpoint: { id: string; label: string; matched: boolean; earned_weight: number; weight: number; actual: unknown; expected: unknown }) => <div className={`checkpoint-review-row ${checkpoint.matched ? "matched" : "missed"}`} key={checkpoint.id}><div><strong>{checkpoint.label}</strong><small>{checkpoint.matched ? "Matched" : "Needs review"}</small></div><span>{checkpoint.earned_weight}/{checkpoint.weight}</span><small>Submitted: {JSON.stringify(checkpoint.actual)} | Key: {JSON.stringify(checkpoint.expected)}</small></div>) : <pre>{JSON.stringify(review.data.result?.detail || review.data.result || {}, null, 2)}</pre>}</div>
-                <div className="review-panel"><strong>Candidate submission</strong><pre>{JSON.stringify(review.data.submission?.submitted_data || {}, null, 2)}</pre></div>
-                <div className="review-panel"><strong>Activity and proctoring</strong><pre>{JSON.stringify(review.data.submission?.proctoring_events || [], null, 2)}</pre></div>
+                <div className="review-panel checkpoint-review"><strong>Scoring checkpoints</strong><p className="review-panel-intro">Each row compares the candidate’s submitted result with the assessment key.</p>{Array.isArray(review.data.result?.detail?.checkpoints) ? review.data.result.detail.checkpoints.map((checkpoint: { id: string; label: string; matched: boolean; earned_weight: number; weight: number; actual: unknown; expected: unknown }) => <div className={`checkpoint-review-row ${checkpoint.matched ? "matched" : "missed"}`} key={checkpoint.id}><div><strong>{checkpoint.label}</strong><small>{checkpoint.matched ? "Matches the key" : "Needs recruiter review"}</small></div><span>{readableReviewValue(checkpoint.earned_weight)} / {readableReviewValue(checkpoint.weight)} pts</span><small><b>Submitted:</b> {readableReviewValue(checkpoint.actual)} <b>Expected:</b> {readableReviewValue(checkpoint.expected)}</small></div>) : <div className="review-readable-summary">{Object.entries((review.data.result?.detail || {}) as Record<string, unknown>).map(([key, value]) => <div key={key}><span>{key.replaceAll("_", " ")}</span><strong>{readableReviewValue(value)}</strong></div>)}</div>}</div>
+                <div className="review-panel"><strong>Answer key</strong><p className="review-panel-intro">Recruiter reference for the expected scoring points.</p>{Array.isArray(review.data.task?.grading_config?.checkpoints) ? <div className="review-readable-summary">{review.data.task.grading_config.checkpoints.map((checkpoint: { id: string; label: string; expected: unknown; weight: number }) => <div key={checkpoint.id}><span>{checkpoint.label}</span><strong>{readableReviewValue(checkpoint.expected)} · {readableReviewValue(checkpoint.weight)} pts</strong></div>)}</div> : <p className="review-panel-intro">This assessment uses its configured scoring guide; no separate checkpoint key is available.</p>}</div>
+                <div className="review-panel"><strong>Candidate submission</strong><p className="review-panel-intro">Submitted values are formatted for quick recruiter review.</p><div className="review-readable-summary">{Object.entries((review.data.submission?.submitted_data || {}) as Record<string, unknown>).map(([key, value]) => <div key={key}><span>{key.replaceAll("_", " ")}</span><strong>{readableReviewValue(value)}</strong></div>)}</div></div>
+                <ProctorEventReviewControls issueId={reviewIssueId} events={review.data.submission?.proctoring_events} labels={review.data.proctor_review_labels} onSaved={() => qc.invalidateQueries({ queryKey: ["issued-review", reviewIssueId] })} />
+                <div className="review-panel review-clips-panel"><strong>Clips for review</strong><p className="review-panel-intro">Only cropped clips around flagged events are retained. Full camera and screen recordings are discarded.</p>{Array.isArray(review.data.review_clips) && review.data.review_clips.length ? <div className="review-clips-grid">{review.data.review_clips.map((clip: { id: number; evidence_type: string; event_type: string; url: string; duration_seconds: number }) => <figure key={clip.id}><video controls preload="metadata" src={clip.url} /><figcaption><strong>{clip.evidence_type === "screen" ? "Screen" : "Camera"}</strong><span>{clip.event_type.replaceAll("_", " ")} · {Number(clip.duration_seconds).toFixed(1)}s</span></figcaption></figure>)}</div> : <p className="review-panel-intro">No flagged clips were retained.</p>}</div>
               </div>
               <div className="review-decision">
                 <div><strong>Recruiter decision</strong><span>Confirm or adjust the provisional score. Candidates do not receive this result from the assessment session.</span></div>
@@ -1295,6 +1433,7 @@ export function ProviderAssessments({ embedded = false }: { embedded?: boolean }
           </section>
         </div>
       )}
+      </div>
       </main>
     </section>
   );

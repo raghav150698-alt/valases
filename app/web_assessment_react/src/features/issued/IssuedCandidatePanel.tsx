@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useCandidateGazeProctor } from "../assessment/useCandidateGazeProctor";
+import { useFlaggedSessionRecorder } from "../assessment/useFlaggedSessionRecorder";
 import { useAssessmentSession } from "../assessment/useAssessmentSession";
 import { useAssessmentTimer } from "../assessment/useAssessmentTimer";
 import type { TimerState } from "../assessment/assessmentRuntime";
@@ -15,12 +16,23 @@ const AccountingTool = lazy(() => import("../tools/AccountingTool").then((module
 const TaxTool = lazy(() => import("../tools/TaxTool").then((module) => ({ default: module.TaxTool })));
 const CorporateTaxTool = lazy(() => import("../tools/CorporateTaxTool").then((module) => ({ default: module.CorporateTaxTool })));
 const RemoteDesktopTool = lazy(() => import("../tools/RemoteDesktopTool").then((module) => ({ default: module.RemoteDesktopTool })));
+const REVIEW_EVIDENCE_EVENT_TYPES = new Set([
+  "mobile_phone_detected",
+  "multiple_faces_sustained",
+  "possible_overlapping_voice_activity_advisory",
+  "look_away_sustained",
+  "object_detected_advisory",
+  "speaker_identity_mismatch",
+  "face_identity_mismatch",
+]);
 
 type IssuedOption = { id: number; text: string };
 type IssuedQuestion = { question_id: number; question_text: string; question_type: string; options: IssuedOption[] };
 type IssuedExam = {
   issued_id: number;
   assessment_title: string;
+  organization_name?: string;
+  organization_logo_url?: string;
   assessment_type: string;
   desktop_app?: {
     app_key: string;
@@ -41,6 +53,7 @@ type IssuedExam = {
   } | null;
   questions: IssuedQuestion[];
   status: string;
+  next_step?: string;
   score_pct?: number;
   passed?: boolean;
   draft?: {
@@ -69,6 +82,14 @@ export function IssuedCandidatePanel() {
   const [accountingSubmission, setAccountingSubmission] = useState<AccountingAssessmentSubmission | null>(null);
   const [taxSubmission, setTaxSubmission] = useState<TaxAssessmentSubmission | null>(null);
   const [corporateTaxSubmission, setCorporateTaxSubmission] = useState<CorporateTaxAssessmentSubmission | null>(null);
+  const [englishObjectiveAnswers, setEnglishObjectiveAnswers] = useState<Record<string, string>>({});
+  const [englishWritingResponse, setEnglishWritingResponse] = useState("");
+  const [englishSpeakingResponse, setEnglishSpeakingResponse] = useState("");
+  const [englishSpeakingAudio, setEnglishSpeakingAudio] = useState("");
+  const [englishRecording, setEnglishRecording] = useState(false);
+  const [englishAudioPlayed, setEnglishAudioPlayed] = useState<Record<string, boolean>>({});
+  const recordingRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
   const [taskResponse, setTaskResponse] = useState("");
   const [taskFileLink, setTaskFileLink] = useState("");
   const [desktopSession, setDesktopSession] = useState({ sessionId: "", status: "not_started", ready: false });
@@ -76,6 +97,7 @@ export function IssuedCandidatePanel() {
   const [policyWarning, setPolicyWarning] = useState<{ reason: string; count: number } | null>(null);
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [completion, setCompletion] = useState<{ title: string; message: string } | null>(null);
+  const [closedMessage, setClosedMessage] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isAcceptingConsent, setIsAcceptingConsent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -92,13 +114,27 @@ export function IssuedCandidatePanel() {
   const submissionIdRef = useRef<string>(globalThis.crypto?.randomUUID?.() || `submission-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const autosaveRevisionRef = useRef(0);
   const timerStateRef = useRef<TimerState | null>(null);
-  const { status: gazeStatus, error: gazeError, stream: gazeStream, start: startGazeProctor, stop: stopGazeProctor } = useCandidateGazeProctor(Boolean(paper));
+  const { status: gazeStatus, error: gazeError, stream: gazeStream, readiness: proctorReadiness, start: startGazeProctor, stop: stopGazeProctor } = useCandidateGazeProctor(Boolean(paper));
+  const uploadReviewClip = useCallback(async (blob: Blob, kind: "camera" | "screen", eventType: string, durationSeconds: number) => {
+    if (!token || !blob.size) return;
+    const form = new FormData();
+    form.append("file", blob, `${kind}-${Date.now()}.webm`);
+    form.append("evidence_type", kind);
+    form.append("event_type", eventType);
+    form.append("duration_seconds", String(durationSeconds));
+    await api.request({ method: "POST", url: "/exams/issued/review-clips", data: form, headers: { Authorization: `Bearer ${token}` } });
+  }, [token]);
+  const flaggedRecorder = useFlaggedSessionRecorder(uploadReviewClip);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const key = String(params.get("issued_key") || "").trim();
     if (key) setAccessKey(key);
   }, []);
+
+  const storedIssuedToken = () => {
+    try { return sessionStorage.getItem("valases-issued-session") || ""; } catch { return ""; }
+  };
 
   useEffect(() => () => {
     welcomeSpeechRunRef.current += 1;
@@ -119,6 +155,7 @@ export function IssuedCandidatePanel() {
 
   const loadMe = async (newToken: string) => {
     setToken(newToken);
+    try { sessionStorage.setItem("valases-issued-session", newToken); } catch { /* best-effort browser session recovery */ }
     const response = await api.request<IssuedExam>({
       method: "GET",
       url: "/exams/issued/me",
@@ -127,9 +164,11 @@ export function IssuedCandidatePanel() {
     const me = response.data;
     if (["submitted", "completed", "review_pending", "reviewed", "terminated"].includes(me.status)) {
       setPaper(null);
-      setStatus("This assessment has already been submitted. Results are shared only by the recruiting organization.");
+      try { sessionStorage.removeItem("valases-issued-session"); } catch { /* best-effort cleanup */ }
+      setClosedMessage(me.next_step || "This assessment has already been submitted. Results and next steps are shared directly by the recruiting organization.");
       return;
     }
+    setClosedMessage("");
     setPaper(me);
     const draft = me.draft;
     const draftData = draft?.submitted_data || {};
@@ -141,6 +180,10 @@ export function IssuedCandidatePanel() {
     setAccountingSubmission((draftData.accounting_workspace ? draftData : null) as AccountingAssessmentSubmission | null);
     setTaxSubmission((draftData.tax_workspace ? draftData : null) as TaxAssessmentSubmission | null);
     setCorporateTaxSubmission((draftData.corporate_tax_workspace ? draftData : null) as CorporateTaxAssessmentSubmission | null);
+    setEnglishObjectiveAnswers((draftData.objective_answers || {}) as Record<string, string>);
+    setEnglishWritingResponse(String(draftData.writing_response || ""));
+    setEnglishSpeakingResponse(String(draftData.speaking_response || ""));
+    setEnglishSpeakingAudio(String(draftData.speaking_recording || ""));
     setTaskResponse(String(draftData.code || draftData.response_text || draftData.notes || me.task?.metadata?.starter_code || ""));
     setTaskFileLink(String(draftData.attachment_url || ""));
     const timerState = draft?.timer_state;
@@ -160,9 +203,18 @@ export function IssuedCandidatePanel() {
     setWelcomeCompleted(false);
     setBriefingState("idle");
     setBriefingError("");
+    setEnglishAudioPlayed({});
     setCompletion(null);
     setStatus("");
   };
+
+  useEffect(() => {
+    const savedToken = storedIssuedToken();
+    if (!savedToken) return;
+    void loadMe(savedToken).catch(() => {
+      try { sessionStorage.removeItem("valases-issued-session"); } catch { /* best-effort cleanup */ }
+    });
+  }, [accessKey]);
 
   const welcomeBriefing = useMemo(() => {
     if (!paper) return "";
@@ -242,11 +294,11 @@ export function IssuedCandidatePanel() {
     setIsAcceptingConsent(true);
     setStatus("");
     const consentDetails = {
-      policy_version: "privacy-2026-07-19",
-      consent_version: "candidate-consent-1.0",
+      policy_version: "privacy-2026-08-29",
+      consent_version: "candidate-consent-1.2",
       camera: true,
-      microphone: false,
-      recording: false,
+      microphone: true,
+      recording: true,
       accepted_at: new Date().toISOString(),
     };
     setProctorEvents((currentEvents) => [
@@ -254,6 +306,9 @@ export function IssuedCandidatePanel() {
       { event_type: "candidate_consent_accepted", severity: "info", details: consentDetails, recorded_at: consentDetails.accepted_at },
     ]);
     try {
+      // Must happen directly from the consent checkbox gesture; browsers may
+      // reject getDisplayMedia after the async camera/model setup begins.
+      await flaggedRecorder.requestScreen();
       await issuedApi("POST", "/exams/issued/consent", {
         policy_version: consentDetails.policy_version,
         consent_version: consentDetails.consent_version,
@@ -273,11 +328,14 @@ export function IssuedCandidatePanel() {
       // attempt, so a transient server write failure does not block the session.
     }
     try {
-      await startGazeProctor();
+      const cameraStream = await startGazeProctor();
+      if (!cameraStream) throw new Error("Camera stream is not ready yet.");
+      await flaggedRecorder.start(cameraStream);
       setConsentAccepted(true);
     } catch {
       stopGazeProctor();
-      setStatus("We could not start integrity monitoring. Check camera permission and try again.");
+      flaggedRecorder.stop();
+      setStatus("Camera and screen recording are required for this assessment. Check permissions and try again.");
       if (document.fullscreenElement) void document.exitFullscreen();
     } finally {
       setIsAcceptingConsent(false);
@@ -291,11 +349,13 @@ export function IssuedCandidatePanel() {
     submittingRef.current = true;
     setIsSubmitting(false);
     setPolicyWarning(null);
+    flaggedRecorder.stop();
     stopGazeProctor();
-    setCompletion({ title, message });
+    setCompletion({ title, message: `${message} The recruiting organization will contact you about next steps.` });
     setPaper(null);
+    try { sessionStorage.removeItem("valases-issued-session"); } catch { /* best-effort cleanup */ }
     if (document.fullscreenElement) void document.exitFullscreen();
-  }, [stopGazeProctor]);
+  }, [flaggedRecorder, stopGazeProctor]);
 
   const beginSubmission = () => {
     if (submittingRef.current) return false;
@@ -359,8 +419,50 @@ export function IssuedCandidatePanel() {
         },
       };
     }
+    if (paper.assessment_type === "english_language") {
+      return {
+        objective_answers: englishObjectiveAnswers,
+        writing_response: englishWritingResponse,
+        speaking_response: englishSpeakingResponse,
+        speaking_recording: englishSpeakingAudio || undefined,
+      };
+    }
     return { response_text: taskResponse, attachment_url: taskFileLink };
-  }, [accountingSubmission, corporateTaxSubmission, desktopSession.sessionId, excelSubmission, paper, taskFileLink, taskResponse, taxSubmission]);
+  }, [accountingSubmission, corporateTaxSubmission, desktopSession.sessionId, englishObjectiveAnswers, englishSpeakingAudio, englishSpeakingResponse, englishWritingResponse, excelSubmission, paper, taskFileLink, taskResponse, taxSubmission]);
+
+  const playEnglishAudio = (clip: { id: string; text: string; voice?: string }) => {
+    if (!window.speechSynthesis) { setStatus("Audio playback is not supported in this browser."); return; }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(clip.text);
+    utterance.lang = clip.voice || "en-US";
+    utterance.rate = 0.94;
+    utterance.onend = () => setEnglishAudioPlayed((current) => ({ ...current, [clip.id]: true }));
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const toggleEnglishRecording = async () => {
+    if (recordingRef.current) { recordingRef.current.stop(); return; }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setStatus("Speaking recording is not supported in this browser. Use the text response field instead.");
+      return;
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const recorder = new MediaRecorder(stream);
+    recordingChunksRef.current = [];
+    recorder.ondataavailable = (event) => { if (event.data.size) recordingChunksRef.current.push(event.data); };
+    recorder.onstop = () => {
+      const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+      const reader = new FileReader();
+      reader.onloadend = () => setEnglishSpeakingAudio(String(reader.result || ""));
+      reader.readAsDataURL(blob);
+      stream.getTracks().forEach((track) => track.stop());
+      recordingRef.current = null;
+      setEnglishRecording(false);
+    };
+    recorder.start();
+    recordingRef.current = recorder;
+    setEnglishRecording(true);
+  };
 
   const submit = async (endReason: "fullscreen" | "policy" | "manual" | null = null) => {
     if (!paper || !beginSubmission()) return;
@@ -401,19 +503,41 @@ export function IssuedCandidatePanel() {
   };
 
   const recordProctorEvent = async (eventType: string, severity = "warning", details: Record<string, unknown> = {}) => {
-    const eventDetails = { source: "candidate_browser", ...details };
+    const clientEventId = globalThis.crypto?.randomUUID?.() || `proctor-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const eventDetails = { source: "candidate_browser", client_event_id: clientEventId, ...details };
     const event = { event_type: eventType, severity, details: eventDetails, recorded_at: new Date().toISOString() };
     setProctorEvents((currentEvents) => [...currentEvents.slice(-99), event]);
+    if (severity !== "info" || REVIEW_EVIDENCE_EVENT_TYPES.has(eventType)) flaggedRecorder.flag(eventType);
     if (!token) return;
     try {
-      const response = await issuedApi<{ warning_count: number; should_terminate: boolean }>("POST", "/exams/issued/proctor-event", {
+      const response = await issuedApi<{
+        warning_count: number;
+        should_terminate: boolean;
+        disposition?: "ignore" | "review" | "high_confidence_flag";
+        severity?: "info" | "warning" | "critical";
+        policy_confidence?: number;
+        policy_reason?: string;
+      }>("POST", "/exams/issued/proctor-event", {
         event_type: eventType,
         severity,
         details: eventDetails,
       });
-      if (response.should_terminate) {
-        setStatus("Assessment closed because the warning limit was reached. Your attempt has been sent for review.");
-      }
+      setProctorEvents((currentEvents) => currentEvents.map((currentEvent) => {
+        const currentDetails = currentEvent.details as Record<string, unknown> | undefined;
+        if (String(currentDetails?.client_event_id || "") !== clientEventId) return currentEvent;
+        return {
+          ...currentEvent,
+          severity: response.severity || currentEvent.severity,
+          details: {
+            ...(currentDetails || {}),
+            policy_disposition: response.disposition || "ignore",
+            policy_confidence: Number(response.policy_confidence || 0),
+            policy_reason: response.policy_reason || "",
+            automatic_rejection: false,
+            automatic_score_deduction: false,
+          },
+        };
+      }));
     } catch {
       // The final submission still carries the local event log if the network is briefly unavailable.
     }
@@ -436,6 +560,10 @@ export function IssuedCandidatePanel() {
       setPolicyWarning({ reason: `Assessment closed: ${reason}`, count: 8 });
       await recordProctorEvent(signal?.eventType || "browser_policy_terminated", "critical", { reason, ...(signal?.details || {}) });
       await submit("policy");
+    },
+    onProctorAdvisory: (signal) => {
+      if (submittingRef.current) return;
+      void recordProctorEvent(signal.eventType, "info", signal.details || {});
     },
   });
 
@@ -488,8 +616,8 @@ export function IssuedCandidatePanel() {
   if (completion) {
     return (
       <section className="assessment-thank-you" role="status">
-        <BrandLogo className="assessment-brand-logo" />
-        <span className="launch-section-label">Valases Assessments</span>
+        {paper?.organization_logo_url ? <img className="assessment-brand-logo assessment-employer-logo" src={paper.organization_logo_url} alt={paper.organization_name || "Employer"} /> : <BrandLogo className="assessment-brand-logo" />}
+        <span className="launch-section-label">{paper?.organization_name || "Assessment complete"}</span>
         <h1>{completion.title}</h1>
         <p>{completion.message}</p>
         <strong>Thank you for your time.</strong>
@@ -497,6 +625,12 @@ export function IssuedCandidatePanel() {
       </section>
     );
   }
+
+  const englishSections = (paper?.task?.metadata?.sections || []) as Array<Record<string, any>>;
+  const listeningSection = englishSections.find((section) => section.id === "listening");
+  const readingSection = englishSections.find((section) => section.id === "reading");
+  const writingSection = englishSections.find((section) => section.id === "writing");
+  const speakingSection = englishSections.find((section) => section.id === "speaking");
 
   return (
     <section
@@ -510,18 +644,26 @@ export function IssuedCandidatePanel() {
           <span>Saving your work. Please keep this window open.</span>
         </div>
       )}
-      {!paper ? (
+      {closedMessage ? (
+        <section className="assessment-thank-you candidate-closed-state" role="status">
+          <BrandLogo className="assessment-brand-logo" />
+          <span className="launch-section-label">Assessment status</span>
+          <h1>Assessment already submitted</h1>
+          <p>{closedMessage}</p>
+          <small>You may close this browser tab.</small>
+        </section>
+      ) : !paper ? (
         <div className="candidate-login-layout">
           <div className="candidate-login-intro">
             <BrandLogo className="candidate-login-logo" />
             <h1>Welcome</h1>
-            <p>Sign in with the details from your assessment invitation.</p>
+            <p>Sign in with the details from your assessment invitation. Your progress is saved automatically so you can resume in this browser if you need to refresh.</p>
           </div>
         <form className="issued-login-panel" aria-busy={isSigningIn} onSubmit={(event) => { event.preventDefault(); void login(); }}>
           {!accessKey && (
             <label className="field-stack">
               <span>Email address</span>
-              <input autoComplete="email" placeholder="name@company.com" value={email} disabled={isSigningIn} onChange={(e) => setEmail(e.target.value)} />
+              <input type="email" inputMode="email" autoComplete="email" placeholder="name@company.com" value={email} disabled={isSigningIn} onChange={(e) => setEmail(e.target.value)} />
             </label>
           )}
           <label className="field-stack">
@@ -548,8 +690,9 @@ export function IssuedCandidatePanel() {
                 <span><b>3</b>Assessment</span>
               </nav>
               <div className="candidate-welcome-heading">
+                {paper.organization_name && <span className="candidate-company-brand">{paper.organization_logo_url && <img src={paper.organization_logo_url} alt="" />}{paper.organization_name}</span>}
                 <span className="launch-section-label">Your assessment is ready</span>
-                <h2 id="candidate-welcome-title">Welcome to Valases Assessments</h2>
+                <h2 id="candidate-welcome-title">Welcome to {paper.organization_name || "your assessment"}</h2>
                 <p>Review the written note and listen to the complete audio briefing before continuing.</p>
               </div>
               <div className="candidate-assessment-summary">
@@ -597,7 +740,7 @@ export function IssuedCandidatePanel() {
               <span className="launch-section-label">Before you begin</span>
               <h3 id="candidate-consent-title">Assessment privacy and integrity notice</h3>
               <p>Your answers, submitted work, timestamps, and assessment activity are collected to administer, score, secure, and review this assessment.</p>
-              <p>This session uses browser security checks and on-device camera analysis for attention and prohibited-object signals, including mobile phones. Camera frames are processed in the browser and are not recorded by this flow. If fullscreen exits, return promptly to continue. Automated signals require recruiter review and are not a final employment decision.</p>
+              <p>This session uses browser security checks plus camera and screen recording. Recordings stay in a short rolling buffer during the assessment; when an integrity signal is flagged, only a cropped 4–7 second camera clip and matching screen clip are sent for recruiter review. The full recordings are discarded when the session ends. Brief eye movement, natural posture changes, background noise, or a momentary camera obstruction are not treated as violations. Automated signals require recruiter review and are not a final employment decision.</p>
               <div className="candidate-policy-links">
                 <a href={`${legalBase}/privacy-policy.html`} target="_blank" rel="noreferrer">Privacy policy</a>
                 <a href={`${legalBase}/data-retention-and-deletion.html`} target="_blank" rel="noreferrer">Retention and deletion</a>
@@ -607,6 +750,13 @@ export function IssuedCandidatePanel() {
                 <input type="checkbox" checked={consentAccepted} disabled={isAcceptingConsent} onChange={(event) => { if (event.target.checked) { void requestFullscreen(); void acceptConsent(); } }} />
                 <span>I have read and agree to this assessment data and integrity notice.</span>
               </label>
+              <div className="candidate-preflight-grid" aria-label="Camera and microphone readiness">
+                <span className={proctorReadiness.camera === "ready" ? "ready" : "checking"}>Camera {proctorReadiness.camera === "ready" ? "ready" : "checking"}</span>
+                <span className={proctorReadiness.microphone === "ready" ? "ready" : "checking"}>Microphone {proctorReadiness.microphone === "ready" ? "ready" : "checking"}</span>
+                <span className={proctorReadiness.lighting === "good" ? "ready" : "checking"}>Lighting {proctorReadiness.lighting === "good" ? "good" : "check suggested"}</span>
+                <span className={proctorReadiness.face === "ready" ? "ready" : "checking"}>Face framing {proctorReadiness.face === "ready" ? "ready" : "checking"}</span>
+              </div>
+              {gazeStatus === "active" && <small className="candidate-preflight-message">{proctorReadiness.message}</small>}
               {isAcceptingConsent && <div className="candidate-login-progress compact" role="status"><span className="candidate-loading-spinner" aria-hidden="true" /><span><strong>Preparing fullscreen assessment</strong><small>Starting integrity checks and calibrating the camera...</small></span></div>}
               {gazeError && (
                 <div className="candidate-camera-retry" role="alert">
@@ -864,7 +1014,17 @@ export function IssuedCandidatePanel() {
             </footer>
             </main>
           )}
-          {!paper.desktop_app && !isMcqAssessment && !["spreadsheet", "accounting", "tax_simulator", "tax_1120"].includes(paper.assessment_type) && paper.task && (
+          {!paper.desktop_app && paper.assessment_type === "english_language" && paper.task && (
+            <section className="task-candidate-workspace english-assessment-workspace">
+              <div className="task-candidate-brief"><span>Four-section assessment</span><h3>{paper.task.title}</h3><p>{paper.task.description}</p><div className="task-instructions">{paper.task.instructions}</div></div>
+              {listeningSection && <div className="english-section-card"><div className="english-section-heading"><span>Section 1 · {listeningSection.minutes} minutes</span><h3>{listeningSection.label}</h3><p>{listeningSection.description}</p></div>{(listeningSection.audio || []).map((clip: any) => <div className="english-audio-row" key={clip.id}><div><strong>{clip.label}</strong><small>{englishAudioPlayed[clip.id] ? "Audio completed" : "Listen before answering"}</small></div><button className="assessment-secondary-btn" type="button" onClick={() => playEnglishAudio(clip)}>{englishAudioPlayed[clip.id] ? "Replay audio" : "Play audio"}</button></div>)}{(listeningSection.questions || []).map((question: any) => <label className="english-question" key={question.id}><strong>{question.prompt}</strong><select value={englishObjectiveAnswers[question.id] || ""} onChange={(event) => setEnglishObjectiveAnswers((current) => ({ ...current, [question.id]: event.target.value }))}><option value="">Select an answer</option>{question.options.map((option: string) => <option value={option} key={option}>{option}</option>)}</select></label>)}</div>}
+              {readingSection && <div className="english-section-card"><div className="english-section-heading"><span>Section 2 · {readingSection.minutes} minutes</span><h3>{readingSection.label}</h3><p>{readingSection.description}</p></div><div className="english-passage">{readingSection.passage}</div>{(readingSection.questions || []).map((question: any) => <label className="english-question" key={question.id}><strong>{question.prompt}</strong><select value={englishObjectiveAnswers[question.id] || ""} onChange={(event) => setEnglishObjectiveAnswers((current) => ({ ...current, [question.id]: event.target.value }))}><option value="">Select an answer</option>{question.options.map((option: string) => <option value={option} key={option}>{option}</option>)}</select></label>)}</div>}
+              {writingSection && <div className="english-section-card"><div className="english-section-heading"><span>Section 3 · {writingSection.minutes} minutes</span><h3>{writingSection.label}</h3><p>{writingSection.description}</p></div><div className="english-prompt">{writingSection.prompt}</div><textarea rows={10} value={englishWritingResponse} onChange={(event) => setEnglishWritingResponse(event.target.value)} placeholder="Write your response here..." /><small>{englishWritingResponse.trim() ? `${englishWritingResponse.trim().split(/\s+/).length} words` : "0 words"} · target {writingSection.minimum_words}–{writingSection.maximum_words}</small></div>}
+              {speakingSection && <div className="english-section-card"><div className="english-section-heading"><span>Section 4 · {speakingSection.minutes} minutes</span><h3>{speakingSection.label}</h3><p>{speakingSection.description}</p></div><div className="english-prompt">{speakingSection.prompt}</div><button className="assessment-secondary-btn" type="button" onClick={() => void toggleEnglishRecording()}>{englishRecording ? "Stop recording" : englishSpeakingAudio ? "Record again" : "Start recording"}</button>{englishSpeakingAudio && <audio controls src={englishSpeakingAudio} />}<textarea rows={5} value={englishSpeakingResponse} onChange={(event) => setEnglishSpeakingResponse(event.target.value)} placeholder="Optional transcript or written fallback..." /><small>Target response length: {speakingSection.minimum_seconds}–{speakingSection.maximum_seconds} seconds.</small></div>}
+              <div className="assessment-action-bar inline"><button className="assessment-primary-btn" type="button" disabled={!englishWritingResponse.trim() && !englishSpeakingResponse.trim() && !englishSpeakingAudio} onClick={() => void submit()}>Submit Assessment</button></div>
+            </section>
+          )}
+          {!paper.desktop_app && !isMcqAssessment && !["spreadsheet", "accounting", "tax_simulator", "tax_1120", "english_language"].includes(paper.assessment_type) && paper.task && (
             <section className="task-candidate-workspace">
               <div className="task-candidate-brief">
                 <span>Task brief</span>

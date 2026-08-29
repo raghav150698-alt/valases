@@ -4,6 +4,10 @@
 __pycache__/
 *.pyc
 .env
+.env.local
+tmp_start_local_review.ps1
+valases_website/
+node_modules/
 gmail.smtp.local.env
 *.db
 logs/

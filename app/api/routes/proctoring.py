@@ -41,6 +41,7 @@ from app.services.proctor_hard_negative import (
 )
 from app.services.proctor_retention import run_proctor_retention_cleanup
 from app.services.proctor_training import TrainConfig, train_proctor_model_from_feedback
+from app.services.proctor_event_fusion import classify_proctor_event, reset_proctor_fusion_policy_cache
 from app.services.proctoring_ai import evaluate_proctor_session, get_proctor_model_status, reset_proctor_model_cache
 from app.services.media_storage import resolve_media_url, upload_file_to_cloud_storage
 
@@ -174,8 +175,28 @@ def _event_impact(db: Session, item: ProctorSession, payload: ProctorEventCreate
     return min(weight, 3.0), warn_inc
 
 
-def _recompute_flag(item: ProctorSession) -> None:
-    item.is_flagged = bool(item.warning_count >= 5 or item.risk_score >= 20)
+def _recompute_flag(item: ProctorSession, *, high_confidence_flag: bool = False) -> None:
+    # A review score is not the same thing as a high-confidence flag. Once a
+    # high-confidence flag exists it is monotonic until a recruiter adjudicates it.
+    item.is_flagged = bool(item.is_flagged or high_confidence_flag)
+
+
+def _event_history_for_fusion(db: Session, session_id: int) -> list[dict]:
+    rows = db.scalars(
+        select(ProctorEvent)
+        .where(ProctorEvent.session_id == session_id)
+        .order_by(ProctorEvent.created_at.desc(), ProctorEvent.id.desc())
+        .limit(100),
+    ).all()
+    return [
+        {
+            "event_type": row.event_type,
+            "severity": row.severity,
+            "details": row.details_json or {},
+            "created_at": row.created_at,
+        }
+        for row in reversed(list(rows))
+    ]
 
 
 def _active_session_for_user(db: Session, user_id: int) -> ProctorSession | None:
@@ -428,6 +449,7 @@ def admin_train_proctor_model(
         run.error_message = None
         db.commit()
         reset_proctor_model_cache()
+        reset_proctor_fusion_policy_cache()
         return {"status": "ok", "run_id": run.id, **result}
     except Exception as exc:
         run.status = "failed"
@@ -464,6 +486,7 @@ def admin_reload_proctor_model(
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ):
     reset_proctor_model_cache()
+    reset_proctor_fusion_policy_cache()
     return {"status": "ok", "message": "Proctor model cache reloaded"}
 
 
@@ -724,22 +747,37 @@ def add_event(
     if item.status != "active":
         raise HTTPException(status_code=400, detail="Session is not active")
 
-    weight, warn_inc = _event_impact(db, item, payload)
+    decision = classify_proctor_event(
+        payload.event_type,
+        confidence=payload.confidence,
+        details=payload.details or {},
+        history=_event_history_for_fusion(db, item.id),
+    )
+    classified_details = {
+        **(payload.details or {}),
+        "client_severity": payload.severity,
+        "policy_disposition": decision.disposition,
+        "policy_confidence": decision.policy_confidence,
+        "policy_reason": decision.reason,
+        "policy_version": decision.policy_version,
+        "policy_rule": decision.matched_rule,
+        "automatic_rejection": False,
+        "automatic_score_deduction": False,
+    }
+    classified_payload = payload.model_copy(
+        update={"severity": decision.severity, "confidence": decision.raw_confidence, "details": classified_details},
+    )
+    weight, warn_inc = (0.0, 0) if decision.disposition == "ignore" else _event_impact(db, item, classified_payload)
     item.risk_score += weight
-    item.warning_count += warn_inc
-    _recompute_flag(item)
-    should_terminate = item.warning_count >= 8
-    if should_terminate:
-        item.status = "terminated"
-        item.ended_reason = "warning_limit_reached"
-        item.ended_at = datetime.now(timezone.utc)
+    item.warning_count += warn_inc if decision.candidate_warning else 0
+    _recompute_flag(item, high_confidence_flag=decision.disposition == "high_confidence_flag")
 
     event = ProctorEvent(
         session_id=item.id,
         event_type=payload.event_type,
-        severity=payload.severity,
-        confidence=payload.confidence,
-        details_json=payload.details or {},
+        severity=decision.severity,
+        confidence=decision.raw_confidence,
+        details_json=classified_details,
     )
     db.add(event)
     db.commit()
@@ -750,7 +788,12 @@ def add_event(
         "warning_count": item.warning_count,
         "risk_score": item.risk_score,
         "is_flagged": item.is_flagged,
-        "should_terminate": should_terminate,
+        "should_terminate": False,
+        "disposition": decision.disposition,
+        "severity": decision.severity,
+        "policy_confidence": decision.policy_confidence,
+        "policy_reason": decision.reason,
+        "capture_evidence": decision.capture_evidence,
         "status": item.status,
     }
 

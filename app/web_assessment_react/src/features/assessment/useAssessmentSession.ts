@@ -8,6 +8,7 @@ type AssessmentSessionOptions = {
   onFullscreenExited?: () => void;
   onPolicyWarning?: (reason: string, warningCount: number, signal?: ProctorViolation) => void;
   onPolicyTerminated?: (reason: string, warningCount: number, signal?: ProctorViolation) => void;
+  onProctorAdvisory?: (signal: ProctorViolation) => void;
 };
 
 export type ProctorViolation = {
@@ -16,9 +17,7 @@ export type ProctorViolation = {
   details?: Record<string, unknown>;
 };
 
-const MAX_WARNINGS = 8;
-
-export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onFullscreenExited, onPolicyWarning, onPolicyTerminated }: AssessmentSessionOptions) {
+export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onFullscreenExited, onPolicyWarning, onPolicyTerminated, onProctorAdvisory }: AssessmentSessionOptions) {
   const [fullscreenRequired, setFullscreenRequired] = useState(false);
   const [escapeWarningVisible, setEscapeWarningVisible] = useState(false);
   const [warningCount, setWarningCount] = useState(0);
@@ -30,10 +29,12 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
   const terminatedCallbackRef = useRef(onPolicyTerminated);
   const fullscreenExitedCallbackRef = useRef(onFullscreenExited);
   const exitConfirmedCallbackRef = useRef(onExitConfirmed);
+  const advisoryCallbackRef = useRef(onProctorAdvisory);
   warningCallbackRef.current = onPolicyWarning;
   terminatedCallbackRef.current = onPolicyTerminated;
   fullscreenExitedCallbackRef.current = onFullscreenExited;
   exitConfirmedCallbackRef.current = onExitConfirmed;
+  advisoryCallbackRef.current = onProctorAdvisory;
 
   const requestFullscreen = useCallback(async () => {
     if (typeof document === "undefined") return;
@@ -88,7 +89,7 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
       setWarningCount(nextCount);
       setLastWarning(reason);
       warningCallbackRef.current?.(reason, nextCount, signal);
-      if (immediate || nextCount >= MAX_WARNINGS) {
+      if (immediate) {
         terminatedRef.current = true;
         terminatedCallbackRef.current?.(reason, nextCount, signal);
       }
@@ -114,16 +115,19 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") recordViolation("The assessment tab was hidden");
+      if (document.visibilityState === "hidden") recordViolation("The assessment tab was hidden", false, { eventType: "assessment_tab_hidden" });
     };
-    const handleBlur = () => recordViolation("The assessment window lost focus");
+    const handleBlur = () => recordViolation("The assessment window lost focus", false, { eventType: "window_focus_lost" });
     const handleContextMenu = (event: MouseEvent) => {
       event.preventDefault();
-      recordViolation("The context menu was opened");
+      recordViolation("The context menu was opened", false, { eventType: "context_menu_opened" });
     };
     const handleClipboard = (event: ClipboardEvent) => {
       event.preventDefault();
-      recordViolation(`Clipboard ${event.type} was blocked`);
+      recordViolation(`Clipboard ${event.type} was blocked`, false, {
+        eventType: "clipboard_action_blocked",
+        details: { clipboard_action: event.type },
+      });
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && document.fullscreenElement) {
@@ -138,21 +142,27 @@ export function useAssessmentSession({ active, exitWarning, onExitConfirmed, onF
         (event.ctrlKey && ["U", "P"].includes(event.key.toUpperCase()));
       if (blocked) {
         event.preventDefault();
-        recordViolation("A restricted browser shortcut was used");
+        recordViolation("A restricted browser shortcut was used", false, {
+          eventType: "restricted_browser_shortcut",
+          details: { key: event.key },
+        });
       }
     };
 
     const handleProctorSignal = (event: Event) => {
-      const detail = (event as CustomEvent<{ event_type?: string; duration_ms?: number; confidence?: number; object_label?: string }>).detail || {};
+      const detail = (event as CustomEvent<{ event_type?: string; duration_ms?: number; confidence?: number; object_label?: string; face_count?: number; level?: number }>).detail || {};
       const eventType = String(detail.event_type || "").toLowerCase();
       const durationMs = Number(detail.duration_ms || 0);
+      if (["multiple_faces_sustained", "possible_overlapping_voice_activity_advisory", "object_detected_advisory"].includes(eventType)) {
+        advisoryCallbackRef.current?.({ eventType, severity: "info", details: { ...detail } });
+      }
       const isSustainedGazeAway = ["look_away_sustained", "look_away_over_2s", "gaze_away_over_3s", "gaze_pattern_review_flag"].includes(eventType);
       if (isSustainedGazeAway && durationMs >= 6000) {
         recordViolation("Sustained attention away was detected", false, { eventType: "look_away_sustained", details: { duration_ms: durationMs } });
       } else if (eventType === "mobile_phone_detected") {
         recordViolation("A mobile phone was detected. Put it away before continuing", false, {
           eventType: "mobile_phone_detected",
-          severity: "critical",
+          severity: "warning",
           details: { confidence: Number(detail.confidence || 0), object_label: String(detail.object_label || "cell phone") },
         });
       }

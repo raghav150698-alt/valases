@@ -52,6 +52,7 @@ class AssessmentType(StrEnum):
     TAX_SIMULATOR = "tax_simulator"
     TAX_1120 = "tax_1120"
     CASE_STUDY = "case_study"
+    ENGLISH_LANGUAGE = "english_language"
 
 
 class ExamStatus(StrEnum):
@@ -598,6 +599,48 @@ class AssessmentSubmission(Base):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     time_taken_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     proctoring_events_json: Mapped[list | dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AssessmentReviewClip(Base):
+    """Short recruiter-review media retained for a flagged issued attempt.
+
+    Full camera/screen recordings are never persisted. The candidate browser
+    keeps a small rolling buffer and uploads only these bounded clips.
+    """
+
+    __tablename__ = "assessment_review_clips"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("assessment_issues.id"), index=True)
+    evidence_type: Mapped[str] = mapped_column(String(20), index=True)  # screen | camera
+    event_type: Mapped[str] = mapped_column(String(120), index=True)
+    file_url: Mapped[str] = mapped_column(String(2000))
+    mime_type: Mapped[str] = mapped_column(String(120))
+    duration_seconds: Mapped[float] = mapped_column(Float, default=6.0)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AssessmentProctorReviewLabel(Base):
+    """Recruiter ground truth for one issued-assessment integrity signal."""
+
+    __tablename__ = "assessment_proctor_review_labels"
+    __table_args__ = (UniqueConstraint("issue_id", "event_key", name="uq_assessment_proctor_review_label_event"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("assessment_issues.id"), index=True)
+    submission_id: Mapped[int | None] = mapped_column(ForeignKey("assessment_submissions.id"), nullable=True, index=True)
+    evidence_clip_id: Mapped[int | None] = mapped_column(ForeignKey("assessment_review_clips.id"), nullable=True, index=True)
+    event_key: Mapped[str] = mapped_column(String(180))
+    source_event_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    event_type: Mapped[str] = mapped_column(String(120), index=True)
+    reviewer_label: Mapped[str] = mapped_column(String(30), index=True)  # confirmed | false_positive | uncertain | missed_detection
+    model_disposition: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    model_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reviewer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -1306,6 +1349,26 @@ class HiringOffer(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class HiringOnboarding(Base):
+    __tablename__ = "hiring_onboarding"
+    __table_args__ = (UniqueConstraint("application_id", name="uq_hiring_onboarding_application"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("hiring_applications.id"), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="not_started", index=True)
+    manager_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    manager_name: Mapped[str] = mapped_column(String(240), default="")
+    start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    checklist_json: Mapped[list] = mapped_column(JSON, default=list)
+    documents_json: Mapped[list] = mapped_column(JSON, default=list)
+    access_requests_json: Mapped[list] = mapped_column(JSON, default=list)
+    first_day_plan: Mapped[str] = mapped_column(Text, default="")
+    welcome_email_status: Mapped[str] = mapped_column(String(30), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class HiringInterview(Base):
     __tablename__ = "hiring_interviews"
 
@@ -1318,6 +1381,11 @@ class HiringInterview(Base):
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     duration_minutes: Mapped[int] = mapped_column(Integer, default=45)
     meeting_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    calendar_provider: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    calendar_event_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    calendar_event_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    calendar_sync_status: Mapped[str] = mapped_column(String(30), default="not_connected")
+    calendar_sync_error: Mapped[str] = mapped_column(String(500), default="")
     interviewers_json: Mapped[list] = mapped_column(JSON, default=list)
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -1370,6 +1438,44 @@ class HiringIntegration(Base):
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class HiringEmailChannel(Base):
+    __tablename__ = "hiring_email_channels"
+    __table_args__ = (UniqueConstraint("organization_id", "purpose", name="uq_hiring_email_channel_purpose"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    purpose: Mapped[str] = mapped_column(String(60), index=True)
+    provider: Mapped[str] = mapped_column(String(30), default="smtp")
+    status: Mapped[str] = mapped_column(String(30), default="not_configured", index=True)
+    smtp_host: Mapped[str] = mapped_column(String(240), default="")
+    smtp_port: Mapped[int] = mapped_column(Integer, default=587)
+    smtp_username: Mapped[str] = mapped_column(String(320), default="")
+    smtp_password_encrypted: Mapped[str] = mapped_column(Text, default="")
+    sender: Mapped[str] = mapped_column(String(320), default="")
+    sender_name: Mapped[str] = mapped_column(String(200), default="")
+    reply_to: Mapped[str] = mapped_column(String(320), default="")
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class HiringAutomationDelivery(Base):
+    __tablename__ = "hiring_automation_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    automation_key: Mapped[str] = mapped_column(String(240), unique=True, index=True)
+    automation_type: Mapped[str] = mapped_column(String(80), index=True)
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("hiring_applications.id"), nullable=True, index=True)
+    interview_id: Mapped[int | None] = mapped_column(ForeignKey("hiring_interviews.id"), nullable=True, index=True)
+    assessment_issue_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    recipient_email: Mapped[str] = mapped_column(String(320))
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    provider_error: Mapped[str] = mapped_column(String(500), default="")
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class OrganizationAuditEvent(Base):

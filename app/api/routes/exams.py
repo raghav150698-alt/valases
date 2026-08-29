@@ -10,10 +10,11 @@ import logging
 import random
 import re
 import secrets
+from cryptography.fernet import Fernet
 from urllib.parse import urlsplit
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -27,6 +28,8 @@ from app.db.session import get_db
 from app.models.entities import (
     ApprovalStatus,
     AssessmentIssue,
+    AssessmentProctorReviewLabel,
+    AssessmentReviewClip,
     AssessmentSubmission,
     AssessmentTask,
     AssessmentType,
@@ -39,6 +42,7 @@ from app.models.entities import (
     ExamStatus,
     HiringApplication,
     HiringCandidate,
+    HiringEmailChannel,
     HiringStageEvent,
     Option,
     Organization,
@@ -58,7 +62,11 @@ from app.services.desktop_session_broker import desktop_app_spec
 from app.services.desktop_session_lifecycle import desktop_session_artifact_payload, finalize_desktop_sessions_for_issue
 from app.services.notifications import send_email
 from app.services.organization_branding import organization_logo_url
+from app.services.proctor_event_fusion import apply_proctor_event_decision, classify_proctor_event
 from app.services.rule_engine import evaluate_exam_rules
+from app.services.media_storage import resolve_media_url, upload_file_to_cloud_storage
+from pathlib import Path
+from uuid import uuid4
 
 router = APIRouter(prefix="/exams", tags=["exams"])
 ALLOWED_QUESTIONS_PER_ATTEMPT = {25, 30, 35, 40}
@@ -67,6 +75,8 @@ ALLOWED_ASSESSMENT_TYPES = {x.value for x in AssessmentType}
 STANDALONE_ASSESSMENT_CATEGORY = "__standalone_assessment__"
 ISSUED_TOKEN_ROLE = "issued_candidate"
 request_logger = logging.getLogger("valases.request")
+
+_REVIEW_CLIP_MIME = {"video/webm": ".webm", "video/mp4": ".mp4", "video/quicktime": ".mov"}
 
 
 def _sync_pk_sequence_if_needed(db: Session, table_name: str, pk_col: str = "id") -> None:
@@ -151,6 +161,39 @@ def _organization_email_branding(
         str(organization.name or fallback_name).strip(),
         organization_logo_url(organization.settings_json),
     )
+
+
+def _organization_smtp_config(db: Session, organization_id: int | None, purpose: str) -> dict | None:
+    if not organization_id:
+        return None
+    channel = db.scalar(select(HiringEmailChannel).where(HiringEmailChannel.organization_id == organization_id, HiringEmailChannel.purpose == purpose, HiringEmailChannel.status == "connected"))
+    encrypted = str(channel.smtp_password_encrypted or "") if channel else ""
+    if not channel or not encrypted:
+        return None
+    settings = get_settings()
+    configured = str(settings.integration_token_encryption_key or "").strip()
+    if configured:
+        try:
+            fernet = Fernet(configured.encode("ascii"))
+        except (ValueError, TypeError):
+            return None
+    elif settings.is_production:
+        return None
+    else:
+        fernet = Fernet(base64.urlsafe_b64encode(hashlib.sha256(settings.jwt_secret_key.encode("utf-8")).digest()))
+    try:
+        password = fernet.decrypt(encrypted.encode("ascii")).decode("utf-8")
+    except Exception:
+        return None
+    return {
+        "smtp_host": channel.smtp_host,
+        "smtp_port": channel.smtp_port,
+        "smtp_username": channel.smtp_username,
+        "smtp_password": password,
+        "sender": channel.sender,
+        "sender_name": channel.sender_name,
+        "reply_to": channel.reply_to,
+    }
 
 
 def _assessment_permissions(db: Session, current_user: User) -> set[str]:
@@ -268,6 +311,14 @@ class AssessmentReviewFinalizeRequest(BaseModel):
     reviewer_notes: str = Field(min_length=10, max_length=4000)
 
 
+class AssessmentProctorReviewLabelRequest(BaseModel):
+    event_key: str | None = Field(default=None, max_length=180)
+    event_type: str = Field(min_length=2, max_length=120)
+    reviewer_label: Literal["confirmed", "false_positive", "uncertain", "missed_detection"]
+    reviewer_notes: str | None = Field(default=None, max_length=2000)
+    evidence_clip_id: int | None = Field(default=None, gt=0)
+
+
 class IssuedAssessmentRevokeRequest(BaseModel):
     reason: str = Field(default="Revoked by recruiter", min_length=3, max_length=500)
 
@@ -294,6 +345,29 @@ def _latest_invite_delivery(issue: AssessmentIssue) -> dict | None:
             details = operation.get("details")
             return details if isinstance(details, dict) else None
     return None
+
+
+def _issued_review_events(submission: AssessmentSubmission | None) -> list[dict[str, Any]]:
+    raw_events = submission.proctoring_events_json if submission else None
+    if not isinstance(raw_events, list):
+        return []
+    events: list[dict[str, Any]] = []
+    for index, raw_event in enumerate(raw_events):
+        if not isinstance(raw_event, dict):
+            continue
+        events.append({**raw_event, "review_key": f"submission:{submission.id}:event:{index}", "source_event_index": index})
+    return events
+
+
+def _source_review_event(submission: AssessmentSubmission, event_key: str) -> tuple[int, dict[str, Any]] | None:
+    match = re.fullmatch(rf"submission:{int(submission.id)}:event:(\d+)", str(event_key or "").strip())
+    events = submission.proctoring_events_json
+    if not match or not isinstance(events, list):
+        return None
+    index = int(match.group(1))
+    if index < 0 or index >= len(events) or not isinstance(events[index], dict):
+        return None
+    return index, events[index]
 
 
 def _request_origin(request: Request) -> str:
@@ -414,29 +488,49 @@ def _issued_proctoring_state(issue: AssessmentIssue) -> dict:
     state.setdefault("events", [])
     state.setdefault("terminated", False)
     state.setdefault("mobile_phone_detection_count", 0)
-    state.setdefault("integrity_penalty_pct", 0.0)
+    state["integrity_penalty_pct"] = 0.0
     state.setdefault("mandatory_review", False)
+    state.setdefault("is_flagged", False)
+    state.setdefault("review_event_count", 0)
+    state.setdefault("high_confidence_flag_count", 0)
+    state.setdefault("ignored_event_count", 0)
+    state["automatic_rejection"] = False
+    state["automatic_score_deduction"] = False
     return state
 
 
-def _apply_issued_integrity_event(state: dict, event_type: str) -> None:
-    """Apply deterministic, reviewable adjustments to an issued attempt."""
-    if str(event_type or "").strip().lower() != "mobile_phone_detected":
-        return
-    phone_count = int(state.get("mobile_phone_detection_count") or 0) + 1
-    state["mobile_phone_detection_count"] = phone_count
-    state["integrity_penalty_pct"] = min(30.0, float(phone_count * 10))
-    state["mandatory_review"] = True
+def _apply_issued_review_signal(
+    state: dict,
+    event_type: str,
+    details: dict[str, Any] | None = None,
+    confidence: float | None = None,
+):
+    """Classify and persist one signal using the server-authoritative fusion policy."""
+    event_details = details or {}
+    client_event_id = str(event_details.get("client_event_id") or "").strip()
+    if client_event_id and any(
+        str((row.get("details") or {}).get("client_event_id") or "") == client_event_id
+        for row in state.get("events") or []
+        if isinstance(row, dict)
+    ):
+        return None
+    decision = classify_proctor_event(
+        event_type,
+        confidence=confidence,
+        details=event_details,
+        history=[row for row in state.get("events") or [] if isinstance(row, dict)],
+    )
+    apply_proctor_event_decision(state, decision)
+    return decision
 
 
 def _integrity_adjusted_score(raw_score_pct: float | None, state: dict) -> float | None:
     if raw_score_pct is None:
         return None
-    penalty = min(30.0, max(0.0, float(state.get("integrity_penalty_pct") or 0)))
-    return round(max(0.0, float(raw_score_pct) - penalty), 2)
-
-
-ISSUED_PROCTOR_WARNING_LIMIT = 8
+    # Proctoring is evidence for recruiter adjudication, never a scoring input.
+    state["integrity_penalty_pct"] = 0.0
+    state["automatic_score_deduction"] = False
+    return round(max(0.0, float(raw_score_pct)), 2)
 
 
 def _internal_assessment_id(exam_id: int) -> str:
@@ -499,6 +593,8 @@ def _candidate_task_to_dict(task: AssessmentTask | None) -> dict | None:
             "accounting_case",
             "tax_case",
             "corporate_tax_case",
+            "sections",
+            "rubric",
         )
         if key in metadata
     }
@@ -680,6 +776,28 @@ def _score_task_submission(task: AssessmentTask, submitted_data: dict) -> tuple[
             "red_flags_matched": len(expected_flags & submitted_flags),
             "red_flags_total": len(expected_flags),
         }
+    if task_type == AssessmentType.ENGLISH_LANGUAGE.value:
+        objective = submitted_data.get("objective_answers") or {}
+        expected_answers = expected.get("objective_answers") or {}
+        objective_total = len(expected_answers)
+        objective_correct = sum(
+            1 for key, value in expected_answers.items()
+            if str(objective.get(key, "")).strip().casefold() == str(value).strip().casefold()
+        )
+        objective_weight = float(grading.get("objective_weight", 50) or 50)
+        objective_score = (objective_correct / objective_total) * objective_weight if objective_total else 0
+        return round(objective_score, 2), "manual_review", {
+            "evaluation_mode": "objective_plus_manual_review",
+            "objective_correct": objective_correct,
+            "objective_total": objective_total,
+            "objective_score": round(objective_score, 2),
+            "manual_review_weight": max(0, 100 - objective_weight),
+            "responses_present": {
+                "writing": bool(str(submitted_data.get("writing_response") or "").strip()),
+                "speaking": bool(str(submitted_data.get("speaking_response") or "").strip() or submitted_data.get("speaking_recording")),
+            },
+            "rubric": grading.get("rubric") or expected.get("rubric") or {},
+        }
     if task_type == AssessmentType.CASE_STUDY.value:
         return None, "manual_review", {"rubric": grading.get("rubric") or expected.get("rubric") or ""}
     return None, "manual_review", {"message": "Unsupported assessment task type"}
@@ -740,6 +858,8 @@ def _safe_send_assessment_issue_email(
     to_email: str,
     candidate_name: str,
     assessment_title: str,
+    assessment_type: str,
+    duration_minutes: int,
     login_link: str,
     temporary_password: str,
     expires_at: datetime | None,
@@ -747,6 +867,7 @@ def _safe_send_assessment_issue_email(
     company_logo_url: str,
     privacy_url: str,
     retention_url: str,
+    smtp_config: dict | None = None,
 ) -> dict:
     subject = f"Invitation: {assessment_title} | {company_name}"
     expiry_text = expires_at.strftime("%d %B %Y at %H:%M UTC") if expires_at else "7 days from issue"
@@ -756,7 +877,8 @@ def _safe_send_assessment_issue_email(
         f"Open the assessment: {login_link}\n"
         f"Temporary password: {temporary_password}\n"
         f"Access expires: {expiry_text}\n\n"
-        "Review the privacy and assessment instructions before starting. Complete the assessment in one sitting.\n\n"
+        f"Format: {assessment_type.replace('_', ' ')}\nTime available: {duration_minutes} minutes\n\n"
+        "Review the privacy and assessment instructions before starting. Use a supported desktop browser, a stable internet connection, and a quiet place. Your work is saved during the session so you can recover from a refresh, but plan uninterrupted time to complete it.\n\n"
         f"Privacy: {privacy_url}\nData retention: {retention_url}\n\n"
         f"Regards,\n{company_name}"
     )
@@ -821,6 +943,10 @@ def _safe_send_assessment_issue_email(
             </table>
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;margin-top:30px;border:1px solid #dce5e0">
               <tr>
+                <td style="padding:13px 16px;border-bottom:1px solid #e5ece8;font-size:13px;line-height:19px;color:#617169">Format and time</td>
+                <td align="right" style="padding:13px 16px;border-bottom:1px solid #e5ece8;font-size:13px;line-height:19px;font-weight:700;color:#14251f">{escape(assessment_type.replace('_', ' '))} · {duration_minutes} minutes</td>
+              </tr>
+              <tr>
                 <td style="padding:13px 16px;border-bottom:1px solid #e5ece8;font-size:13px;line-height:19px;color:#617169">Temporary password</td>
                 <td align="right" style="padding:13px 16px;border-bottom:1px solid #e5ece8;font-family:'Courier New',monospace;font-size:14px;line-height:19px;font-weight:700;color:#14251f">{safe_password}</td>
               </tr>
@@ -829,7 +955,7 @@ def _safe_send_assessment_issue_email(
                 <td align="right" style="padding:13px 16px;font-size:13px;line-height:19px;font-weight:700;color:#14251f">{safe_expiry}</td>
               </tr>
             </table>
-            <p style="margin:24px 0 0;font-size:13px;line-height:21px;color:#617169">This link is assigned to you. Review the instructions before starting and plan to complete the assessment in one sitting.</p>
+            <p style="margin:24px 0 0;font-size:13px;line-height:21px;color:#617169">This link is assigned to you. If you need an accommodation or have a privacy question, contact the organization that sent this invitation before starting.</p>
             <p style="margin:16px 0 0;font-size:12px;line-height:18px"><a href="{safe_privacy}" style="color:#315f50;text-decoration:underline">Privacy policy</a><span style="padding:0 8px;color:#a0aca6">|</span><a href="{safe_retention}" style="color:#315f50;text-decoration:underline">Data retention</a></p>
           </td>
         </tr>
@@ -853,6 +979,7 @@ def _safe_send_assessment_issue_email(
             body,
             html_body=html_body,
             inline_images=inline_images,
+            smtp_config=smtp_config,
         )
     except Exception as exc:
         return {"sent": False, "reason": str(exc)}
@@ -1505,6 +1632,8 @@ def issue_assessment_to_candidate(
         to_email=candidate_email,
         candidate_name=candidate_name,
         assessment_title=exam.title,
+        assessment_type=exam.assessment_type,
+        duration_minutes=exam.duration_minutes,
         login_link=login_link,
         temporary_password=temp_password,
         expires_at=issue.access_expires_at,
@@ -1512,6 +1641,7 @@ def issue_assessment_to_candidate(
         company_logo_url=company_logo_url,
         privacy_url=f"{base_url}/legal/privacy-policy",
         retention_url=f"{base_url}/legal/data-retention-and-deletion",
+        smtp_config=_organization_smtp_config(db, application.organization_id, "assessment_invites"),
     )
     delivery_details = {
         "sent": bool(email_delivery.get("sent")),
@@ -1655,6 +1785,8 @@ def resend_issued_assessment_invitation(
         to_email=issue.candidate_email,
         candidate_name=issue.candidate_name,
         assessment_title=exam.title,
+        assessment_type=exam.assessment_type,
+        duration_minutes=exam.duration_minutes,
         login_link=login_link,
         temporary_password=temporary_password,
         expires_at=issue.access_expires_at,
@@ -1662,6 +1794,7 @@ def resend_issued_assessment_invitation(
         company_logo_url=company_logo_url,
         privacy_url=f"{base_url}/legal/privacy-policy",
         retention_url=f"{base_url}/legal/data-retention-and-deletion",
+        smtp_config=_organization_smtp_config(db, organization_id, "assessment_invites"),
     )
     delivery_details = {
         "sent": bool(email_delivery.get("sent")),
@@ -1751,6 +1884,17 @@ def review_issued_assessment_attempt(
         .order_by(AssessmentSubmission.id.desc()),
     )
     task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == issue.exam_id))
+    review_labels = list(
+        db.scalars(
+            select(AssessmentProctorReviewLabel)
+            .where(AssessmentProctorReviewLabel.issue_id == issue.id)
+            .order_by(AssessmentProctorReviewLabel.created_at.asc(), AssessmentProctorReviewLabel.id.asc()),
+        ).all(),
+    )
+    label_counts = {label: 0 for label in ("confirmed", "false_positive", "uncertain", "missed_detection")}
+    for label in review_labels:
+        if label.reviewer_label in label_counts:
+            label_counts[label.reviewer_label] += 1
     return {
         "issued_id": issue.id,
         "exam_id": issue.exam_id,
@@ -1772,9 +1916,196 @@ def review_issued_assessment_attempt(
             "status": submission.status,
             "submitted_at": submission.submitted_at,
             "time_taken_seconds": submission.time_taken_seconds,
-            "proctoring_events": submission.proctoring_events_json,
+            "proctoring_events": _issued_review_events(submission),
         } if submission else None,
+        "proctor_review_labels": [
+            {
+                "id": label.id,
+                "event_key": label.event_key,
+                "source_event_index": label.source_event_index,
+                "event_type": label.event_type,
+                "reviewer_label": label.reviewer_label,
+                "model_disposition": label.model_disposition,
+                "model_confidence": label.model_confidence,
+                "reviewer_notes": label.reviewer_notes,
+                "evidence_clip_id": label.evidence_clip_id,
+                "reviewed_by_user_id": label.reviewed_by_user_id,
+                "created_at": label.created_at,
+                "updated_at": label.updated_at,
+            }
+            for label in review_labels
+        ],
+        "proctor_review_label_summary": {
+            **label_counts,
+            "total": len(review_labels),
+            "detected_event_count": len(_issued_review_events(submission)),
+        },
+        "review_clips": [
+            {
+                "id": clip.id,
+                "evidence_type": clip.evidence_type,
+                "event_type": clip.event_type,
+                "url": resolve_media_url(clip.file_url) or clip.file_url,
+                "duration_seconds": round(float(clip.duration_seconds or 0), 2),
+                "size_bytes": clip.size_bytes,
+                "created_at": clip.created_at,
+            }
+            for clip in db.scalars(
+                select(AssessmentReviewClip)
+                .where(AssessmentReviewClip.issue_id == issue.id)
+                .order_by(AssessmentReviewClip.created_at.asc(), AssessmentReviewClip.id.asc()),
+            ).all()
+        ],
     }
+
+
+@router.post("/issued/{issue_id}/review/proctor-labels", status_code=status.HTTP_201_CREATED)
+def save_issued_proctor_review_label(
+    issue_id: int,
+    payload: AssessmentProctorReviewLabelRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    issue = db.get(AssessmentIssue, issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issued assessment not found")
+    _require_assessment_permission(db, current_user, "assessments.manage")
+    if not _can_access_issue(db, current_user, issue):
+        raise HTTPException(status_code=403, detail="Access denied")
+    submission = db.scalar(
+        select(AssessmentSubmission)
+        .where(AssessmentSubmission.issue_id == issue.id)
+        .order_by(AssessmentSubmission.id.desc()),
+    )
+    if not submission:
+        raise HTTPException(status_code=409, detail="No candidate submission is available for integrity review")
+
+    reviewer_notes = str(payload.reviewer_notes or "").strip() or None
+    source_event_index: int | None = None
+    model_disposition: str | None = None
+    model_confidence: float | None = None
+    event_type = str(payload.event_type or "").strip().lower()
+    event_key = str(payload.event_key or "").strip()
+
+    if payload.reviewer_label == "missed_detection":
+        if reviewer_notes is None or len(reviewer_notes) < 5:
+            raise HTTPException(status_code=422, detail="Describe the missed detection in at least 5 characters")
+        if event_key and not event_key.startswith("missed:"):
+            raise HTTPException(status_code=422, detail="Invalid missed-detection key")
+        event_key = event_key or f"missed:{uuid4().hex}"
+    else:
+        source = _source_review_event(submission, event_key)
+        if source is None:
+            raise HTTPException(status_code=422, detail="The integrity event is not part of this submission")
+        source_event_index, source_event = source
+        event_type = str(source_event.get("event_type") or event_type).strip().lower()
+        details = source_event.get("details") if isinstance(source_event.get("details"), dict) else {}
+        model_disposition = str(details.get("policy_disposition") or source_event.get("severity") or "").strip().lower() or None
+        try:
+            model_confidence = float(details.get("policy_confidence") or details.get("confidence"))
+        except (TypeError, ValueError):
+            model_confidence = None
+
+    evidence_clip_id = payload.evidence_clip_id
+    if evidence_clip_id is not None:
+        clip = db.get(AssessmentReviewClip, evidence_clip_id)
+        if not clip or clip.issue_id != issue.id:
+            raise HTTPException(status_code=422, detail="Evidence clip does not belong to this assessment")
+    else:
+        matching_clip = db.scalar(
+            select(AssessmentReviewClip)
+            .where(AssessmentReviewClip.issue_id == issue.id, AssessmentReviewClip.event_type == event_type)
+            .order_by(AssessmentReviewClip.created_at.asc(), AssessmentReviewClip.id.asc()),
+        )
+        evidence_clip_id = matching_clip.id if matching_clip else None
+
+    label = db.scalar(
+        select(AssessmentProctorReviewLabel).where(
+            AssessmentProctorReviewLabel.issue_id == issue.id,
+            AssessmentProctorReviewLabel.event_key == event_key,
+        ),
+    )
+    created = label is None
+    if label is None:
+        label = AssessmentProctorReviewLabel(issue_id=issue.id, event_key=event_key, reviewed_by_user_id=current_user.id)
+    label.submission_id = submission.id
+    label.evidence_clip_id = evidence_clip_id
+    label.source_event_index = source_event_index
+    label.event_type = event_type
+    label.reviewer_label = payload.reviewer_label
+    label.model_disposition = model_disposition
+    label.model_confidence = model_confidence
+    label.reviewer_notes = reviewer_notes
+    label.reviewed_by_user_id = current_user.id
+    db.add(label)
+    db.flush()
+    db.add(
+        AuditLog(
+            actor_user_id=current_user.id,
+            action="assessment_proctor_signal_reviewed",
+            target_type="assessment_proctor_review_label",
+            target_id=label.id,
+            details_json={"issue_id": issue.id, "created": created},
+        ),
+    )
+    db.commit()
+    db.refresh(label)
+    return {
+        "id": label.id,
+        "event_key": label.event_key,
+        "event_type": label.event_type,
+        "reviewer_label": label.reviewer_label,
+        "reviewer_notes": label.reviewer_notes,
+        "evidence_clip_id": label.evidence_clip_id,
+        "created_at": label.created_at,
+        "updated_at": label.updated_at,
+    }
+
+
+@router.post("/issued/review-clips", status_code=status.HTTP_201_CREATED)
+async def upload_issued_review_clip(
+    file: UploadFile = File(...),
+    evidence_type: str = Form(default="camera"),
+    event_type: str = Form(default="integrity_signal"),
+    duration_seconds: float = Form(default=6.0),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Store one bounded flagged clip; raw full-session media is never stored."""
+    issue = _issued_issue_from_bearer_token(authorization, db)
+    # A flag clip can finish uploading just after the assessment submit
+    # transaction changes the issue to review_pending.
+    if issue.status not in {"issued", "started", "active", "review_pending"}:
+        raise HTTPException(status_code=409, detail="Assessment is no longer active")
+    kind = str(evidence_type or "").strip().lower()
+    if kind not in {"camera", "screen"}:
+        raise HTTPException(status_code=400, detail="evidence_type must be camera or screen")
+    content_type = str(file.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type not in _REVIEW_CLIP_MIME:
+        raise HTTPException(status_code=415, detail="Only WebM or MP4 review clips are supported")
+    max_bytes = min(max(1_000_000, int(get_settings().max_proctor_evidence_bytes)), 12_000_000)
+    raw = await file.read(max_bytes + 1)
+    if not raw or len(raw) > max_bytes:
+        raise HTTPException(status_code=413, detail="Review clip is empty or too large")
+    duration = max(1.0, min(float(duration_seconds or 6), 7.0))
+    settings = get_settings()
+    root = Path(settings.resolved_media_dir) / "assessment-review-clips" / str(issue.id)
+    root.mkdir(parents=True, exist_ok=True)
+    filename = f"{kind}_{uuid4().hex}{_REVIEW_CLIP_MIME[content_type]}"
+    out_path = root / filename
+    out_path.write_bytes(raw)
+    if settings.resolved_object_storage_backend == "local":
+        file_url = f"/media/{out_path.relative_to(Path(settings.resolved_media_dir)).as_posix()}"
+    else:
+        try:
+            file_url = upload_file_to_cloud_storage(out_path, object_path=f"assessment-review-clips/{issue.id}/{filename}", content_type=content_type)
+        finally:
+            out_path.unlink(missing_ok=True)
+    clip = AssessmentReviewClip(issue_id=issue.id, evidence_type=kind, event_type=str(event_type or "integrity_signal")[:120], file_url=file_url, mime_type=content_type, duration_seconds=duration, size_bytes=len(raw))
+    db.add(clip)
+    db.commit()
+    db.refresh(clip)
+    return {"id": clip.id, "url": resolve_media_url(clip.file_url) or clip.file_url, "evidence_type": kind, "duration_seconds": duration}
 
 
 @router.post("/issued/{issue_id}/review/finalize")
@@ -2012,8 +2343,14 @@ def issued_candidate_get_assessment(
     exam = db.get(Exam, issue.exam_id)
     if not exam:
         raise HTTPException(status_code=404, detail="Assessment not found")
+    application = db.get(HiringApplication, issue.hiring_application_id) if issue.hiring_application_id else None
+    organization_name, organization_logo_url_value = _organization_email_branding(
+        db,
+        application.organization_id if application else None,
+        "Your organization",
+    )
     if issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
-        return {"status": "submitted", "message": "Your assessment has been submitted for recruiter review."}
+        return {"status": "submitted", "message": "Your assessment has been submitted for recruiter review.", "next_step": "The recruiting organization will contact you directly if they would like to continue."}
     assessment_type = str(exam.assessment_type or AssessmentType.MCQ.value)
     desktop_spec = desktop_app_spec(assessment_type)
     task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == exam.id)) if assessment_type != AssessmentType.MCQ.value else None
@@ -2048,6 +2385,8 @@ def issued_candidate_get_assessment(
         "status": issue.status,
         "issued_id": issue.id,
         "candidate_name": issue.candidate_name,
+        "organization_name": organization_name,
+        "organization_logo_url": organization_logo_url_value,
         "assessment_title": exam.title,
         "assessment_type": assessment_type,
         "desktop_app": (
@@ -2174,47 +2513,68 @@ def issued_candidate_proctor_event(
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
-    """Record candidate-side policy violations before the final submission.
-
-    Issued candidates do not have a recruiter/student account, so this uses the
-    short-lived issued token and keeps a bounded audit trail on the issue row.
-    Repeated warnings terminate the attempt and force manual review.
-    """
+    """Classify and record candidate-side signals without automatic punishment."""
     issue = _issued_issue_from_bearer_token(authorization, db)
     if issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
-        return {"warning_count": 0, "should_terminate": True, "status": issue.status}
+        return {"warning_count": 0, "should_terminate": False, "accepted": False, "status": issue.status}
 
-    severity = str(payload.severity or "warning").strip().lower()
     if _json_size_bytes(payload.details) > 32_000:
         raise HTTPException(status_code=413, detail="Proctor event details are too large")
     state = _issued_proctoring_state(issue)
     normalized_event_type = str(payload.event_type or "").strip().lower()
-    _apply_issued_integrity_event(state, normalized_event_type)
-    if severity in {"warning", "critical"}:
+    decision = _apply_issued_review_signal(
+        state,
+        normalized_event_type,
+        payload.details,
+        confidence=payload.details.get("confidence"),
+    )
+    if decision is None:
+        return {
+            "warning_count": int(state.get("warning_count") or 0),
+            "should_terminate": False,
+            "accepted": False,
+            "duplicate": True,
+            "status": issue.status,
+        }
+    if decision.candidate_warning:
         state["warning_count"] = int(state.get("warning_count") or 0) + 1
+    classified_details = {
+        **(payload.details or {}),
+        "client_severity": str(payload.severity or "info").strip().lower(),
+        "policy_disposition": decision.disposition,
+        "policy_confidence": decision.policy_confidence,
+        "policy_reason": decision.reason,
+        "policy_version": decision.policy_version,
+        "policy_rule": decision.matched_rule,
+        "automatic_rejection": False,
+        "automatic_score_deduction": False,
+    }
     event = {
         "event_type": payload.event_type,
-        "severity": severity,
-        "details": payload.details or {},
+        "severity": decision.severity,
+        "details": classified_details,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
     state["events"] = [*(state.get("events") or [])[-99:], event]
-    should_terminate = int(state["warning_count"]) >= ISSUED_PROCTOR_WARNING_LIMIT
-    if should_terminate:
-        state["terminated"] = True
-        state["termination_reason"] = "warning_limit_reached"
-        issue.status = "terminated"
-        issue.completed_at = datetime.now(timezone.utc)
+    state["terminated"] = False
+    state.pop("termination_reason", None)
     result = dict(issue.result_json) if isinstance(issue.result_json, dict) else {}
     result["proctoring"] = state
     issue.result_json = result
     db.add(issue)
     db.commit()
-    if should_terminate:
-        finalize_desktop_sessions_for_issue(db, issue.id, "integrity_termination")
     return {
         "warning_count": int(state["warning_count"]),
-        "should_terminate": should_terminate,
+        "should_terminate": False,
+        "accepted": True,
+        "disposition": decision.disposition,
+        "severity": decision.severity,
+        "policy_confidence": decision.policy_confidence,
+        "policy_reason": decision.reason,
+        "capture_evidence": decision.capture_evidence,
+        "is_flagged": bool(state.get("is_flagged")),
+        "mandatory_review": bool(state.get("mandatory_review")),
+        "review_reasons": state.get("review_reasons") or [],
         "status": issue.status,
     }
 
@@ -2235,15 +2595,22 @@ def issued_candidate_submit(
             return {
                 "status": "submitted",
                 "message": "Your assessment has been submitted for recruiter review.",
+                "next_step": "The recruiting organization will contact you directly if they would like to continue.",
             }
         raise HTTPException(status_code=409, detail="Assessment already submitted")
     proctoring_state = _issued_proctoring_state(issue)
-    forced_manual_review = bool(proctoring_state.get("terminated"))
+    forced_manual_review = bool(proctoring_state.get("mandatory_review"))
     if _json_size_bytes(payload.submitted_data) > 3_000_000:
         raise HTTPException(status_code=413, detail="Assessment submission is too large")
     if _json_size_bytes(payload.answers) > 250_000:
         raise HTTPException(status_code=413, detail="Assessment answers are too large")
     submitted_events = _bounded_candidate_events(payload.proctoring_events)
+    for submitted_event in submitted_events:
+        _apply_issued_review_signal(
+            proctoring_state,
+            str(submitted_event.get("event_type") or ""),
+            submitted_event.get("details") if isinstance(submitted_event.get("details"), dict) else {},
+        )
     recorded_events = [*(proctoring_state.get("events") or [])[-100:], *submitted_events][-200:]
     exam = db.get(Exam, issue.exam_id)
     if not exam:
@@ -2322,6 +2689,7 @@ def issued_candidate_submit(
         return {
             "status": "submitted",
             "message": "Your assessment has been submitted for recruiter review.",
+            "next_step": "The recruiting organization will contact you directly if they would like to continue.",
         }
 
     questions = _questions_for_issued_attempt(db, issue, exam)
@@ -2431,5 +2799,5 @@ def issued_candidate_submit(
     return {
         "status": "submitted",
         "message": "Your assessment has been submitted for recruiter review.",
+        "next_step": "The recruiting organization will contact you directly if they would like to continue.",
     }
-

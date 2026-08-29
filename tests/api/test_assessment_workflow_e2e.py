@@ -165,7 +165,7 @@ class AssessmentWorkflowE2ETest(unittest.TestCase):
             IssuedCandidateProctorEventRequest(
                 event_type="mobile_phone_detected",
                 severity="critical",
-                details={"confidence": 0.82, "consecutive_frames": 2},
+                details={"confidence": 0.82, "consecutive_frames": 3, "duration_ms": 1700},
             ),
             authorization,
             self.db,
@@ -185,8 +185,8 @@ class AssessmentWorkflowE2ETest(unittest.TestCase):
         self.assertNotIn("score", submitted)
         self.assertNotIn("passed", submitted)
         self.assertEqual(issue.result_json["proctoring"]["mobile_phone_detection_count"], 1)
-        self.assertEqual(issue.result_json["proctoring"]["integrity_penalty_pct"], 10)
-        self.assertEqual(issue.result_json["provisional_score_pct"], 90)
+        self.assertEqual(issue.result_json["proctoring"]["integrity_penalty_pct"], 0)
+        self.assertEqual(issue.result_json["provisional_score_pct"], 100)
         self.assertEqual(
             self.db.query(AssessmentSubmission).filter(AssessmentSubmission.issue_id == issue.id).count(),
             1,

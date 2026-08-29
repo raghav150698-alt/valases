@@ -176,6 +176,34 @@ POST /proctoring/admin/hard-negatives/ingest
 - Conservative policy rules: `data/proctoring/models/supervised/deduction_rules.json`
 - Dataset gap report: `data/proctoring/processed/dataset_gap_report.json`
 
+## Recruiter-reviewed pilot labels
+
+The issued-assessment recruiter review records one verdict per integrity event:
+
+- `confirmed`
+- `false_positive`
+- `uncertain`
+- `missed_detection`
+
+Export a pseudonymous Phase 1 batch after recruiter review:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ml\proctoring\scripts\manage_proctor_review_data.ps1 `
+  -Mode Export `
+  -BatchName phase1
+```
+
+Use `review_labels.jsonl` from that batch with the readiness validator or an approved calibration/training workflow. After training and verification, delete the exported raw labels and their database rows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ml\proctoring\scripts\manage_proctor_review_data.ps1 `
+  -Mode Purge `
+  -Manifest data\proctoring\review_labels\phase1\manifest.json `
+  -ConfirmPurge
+```
+
+The purge verifies the export hash before deletion and retains only a count/hash receipt. Assessment records and evidence governed by their separate retention schedule are not deleted by this training-data command.
+
 ## Cost / storage note
 
 - This is local only.

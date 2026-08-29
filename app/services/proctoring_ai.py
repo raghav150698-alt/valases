@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models.entities import ProctorEvidence, ProctorEvent, ProctorSession
+from app.services.proctor_event_fusion import POLICY_PATH, load_proctor_fusion_policy
 
 try:
     import numpy as np  # type: ignore
@@ -228,6 +229,7 @@ def get_proctor_model_status() -> dict[str, Any]:
         "pytorch_model_exists": Path(_HEAD_EYE_RUNTIME_DEFAULTS["pytorch_model_path"]).exists(),
         "ensemble_metrics_exists": Path(_HEAD_EYE_RUNTIME_DEFAULTS["ensemble_metrics_path"]).exists(),
     }
+    fusion_policy = load_proctor_fusion_policy()
     return {
         "bundle_path": str(bundle_path.resolve()),
         "bundle_exists": bundle_path.exists(),
@@ -245,6 +247,14 @@ def get_proctor_model_status() -> dict[str, Any]:
             "critical_threshold": _safe_float(rules.get("critical_threshold"), 0.85),
         },
         "head_eye_runtime": head_eye,
+        "fusion_policy": {
+            "path": str(POLICY_PATH),
+            "exists": POLICY_PATH.exists(),
+            "version": fusion_policy.get("version"),
+            "levels": fusion_policy.get("levels") or ["ignore", "review", "high_confidence_flag"],
+            "automatic_rejection": False,
+            "automatic_score_deduction": False,
+        },
     }
 
 
@@ -636,11 +646,7 @@ def evaluate_proctor_session(db: Session, sess: ProctorSession) -> dict[str, Any
     warning_threshold = _safe_float(rules.get("warning_threshold"), 0.45)
     review_threshold = _safe_float(rules.get("manual_review_threshold"), 0.65)
     critical_threshold = _safe_float(rules.get("critical_threshold"), 0.85)
-    auto_deduction_enabled = bool(rules.get("auto_deduction_enabled", False))
-    policy = rules.get("deduction_policy") or {}
-    per_warning_pct = _safe_float(policy.get("per_warning_pct"), 0.0)
-    high_risk_event_pct = _safe_float(policy.get("high_risk_event_pct"), 0.0)
-    max_total_deduction_pct = _safe_float(policy.get("max_total_deduction_pct"), 0.0)
+    configured_auto_deduction_enabled = bool(rules.get("auto_deduction_enabled", False))
 
     warnings = int(sess.warning_count or 0)
     high_risk_events = _count_high_risk_events(db, sess)
@@ -666,6 +672,17 @@ def evaluate_proctor_session(db: Session, sess: ProctorSession) -> dict[str, Any
         or 0
     )
     event_signal_score, event_signal_counts, triggered_signals = _weighted_event_signals(db, sess)
+    classified_events = _ordered_event_rows(db, sess)
+    high_confidence_flags = sum(
+        1
+        for row in classified_events
+        if str((row.details_json or {}).get("policy_disposition") or "") == "high_confidence_flag"
+    )
+    review_events = sum(
+        1
+        for row in classified_events
+        if str((row.details_json or {}).get("policy_disposition") or "") == "review"
+    )
     temporal_gaze_score = float(gaze_temporal.get("server_temporal_score", 0.0))
     base_event_score = min(
         1.0,
@@ -711,68 +728,29 @@ def evaluate_proctor_session(db: Session, sess: ProctorSession) -> dict[str, Any
     if int(gaze_temporal.get("review_flags", 0)) >= 2:
         final_prob = max(final_prob, 0.86)
 
-    if final_prob >= critical_threshold:
-        decision = "critical"
+    if high_confidence_flags > 0:
+        decision = "high_confidence_flag"
     elif final_prob >= review_threshold:
         decision = "manual_review"
     elif final_prob >= warning_threshold:
-        decision = "warning"
+        decision = "manual_review"
     else:
         decision = "clear"
 
-    is_flagged = bool(
-        decision in {"critical", "manual_review"}
+    review_required = bool(
+        decision in {"manual_review", "high_confidence_flag"}
+        or review_events > 0
         or gaze_related_events > 5
         or warnings >= 5
         or int(gaze_temporal.get("repeated_warning_clusters", 0)) >= 2
     )
-    hard_fail = bool(mobile_events >= 3 or voice_events >= 3)
+    is_flagged = bool(sess.is_flagged or high_confidence_flags > 0)
+    # Proctor signals are fallible screening evidence. They may prioritize a
+    # recruiter review, but must never change the score or reject a candidate.
+    hard_fail = False
     hard_fail_reason = None
-    if mobile_events >= 3:
-        hard_fail_reason = "Mobile phone usage threshold reached during assessment."
-    elif voice_events >= 3:
-        hard_fail_reason = "Repeated external voice activity detected."
     deduction_pct = 0.0
     deduction_mode = "none"
-    if auto_deduction_enabled:
-        deduction_pct = (warnings * per_warning_pct) + (high_risk_events * high_risk_event_pct)
-        if event_signal_counts.get("behavior_signature_drift", 0) >= 1:
-            deduction_pct += 4.0
-        if event_signal_counts.get("attention_challenge_failed", 0) >= 1:
-            deduction_pct += 5.0
-        if reading_aloud_events >= 1:
-            deduction_pct += 5.0
-        if background_voice_events >= 1:
-            deduction_pct += 4.0
-        if event_signal_counts.get("side_glance_detected", 0) >= 1:
-            deduction_pct += 3.0
-        if event_signal_counts.get("side_hand_activity_detected", 0) >= 1:
-            deduction_pct += 3.0
-        if event_signal_counts.get("loud_voice_detected", 0) >= 1:
-            deduction_pct += 4.0
-        if max_total_deduction_pct > 0:
-            deduction_pct = min(deduction_pct, max_total_deduction_pct)
-        if deduction_pct > 0:
-            deduction_mode = "auto"
-    else:
-        # Conservative but enforceable fallback: if behavior is critical or reaches max warnings,
-        # apply a fixed provisional deduction and force manual review.
-        if decision == "critical" or warnings >= 5:
-            deduction_pct = 10.0
-            if event_signal_counts.get("behavior_signature_drift", 0) >= 1:
-                deduction_pct = max(deduction_pct, 12.0)
-            if event_signal_counts.get("attention_challenge_failed", 0) >= 1:
-                deduction_pct = max(deduction_pct, 14.0)
-            if reading_aloud_events >= 1:
-                deduction_pct = max(deduction_pct, 14.0)
-            if background_voice_events >= 1:
-                deduction_pct = max(deduction_pct, 12.0)
-            if event_signal_counts.get("loud_voice_detected", 0) >= 1:
-                deduction_pct = max(deduction_pct, 12.0)
-            if max_total_deduction_pct > 0:
-                deduction_pct = min(deduction_pct, max_total_deduction_pct)
-            deduction_mode = "enforcement"
-    deduction_pct = float(max(0.0, deduction_pct))
 
     return {
         "model_used": model_name,
@@ -798,10 +776,14 @@ def evaluate_proctor_session(db: Session, sess: ProctorSession) -> dict[str, Any
         "gaze_temporal_summary": gaze_temporal,
         "event_signal_counts": event_signal_counts,
         "triggered_signals": triggered_signals,
-        "auto_deduction_enabled": auto_deduction_enabled,
+        "review_events": review_events,
+        "high_confidence_flags": high_confidence_flags,
+        "auto_deduction_enabled": False,
+        "configured_auto_deduction_enabled": configured_auto_deduction_enabled,
+        "review_only_enforcement": True,
         "deduction_pct": deduction_pct,
         "deduction_mode": deduction_mode,
-        "review_required": decision in {"warning", "manual_review", "critical"},
+        "review_required": review_required,
         "is_flagged": is_flagged,
         "hard_fail": hard_fail,
         "hard_fail_reason": hard_fail_reason,

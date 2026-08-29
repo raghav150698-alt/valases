@@ -15,6 +15,7 @@ _REQUIRED_PRODUCTION_TABLES = {
     "questions",
     "assessment_issues",
     "assessment_submissions",
+    "assessment_proctor_review_labels",
     "assessment_templates",
     "proctor_sessions",
     "proctor_events",
@@ -30,6 +31,7 @@ _REQUIRED_PRODUCTION_TABLES = {
     "hiring_stage_events",
     "hiring_communications",
     "hiring_offers",
+    "hiring_onboarding",
     "hiring_interviews",
     "hiring_scorecards",
     "hiring_compliance_checks",
@@ -558,6 +560,58 @@ def _migrate_organization_access_schema_postgres(conn) -> None:
             pass
 
 
+def _migrate_hiring_application_identity_schema_sqlite(conn) -> None:
+    """Keep older local SQLite review databases compatible with ATS identity fields."""
+    _sqlite_add_column_if_missing(conn, "hiring_applications", "external_application_id", "TEXT")
+    _sqlite_add_column_if_missing(conn, "hiring_applications", "external_candidate_id", "TEXT")
+    _sqlite_add_column_if_missing(conn, "hiring_applications", "external_job_id", "TEXT")
+    for statement in (
+        "CREATE INDEX IF NOT EXISTS ix_hiring_applications_external_candidate ON hiring_applications (organization_id, source, external_candidate_id)",
+        "CREATE INDEX IF NOT EXISTS ix_hiring_applications_external_job ON hiring_applications (organization_id, source, external_job_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_hiring_applications_org_source_external ON hiring_applications (organization_id, source, external_application_id)",
+    ):
+        try:
+            conn.execute(text(statement))
+        except Exception:
+            pass
+
+
+def _migrate_hiring_application_identity_schema_postgres(conn) -> None:
+    statements = [
+        "ALTER TABLE hiring_applications ADD COLUMN IF NOT EXISTS external_application_id VARCHAR(240)",
+        "ALTER TABLE hiring_applications ADD COLUMN IF NOT EXISTS external_candidate_id VARCHAR(240)",
+        "ALTER TABLE hiring_applications ADD COLUMN IF NOT EXISTS external_job_id VARCHAR(240)",
+        "CREATE INDEX IF NOT EXISTS ix_hiring_applications_external_candidate ON hiring_applications (organization_id, source, external_candidate_id)",
+        "CREATE INDEX IF NOT EXISTS ix_hiring_applications_external_job ON hiring_applications (organization_id, source, external_job_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_hiring_applications_org_source_external ON hiring_applications (organization_id, source, external_application_id) WHERE external_application_id IS NOT NULL",
+    ]
+    for statement in statements:
+        try:
+            conn.execute(text(statement))
+        except Exception:
+            pass
+
+
+def _migrate_assessment_issue_hiring_link_sqlite(conn) -> None:
+    _sqlite_add_column_if_missing(conn, "assessment_issues", "hiring_application_id", "INTEGER")
+    try:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_assessment_issues_hiring_application_id ON assessment_issues (hiring_application_id)"))
+    except Exception:
+        pass
+
+
+def _migrate_assessment_issue_hiring_link_postgres(conn) -> None:
+    statements = [
+        "ALTER TABLE assessment_issues ADD COLUMN IF NOT EXISTS hiring_application_id INTEGER",
+        "CREATE INDEX IF NOT EXISTS ix_assessment_issues_hiring_application_id ON assessment_issues (hiring_application_id)",
+    ]
+    for statement in statements:
+        try:
+            conn.execute(text(statement))
+        except Exception:
+            pass
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     if engine.dialect.name == "sqlite":
@@ -576,6 +630,8 @@ def init_db() -> None:
             _migrate_admin_user_controls_sqlite(conn)
             _migrate_provider_feedback_schema_sqlite(conn)
             _migrate_organization_access_schema_sqlite(conn)
+            _migrate_hiring_application_identity_schema_sqlite(conn)
+            _migrate_assessment_issue_hiring_link_sqlite(conn)
     elif engine.dialect.name == "postgresql":
         with engine.begin() as conn:
             try:
@@ -589,6 +645,8 @@ def init_db() -> None:
             _migrate_admin_user_controls_postgres(conn)
             _migrate_provider_feedback_schema_postgres(conn)
             _migrate_organization_access_schema_postgres(conn)
+            _migrate_hiring_application_identity_schema_postgres(conn)
+            _migrate_assessment_issue_hiring_link_postgres(conn)
 
     # Backfill and normalize existing accounts to current role/approval rules, then sync Firebase claims.
     db = SessionLocal()
