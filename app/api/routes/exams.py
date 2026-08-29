@@ -858,8 +858,6 @@ def _safe_send_assessment_issue_email(
     to_email: str,
     candidate_name: str,
     assessment_title: str,
-    assessment_type: str,
-    duration_minutes: int,
     login_link: str,
     temporary_password: str,
     expires_at: datetime | None,
@@ -868,6 +866,8 @@ def _safe_send_assessment_issue_email(
     privacy_url: str,
     retention_url: str,
     smtp_config: dict | None = None,
+    assessment_type: str = "assessment",
+    duration_minutes: int = 0,
 ) -> dict:
     subject = f"Invitation: {assessment_title} | {company_name}"
     expiry_text = expires_at.strftime("%d %B %Y at %H:%M UTC") if expires_at else "7 days from issue"
