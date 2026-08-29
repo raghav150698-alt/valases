@@ -22,7 +22,7 @@ from app.models.entities import (
 )
 
 
-TEMPLATE_CATALOG_VERSION = 8
+TEMPLATE_CATALOG_VERSION = 10
 STANDALONE_ASSESSMENT_CATEGORY = "__standalone_assessment__"
 SUPERSEDED_TEMPLATE_PREFIX = "__platform_superseded__"
 
@@ -332,6 +332,95 @@ DEFAULT_ASSESSMENTS = [
                 {"id":"m1-income","label":"Schedule M-1 taxable income","weight":7,"source":"field:m1_taxable_income","comparator":"numeric","expected":470700,"tolerance":1},
                 {"id":"flags","label":"Corporate return diagnostics","weight":6,"source":"identified_red_flags","comparator":"set_exact","expected":["Federal income tax provision is nondeductible","Meals require a 50% limitation","Fines and penalties are nondeductible","Bad-debt allowance requires a tax adjustment","Charitable contribution exceeds the current-year limit","Tax depreciation exceeds book depreciation","Contractor information-return support is incomplete"]}]},
         },
+    },
+    {
+        "id": "professional-english-communication",
+        "title": "Professional English Communication",
+        "summary": "PTE-inspired professional English assessment with guided listening, reading, writing, and speaking sections.",
+        "assessment_type": "english_language",
+        "duration_minutes": 60,
+        "pass_score": 70,
+        "topics": ["Listening comprehension", "Reading comprehension", "Written communication", "Spoken communication"],
+        "tools": ["Audio player", "Speech recorder", "Response workspace"],
+        "instructions": "Complete four 15-minute sections in order. Each section begins with an instruction screen and presents one task at a time. Audio can be played once. You cannot return to a completed section.",
+        "about": "A rigorous English communication assessment for roles that require clear, accurate, and confident workplace communication.",
+        "task": {
+            "title": "English communication assessment",
+            "description": "Demonstrate practical command of English through realistic workplace and public-service communication scenarios.",
+            "instructions": "The assessment contains four timed sections. Listening and reading include objective questions. Writing and speaking require original responses and are reviewed for coherence, vocabulary, grammar, fluency, pronunciation, and task fulfilment.",
+            "marks": 100,
+            "metadata": {
+                "workspace": "english_language",
+                "answer_format": "structured_response",
+                "format": "guided_section_flow",
+                "bank_version": "2026.1",
+                "shuffle_ready": True,
+                "sections": [
+                    {
+                        "id": "listening",
+                        "label": "Listening",
+                        "minutes": 15,
+                        "description": "Listen to two natural workplace conversations and identify purpose, detail, attitude, and implied meaning.",
+                        "intro": "You will hear two workplace conversations performed by human speakers. Each recording plays once. After it finishes, answer the questions from memory.",
+                        "rules": ["Use headphones if available.", "Audio plays once and cannot be restarted.", "Notes on paper are not permitted."],
+                        "items": [
+                            {"id": "listen-audio-1", "type": "audio", "label": "Conversation 1 · Budget cuts", "prompt": "Listen to the complete conversation. The questions will appear after the recording.", "audio_url": "/assessment-audio/voa-budget-cuts.mp3", "duration_seconds": 247, "source": "VOA Learning English — Lesson 1: Budget Cuts", "source_url": "https://learningenglish.voanews.com/a/lets-learn-english-level-2-lesson1/3960391.html", "license": "Public domain; credit VOA Learning English"},
+                            {"id": "l1", "type": "choice", "label": "Listening comprehension", "prompt": "What first caused the employees to believe that jobs might be lost?", "options": ["A formal notice from management", "A discussion that began with information from Accounting", "A cancelled client project", "A report in the news"], "answer": "A discussion that began with information from Accounting"},
+                            {"id": "l2", "type": "choice", "label": "Listening comprehension", "prompt": "What was the manager's actual purpose for calling the meeting?", "options": ["To announce dismissals", "To reduce working hours", "To praise the team and give new assignments", "To investigate the rumours"], "answer": "To praise the team and give new assignments"},
+                            {"id": "listen-audio-2", "type": "audio", "label": "Conversation 2 · The interview", "prompt": "Listen to the complete conversation. The questions will appear after the recording.", "audio_url": "/assessment-audio/voa-the-interview.mp3", "duration_seconds": 245, "source": "VOA Learning English — Lesson 2: The Interview", "source_url": "https://learningenglish.voanews.com/a/lets-learn-english-level-2-lesson-2/3960471.html", "license": "Public domain; credit VOA Learning English"},
+                            {"id": "l3", "type": "choice", "label": "Listening comprehension", "prompt": "Why did Anna believe Pete could be suitable as her co-host?", "options": ["He had already hosted a programme", "He was similar to her manager", "His personality contrasted with hers", "He had recently written a popular book"], "answer": "His personality contrasted with hers"},
+                            {"id": "l4", "type": "choice", "label": "Listening comprehension", "prompt": "Which quality did Pete reveal most clearly during the interview?", "options": ["He enjoys constant collaboration", "He is comfortable working independently", "He avoids giving honest answers", "He has extensive reporting experience"], "answer": "He is comfortable working independently"}
+                        ],
+                        "attribution": "Audio courtesy of VOA Learning English. Learning English text and MP3 content is public domain and reusable with credit."
+                    },
+                    {
+                        "id": "reading",
+                        "label": "Reading",
+                        "minutes": 15,
+                        "description": "Read two professional texts and distinguish central claims, supporting detail, exceptions, and implications.",
+                        "intro": "Each question includes the text you need. Read for meaning rather than matching isolated words. Choose one answer and continue.",
+                        "rules": ["One question is shown at a time.", "You may reread the passage while answering.", "Completed questions cannot be reopened."],
+                        "items": [
+                            {"id": "r1", "type": "reading_choice", "label": "Policy analysis", "passage": "Remote work requests are reviewed according to business continuity rather than seniority. Employees should submit a request at least five working days in advance and explain how customer coverage, confidential information, and handovers will be managed. A manager may approve a shorter notice period when an unexpected event makes the normal process impractical. Approval is not permanent: arrangements are reviewed every quarter, and an arrangement may be changed if service levels decline or security controls are not followed.", "prompt": "Which principle has the greatest influence on approval?", "options": ["Length of service", "Operational continuity", "The employee's commute", "The permanence of the request"], "answer": "Operational continuity"},
+                            {"id": "r2", "type": "reading_choice", "label": "Policy analysis", "passage": "Remote work requests are reviewed according to business continuity rather than seniority. Employees should submit a request at least five working days in advance and explain how customer coverage, confidential information, and handovers will be managed. A manager may approve a shorter notice period when an unexpected event makes the normal process impractical. Approval is not permanent: arrangements are reviewed every quarter, and an arrangement may be changed if service levels decline or security controls are not followed.", "prompt": "What does the exception for shorter notice imply?", "options": ["The five-day rule is optional for everyone", "Managers can exercise judgement when circumstances are unexpected", "Only permanent arrangements need approval", "Security controls may be ignored temporarily"], "answer": "Managers can exercise judgement when circumstances are unexpected"},
+                            {"id": "r3", "type": "reading_choice", "label": "Evidence and inference", "passage": "The pilot reduced the average time required to resolve routine support requests by 18 percent. However, customer satisfaction remained unchanged. Interviews suggested that faster closure did not always mean clearer communication: several customers said they received a solution without understanding why the problem occurred. The operations team therefore recommends extending the pilot only if the next phase measures explanation quality as well as speed.", "prompt": "Why does the team attach a condition to extending the pilot?", "options": ["The speed improvement was too small", "The pilot increased operating costs", "Efficiency alone did not improve the customer experience", "Customers preferred slower service"], "answer": "Efficiency alone did not improve the customer experience"},
+                            {"id": "r4", "type": "reading_choice", "label": "Evidence and inference", "passage": "The pilot reduced the average time required to resolve routine support requests by 18 percent. However, customer satisfaction remained unchanged. Interviews suggested that faster closure did not always mean clearer communication: several customers said they received a solution without understanding why the problem occurred. The operations team therefore recommends extending the pilot only if the next phase measures explanation quality as well as speed.", "prompt": "Which statement best summarises the evidence?", "options": ["Faster resolution guaranteed better service", "Customers rejected the solutions they received", "The pilot improved speed but exposed a communication gap", "The team recommends ending all automation"], "answer": "The pilot improved speed but exposed a communication gap"}
+                        ]
+                    },
+                    {
+                        "id": "writing",
+                        "label": "Writing",
+                        "minutes": 15,
+                        "description": "Produce a concise summary and a professional email with clear purpose, structure, and tone.",
+                        "intro": "Complete both writing tasks. Quality, relevance, grammar, vocabulary, organisation, and adherence to the word range are reviewed.",
+                        "rules": ["Write in your own words.", "Stay within the displayed word range.", "Spend about 5 minutes on Task 1 and 10 minutes on Task 2."],
+                        "items": [
+                            {"id": "w1", "type": "writing", "label": "Summarise written text", "suggested_minutes": 5, "passage": "A four-day working week can improve focus when organisations redesign work rather than compressing the same workload into fewer days. Successful trials remove low-value meetings, clarify decision ownership, and protect periods for concentrated work. Where these changes are absent, employees may face longer days and greater pressure, cancelling the intended wellbeing benefit. The strongest evidence therefore supports treating shorter weeks as an operational redesign, not simply a scheduling benefit.", "prompt": "Summarise the passage in one paragraph.", "minimum_words": 45, "maximum_words": 65},
+                            {"id": "w2", "type": "writing", "label": "Professional email", "suggested_minutes": 10, "prompt": "A customer says a promised implementation update was late and incomplete. Write an email that acknowledges the issue, explains the immediate next steps without making unsupported promises, and proposes a practical follow-up time.", "minimum_words": 120, "maximum_words": 160}
+                        ]
+                    },
+                    {
+                        "id": "speaking",
+                        "label": "Speaking",
+                        "minutes": 15,
+                        "description": "Record three responses that test pronunciation, practical communication, fluency, and extended speaking.",
+                        "intro": "Your microphone will be used only for your task responses. Test your microphone, prepare briefly, then record each response once.",
+                        "rules": ["Use a headset microphone if available.", "Speak at a natural pace and volume.", "Listen back before continuing; rerecording is allowed while the section remains open."],
+                        "items": [
+                            {"id": "s1", "type": "speaking", "label": "Read aloud", "suggested_minutes": 3, "prompt": "Read the text aloud clearly.", "passage": "Effective teams do not avoid disagreement. They make it safe to question assumptions, examine evidence, and decide who is responsible for the next action. When disagreement is handled respectfully, it becomes a tool for better decisions rather than a source of delay.", "minimum_seconds": 30, "maximum_seconds": 60},
+                            {"id": "s2", "type": "speaking", "label": "Respond to a situation", "suggested_minutes": 5, "prompt": "You are leading a meeting. A colleague repeatedly interrupts another speaker. Address the colleague politely, protect the discussion, and explain how the meeting will continue.", "minimum_seconds": 45, "maximum_seconds": 90},
+                            {"id": "s3", "type": "speaking", "label": "Extended response", "suggested_minutes": 7, "prompt": "Describe a time you clarified a misunderstanding at work or during a group project. Explain the situation, what you said or did, the result, and what you learned.", "minimum_seconds": 75, "maximum_seconds": 120}
+                        ]
+                    }
+                ],
+                "rubric": {"listening": 20, "reading": 20, "writing": 30, "speaking": 30}
+            },
+            "expected_output": {
+                "objective_answers": {"l1": "A discussion that began with information from Accounting", "l2": "To praise the team and give new assignments", "l3": "His personality contrasted with hers", "l4": "He is comfortable working independently", "r1": "Operational continuity", "r2": "Managers can exercise judgement when circumstances are unexpected", "r3": "Efficiency alone did not improve the customer experience", "r4": "The pilot improved speed but exposed a communication gap"},
+                "rubric": {"writing": ["Task fulfilment and tone", "Coherence and cohesion", "Lexical resource", "Grammar and accuracy"], "speaking": ["Task fulfilment and structure", "Fluency", "Vocabulary and grammar", "Pronunciation and intelligibility"]}
+            },
+            "grading_config": {"objective_weight": 40, "manual_review_required": True, "rubric": {"writing": {"weight": 30}, "speaking": {"weight": 30}}}
+        }
     },
 ]
 

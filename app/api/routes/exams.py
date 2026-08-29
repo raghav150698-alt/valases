@@ -64,7 +64,7 @@ from app.services.notifications import send_email
 from app.services.organization_branding import organization_logo_url
 from app.services.proctor_event_fusion import apply_proctor_event_decision, classify_proctor_event
 from app.services.rule_engine import evaluate_exam_rules
-from app.services.media_storage import resolve_media_url, upload_file_to_cloud_storage
+from app.services.media_storage import delete_storage_reference, resolve_media_url, upload_file_to_cloud_storage
 from pathlib import Path
 from uuid import uuid4
 
@@ -77,6 +77,7 @@ ISSUED_TOKEN_ROLE = "issued_candidate"
 request_logger = logging.getLogger("valases.request")
 
 _REVIEW_CLIP_MIME = {"video/webm": ".webm", "video/mp4": ".mp4", "video/quicktime": ".mov"}
+_LANGUAGE_AUDIO_MIME = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", "audio/mpeg": ".mp3", "video/webm": ".webm"}
 
 
 def _sync_pk_sequence_if_needed(db: Session, table_name: str, pk_col: str = "id") -> None:
@@ -598,6 +599,26 @@ def _candidate_task_to_dict(task: AssessmentTask | None) -> dict | None:
         )
         if key in metadata
     }
+    if isinstance(allowed_metadata.get("sections"), list):
+        sanitized_sections = []
+        for raw_section in allowed_metadata["sections"]:
+            if not isinstance(raw_section, dict):
+                continue
+            section = dict(raw_section)
+            if isinstance(section.get("items"), list):
+                section["items"] = [
+                    {key: value for key, value in item.items() if key not in {"answer", "transcript"}}
+                    for item in section["items"]
+                    if isinstance(item, dict)
+                ]
+            if isinstance(section.get("questions"), list):
+                section["questions"] = [
+                    {key: value for key, value in question.items() if key != "answer"}
+                    for question in section["questions"]
+                    if isinstance(question, dict)
+                ]
+            sanitized_sections.append(section)
+        allowed_metadata["sections"] = sanitized_sections
     return {
         "id": task.id,
         "type": task.type,
@@ -793,8 +814,8 @@ def _score_task_submission(task: AssessmentTask, submitted_data: dict) -> tuple[
             "objective_score": round(objective_score, 2),
             "manual_review_weight": max(0, 100 - objective_weight),
             "responses_present": {
-                "writing": bool(str(submitted_data.get("writing_response") or "").strip()),
-                "speaking": bool(str(submitted_data.get("speaking_response") or "").strip() or submitted_data.get("speaking_recording")),
+                "writing": bool(str(submitted_data.get("writing_response") or "").strip() or submitted_data.get("writing_responses")),
+                "speaking": bool(str(submitted_data.get("speaking_response") or "").strip() or submitted_data.get("speaking_recording") or submitted_data.get("speaking_recordings")),
             },
             "rubric": grading.get("rubric") or expected.get("rubric") or {},
         }
@@ -1895,6 +1916,20 @@ def review_issued_assessment_attempt(
     for label in review_labels:
         if label.reviewer_label in label_counts:
             label_counts[label.reviewer_label] += 1
+    submitted_payload = submission.submitted_data_json if submission and isinstance(submission.submitted_data_json, dict) else {}
+    speaking_recordings = submitted_payload.get("speaking_recordings") if isinstance(submitted_payload.get("speaking_recordings"), dict) else {}
+    language_responses = []
+    for item_id, recording in speaking_recordings.items():
+        if not isinstance(recording, dict):
+            continue
+        storage_ref = str(recording.get("storage_ref") or "").strip()
+        if not storage_ref:
+            continue
+        language_responses.append({
+            "item_id": str(item_id),
+            "url": resolve_media_url(storage_ref) or storage_ref,
+            "duration_seconds": round(float(recording.get("duration_seconds") or 0), 2),
+        })
     return {
         "issued_id": issue.id,
         "exam_id": issue.exam_id,
@@ -1940,6 +1975,7 @@ def review_issued_assessment_attempt(
             "total": len(review_labels),
             "detected_event_count": len(_issued_review_events(submission)),
         },
+        "language_responses": language_responses,
         "review_clips": [
             {
                 "id": clip.id,
@@ -1952,7 +1988,7 @@ def review_issued_assessment_attempt(
             }
             for clip in db.scalars(
                 select(AssessmentReviewClip)
-                .where(AssessmentReviewClip.issue_id == issue.id)
+                .where(AssessmentReviewClip.issue_id == issue.id, AssessmentReviewClip.evidence_type.in_(("camera", "screen")))
                 .order_by(AssessmentReviewClip.created_at.asc(), AssessmentReviewClip.id.asc()),
             ).all()
         ],
@@ -2059,6 +2095,75 @@ def save_issued_proctor_review_label(
         "evidence_clip_id": label.evidence_clip_id,
         "created_at": label.created_at,
         "updated_at": label.updated_at,
+    }
+
+
+@router.post("/issued/language-response-audio", status_code=status.HTTP_201_CREATED)
+async def upload_issued_language_response_audio(
+    file: UploadFile = File(...),
+    item_id: str = Form(...),
+    duration_seconds: float = Form(default=1.0),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Persist a bounded speaking response outside the autosave JSON payload."""
+    issue = _issued_issue_from_bearer_token(authorization, db)
+    if issue.status not in {"issued", "started", "active"}:
+        raise HTTPException(status_code=409, detail="Assessment is no longer active")
+    clean_item_id = "".join(character for character in str(item_id or "").strip().lower() if character.isalnum() or character in {"-", "_"})[:60]
+    if not clean_item_id:
+        raise HTTPException(status_code=400, detail="A valid speaking item id is required")
+    task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == issue.exam_id))
+    sections = (task.metadata_json or {}).get("sections") if task and isinstance(task.metadata_json, dict) else []
+    speaking_item_ids = {
+        str(item.get("id") or "")
+        for section in (sections if isinstance(sections, list) else [])
+        for item in (section.get("items") if isinstance(section, dict) and isinstance(section.get("items"), list) else [])
+        if isinstance(item, dict) and item.get("type") == "speaking"
+    }
+    if clean_item_id not in speaking_item_ids:
+        raise HTTPException(status_code=422, detail="Speaking item does not belong to this assessment")
+    content_type = str(file.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type not in _LANGUAGE_AUDIO_MIME:
+        raise HTTPException(status_code=415, detail="Only WebM, OGG, M4A, or MP3 audio is supported")
+    max_bytes = 15_000_000
+    raw = await file.read(max_bytes + 1)
+    if not raw or len(raw) > max_bytes:
+        raise HTTPException(status_code=413, detail="Speaking response is empty or exceeds 15 MB")
+    duration = max(1.0, min(float(duration_seconds or 1), 180.0))
+    settings = get_settings()
+    root = Path(settings.resolved_media_dir) / "assessment-language-responses" / str(issue.id)
+    root.mkdir(parents=True, exist_ok=True)
+    filename = f"{clean_item_id}_{uuid4().hex}{_LANGUAGE_AUDIO_MIME[content_type]}"
+    out_path = root / filename
+    out_path.write_bytes(raw)
+    if settings.resolved_object_storage_backend == "local":
+        storage_ref = f"/media/{out_path.relative_to(Path(settings.resolved_media_dir)).as_posix()}"
+    else:
+        try:
+            storage_ref = upload_file_to_cloud_storage(out_path, object_path=f"assessment-language-responses/{issue.id}/{filename}", content_type=content_type)
+        finally:
+            out_path.unlink(missing_ok=True)
+    existing = db.scalar(select(AssessmentReviewClip).where(
+        AssessmentReviewClip.issue_id == issue.id,
+        AssessmentReviewClip.evidence_type == "language_response",
+        AssessmentReviewClip.event_type == clean_item_id,
+    ))
+    previous_ref = existing.file_url if existing else None
+    if not existing:
+        existing = AssessmentReviewClip(issue_id=issue.id, evidence_type="language_response", event_type=clean_item_id)
+    existing.file_url = storage_ref
+    existing.mime_type = content_type
+    existing.duration_seconds = duration
+    existing.size_bytes = len(raw)
+    db.add(existing)
+    db.commit()
+    if previous_ref and previous_ref != storage_ref:
+        delete_storage_reference(previous_ref)
+    return {
+        "storage_ref": storage_ref,
+        "playback_url": resolve_media_url(storage_ref) or storage_ref,
+        "duration_seconds": round(duration, 2),
     }
 
 

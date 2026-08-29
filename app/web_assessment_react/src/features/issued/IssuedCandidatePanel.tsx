@@ -10,6 +10,7 @@ import type { AccountingAssessmentSubmission, AccountingCase } from "../tools/Ac
 import type { TaxAssessmentSubmission, TaxCase } from "../tools/TaxTool";
 import type { CorporateTaxAssessmentSubmission, CorporateTaxCase } from "../tools/CorporateTaxTool";
 import { BrandLogo } from "../../components/BrandLogo";
+import { EnglishAssessmentRunner, type EnglishProgress, type EnglishRecording, type EnglishSection } from "./EnglishAssessmentRunner";
 
 const ExcelSimulator = lazy(() => import("../tools/ExcelSimulator").then((module) => ({ default: module.ExcelSimulator })));
 const AccountingTool = lazy(() => import("../tools/AccountingTool").then((module) => ({ default: module.AccountingTool })));
@@ -83,13 +84,10 @@ export function IssuedCandidatePanel() {
   const [taxSubmission, setTaxSubmission] = useState<TaxAssessmentSubmission | null>(null);
   const [corporateTaxSubmission, setCorporateTaxSubmission] = useState<CorporateTaxAssessmentSubmission | null>(null);
   const [englishObjectiveAnswers, setEnglishObjectiveAnswers] = useState<Record<string, string>>({});
-  const [englishWritingResponse, setEnglishWritingResponse] = useState("");
-  const [englishSpeakingResponse, setEnglishSpeakingResponse] = useState("");
-  const [englishSpeakingAudio, setEnglishSpeakingAudio] = useState("");
-  const [englishRecording, setEnglishRecording] = useState(false);
+  const [englishWritingResponses, setEnglishWritingResponses] = useState<Record<string, string>>({});
+  const [englishSpeakingRecordings, setEnglishSpeakingRecordings] = useState<Record<string, EnglishRecording>>({});
+  const [englishProgress, setEnglishProgress] = useState<Partial<EnglishProgress>>({});
   const [englishAudioPlayed, setEnglishAudioPlayed] = useState<Record<string, boolean>>({});
-  const recordingRef = useRef<MediaRecorder | null>(null);
-  const recordingChunksRef = useRef<Blob[]>([]);
   const [taskResponse, setTaskResponse] = useState("");
   const [taskFileLink, setTaskFileLink] = useState("");
   const [desktopSession, setDesktopSession] = useState({ sessionId: "", status: "not_started", ready: false });
@@ -181,9 +179,9 @@ export function IssuedCandidatePanel() {
     setTaxSubmission((draftData.tax_workspace ? draftData : null) as TaxAssessmentSubmission | null);
     setCorporateTaxSubmission((draftData.corporate_tax_workspace ? draftData : null) as CorporateTaxAssessmentSubmission | null);
     setEnglishObjectiveAnswers((draftData.objective_answers || {}) as Record<string, string>);
-    setEnglishWritingResponse(String(draftData.writing_response || ""));
-    setEnglishSpeakingResponse(String(draftData.speaking_response || ""));
-    setEnglishSpeakingAudio(String(draftData.speaking_recording || ""));
+    setEnglishWritingResponses((draftData.writing_responses || (draftData.writing_response ? { w2: draftData.writing_response } : {})) as Record<string, string>);
+    setEnglishSpeakingRecordings((draftData.speaking_recordings || {}) as Record<string, EnglishRecording>);
+    setEnglishProgress((draftData.assessment_progress || {}) as Partial<EnglishProgress>);
     setTaskResponse(String(draftData.code || draftData.response_text || draftData.notes || me.task?.metadata?.starter_code || ""));
     setTaskFileLink(String(draftData.attachment_url || ""));
     const timerState = draft?.timer_state;
@@ -203,7 +201,7 @@ export function IssuedCandidatePanel() {
     setWelcomeCompleted(false);
     setBriefingState("idle");
     setBriefingError("");
-    setEnglishAudioPlayed({});
+    setEnglishAudioPlayed((draftData.audio_completed || {}) as Record<string, boolean>);
     setCompletion(null);
     setStatus("");
   };
@@ -422,47 +420,27 @@ export function IssuedCandidatePanel() {
     if (paper.assessment_type === "english_language") {
       return {
         objective_answers: englishObjectiveAnswers,
-        writing_response: englishWritingResponse,
-        speaking_response: englishSpeakingResponse,
-        speaking_recording: englishSpeakingAudio || undefined,
+        writing_responses: englishWritingResponses,
+        writing_response: Object.values(englishWritingResponses).filter(Boolean).join("\n\n"),
+        speaking_recordings: englishSpeakingRecordings,
+        speaking_recording: Object.values(englishSpeakingRecordings).find(Boolean)?.storage_ref || undefined,
+        audio_completed: englishAudioPlayed,
+        assessment_progress: englishProgress,
       };
     }
     return { response_text: taskResponse, attachment_url: taskFileLink };
-  }, [accountingSubmission, corporateTaxSubmission, desktopSession.sessionId, englishObjectiveAnswers, englishSpeakingAudio, englishSpeakingResponse, englishWritingResponse, excelSubmission, paper, taskFileLink, taskResponse, taxSubmission]);
+  }, [accountingSubmission, corporateTaxSubmission, desktopSession.sessionId, englishAudioPlayed, englishObjectiveAnswers, englishProgress, englishSpeakingRecordings, englishWritingResponses, excelSubmission, paper, taskFileLink, taskResponse, taxSubmission]);
 
-  const playEnglishAudio = (clip: { id: string; text: string; voice?: string }) => {
-    if (!window.speechSynthesis) { setStatus("Audio playback is not supported in this browser."); return; }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(clip.text);
-    utterance.lang = clip.voice || "en-US";
-    utterance.rate = 0.94;
-    utterance.onend = () => setEnglishAudioPlayed((current) => ({ ...current, [clip.id]: true }));
-    window.speechSynthesis.speak(utterance);
-  };
-
-  const toggleEnglishRecording = async () => {
-    if (recordingRef.current) { recordingRef.current.stop(); return; }
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setStatus("Speaking recording is not supported in this browser. Use the text response field instead.");
-      return;
-    }
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream);
-    recordingChunksRef.current = [];
-    recorder.ondataavailable = (event) => { if (event.data.size) recordingChunksRef.current.push(event.data); };
-    recorder.onstop = () => {
-      const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType || "audio/webm" });
-      const reader = new FileReader();
-      reader.onloadend = () => setEnglishSpeakingAudio(String(reader.result || ""));
-      reader.readAsDataURL(blob);
-      stream.getTracks().forEach((track) => track.stop());
-      recordingRef.current = null;
-      setEnglishRecording(false);
-    };
-    recorder.start();
-    recordingRef.current = recorder;
-    setEnglishRecording(true);
-  };
+  const uploadEnglishRecording = useCallback(async (itemId: string, blob: Blob, durationSeconds: number) => {
+    const form = new FormData();
+    form.append("file", blob, `${itemId}.webm`);
+    form.append("item_id", itemId);
+    form.append("duration_seconds", String(durationSeconds));
+    const response = await api.request<EnglishRecording>({ method: "POST", url: "/exams/issued/language-response-audio", data: form, headers: { Authorization: `Bearer ${token}` } });
+    if (!response.data.storage_ref || !response.data.playback_url) throw new Error("Recording upload returned no URL");
+    setEnglishSpeakingRecordings((current) => ({ ...current, [itemId]: response.data }));
+    return response.data;
+  }, [token]);
 
   const submit = async (endReason: "fullscreen" | "policy" | "manual" | null = null) => {
     if (!paper || !beginSubmission()) return;
@@ -572,7 +550,7 @@ export function IssuedCandidatePanel() {
     durationMinutes: Number(paper?.duration_minutes || 30),
     timePerQuestionSeconds: Number(paper?.time_per_question_seconds || 30),
     questionIndex: index,
-    enabled: Boolean(paper && consentAccepted && !policyWarning && !escapeWarningVisible && !fullscreenRequired),
+    enabled: Boolean(paper && paper.assessment_type !== "english_language" && consentAccepted && !policyWarning && !escapeWarningVisible && !fullscreenRequired),
     initialState: restoredTimerState,
     onAssessmentTimeUp: () => { void submit(); },
     onQuestionTimeUp: () => {
@@ -626,11 +604,7 @@ export function IssuedCandidatePanel() {
     );
   }
 
-  const englishSections = (paper?.task?.metadata?.sections || []) as Array<Record<string, any>>;
-  const listeningSection = englishSections.find((section) => section.id === "listening");
-  const readingSection = englishSections.find((section) => section.id === "reading");
-  const writingSection = englishSections.find((section) => section.id === "writing");
-  const speakingSection = englishSections.find((section) => section.id === "speaking");
+  const englishSections = (paper?.task?.metadata?.sections || []) as EnglishSection[];
 
   return (
     <section
@@ -813,7 +787,7 @@ export function IssuedCandidatePanel() {
               <span className={`candidate-proctor-state ${gazeStatus}`}><i aria-hidden="true" />Integrity monitoring {gazeStatus === "active" ? "active" : gazeStatus}</span>
               {gazeStream && <video className="candidate-proctor-preview" aria-label="Camera proctor preview" autoPlay muted playsInline ref={(node) => { if (node && node.srcObject !== gazeStream) node.srcObject = gazeStream; }} />}
               <span>{paper.assessment_type === "mcq" ? `Question ${index + 1}/${paper.questions.length}` : "Task workspace"}</span>
-              <span>Timer: {timerDisplay}</span>
+              <span>{paper.assessment_type === "english_language" ? "Four timed sections" : `Timer: ${timerDisplay}`}</span>
             </div>
           </div>
           {paper.desktop_app && (
@@ -1015,14 +989,24 @@ export function IssuedCandidatePanel() {
             </main>
           )}
           {!paper.desktop_app && paper.assessment_type === "english_language" && paper.task && (
-            <section className="task-candidate-workspace english-assessment-workspace">
-              <div className="task-candidate-brief"><span>Four-section assessment</span><h3>{paper.task.title}</h3><p>{paper.task.description}</p><div className="task-instructions">{paper.task.instructions}</div></div>
-              {listeningSection && <div className="english-section-card"><div className="english-section-heading"><span>Section 1 · {listeningSection.minutes} minutes</span><h3>{listeningSection.label}</h3><p>{listeningSection.description}</p></div>{(listeningSection.audio || []).map((clip: any) => <div className="english-audio-row" key={clip.id}><div><strong>{clip.label}</strong><small>{englishAudioPlayed[clip.id] ? "Audio completed" : "Listen before answering"}</small></div><button className="assessment-secondary-btn" type="button" onClick={() => playEnglishAudio(clip)}>{englishAudioPlayed[clip.id] ? "Replay audio" : "Play audio"}</button></div>)}{(listeningSection.questions || []).map((question: any) => <label className="english-question" key={question.id}><strong>{question.prompt}</strong><select value={englishObjectiveAnswers[question.id] || ""} onChange={(event) => setEnglishObjectiveAnswers((current) => ({ ...current, [question.id]: event.target.value }))}><option value="">Select an answer</option>{question.options.map((option: string) => <option value={option} key={option}>{option}</option>)}</select></label>)}</div>}
-              {readingSection && <div className="english-section-card"><div className="english-section-heading"><span>Section 2 · {readingSection.minutes} minutes</span><h3>{readingSection.label}</h3><p>{readingSection.description}</p></div><div className="english-passage">{readingSection.passage}</div>{(readingSection.questions || []).map((question: any) => <label className="english-question" key={question.id}><strong>{question.prompt}</strong><select value={englishObjectiveAnswers[question.id] || ""} onChange={(event) => setEnglishObjectiveAnswers((current) => ({ ...current, [question.id]: event.target.value }))}><option value="">Select an answer</option>{question.options.map((option: string) => <option value={option} key={option}>{option}</option>)}</select></label>)}</div>}
-              {writingSection && <div className="english-section-card"><div className="english-section-heading"><span>Section 3 · {writingSection.minutes} minutes</span><h3>{writingSection.label}</h3><p>{writingSection.description}</p></div><div className="english-prompt">{writingSection.prompt}</div><textarea rows={10} value={englishWritingResponse} onChange={(event) => setEnglishWritingResponse(event.target.value)} placeholder="Write your response here..." /><small>{englishWritingResponse.trim() ? `${englishWritingResponse.trim().split(/\s+/).length} words` : "0 words"} · target {writingSection.minimum_words}–{writingSection.maximum_words}</small></div>}
-              {speakingSection && <div className="english-section-card"><div className="english-section-heading"><span>Section 4 · {speakingSection.minutes} minutes</span><h3>{speakingSection.label}</h3><p>{speakingSection.description}</p></div><div className="english-prompt">{speakingSection.prompt}</div><button className="assessment-secondary-btn" type="button" onClick={() => void toggleEnglishRecording()}>{englishRecording ? "Stop recording" : englishSpeakingAudio ? "Record again" : "Start recording"}</button>{englishSpeakingAudio && <audio controls src={englishSpeakingAudio} />}<textarea rows={5} value={englishSpeakingResponse} onChange={(event) => setEnglishSpeakingResponse(event.target.value)} placeholder="Optional transcript or written fallback..." /><small>Target response length: {speakingSection.minimum_seconds}–{speakingSection.maximum_seconds} seconds.</small></div>}
-              <div className="assessment-action-bar inline"><button className="assessment-primary-btn" type="button" disabled={!englishWritingResponse.trim() && !englishSpeakingResponse.trim() && !englishSpeakingAudio} onClick={() => void submit()}>Submit Assessment</button></div>
-            </section>
+            <EnglishAssessmentRunner
+              title={paper.task.title}
+              sections={englishSections}
+              objectiveAnswers={englishObjectiveAnswers}
+              writingResponses={englishWritingResponses}
+              speakingRecordings={englishSpeakingRecordings}
+              audioPlayed={englishAudioPlayed}
+              initialProgress={englishProgress}
+              submitting={isSubmitting}
+              paused={Boolean(policyWarning || escapeWarningVisible || fullscreenRequired)}
+              onObjectiveAnswer={(id, value) => setEnglishObjectiveAnswers((current) => ({ ...current, [id]: value }))}
+              onWritingResponse={(id, value) => setEnglishWritingResponses((current) => ({ ...current, [id]: value }))}
+              onSpeakingRecording={uploadEnglishRecording}
+              onAudioPlayed={(id) => setEnglishAudioPlayed((current) => ({ ...current, [id]: true }))}
+              onProgress={setEnglishProgress}
+              onSubmit={() => void submit()}
+              onExit={confirmExit}
+            />
           )}
           {!paper.desktop_app && !isMcqAssessment && !["spreadsheet", "accounting", "tax_simulator", "tax_1120", "english_language"].includes(paper.assessment_type) && paper.task && (
             <section className="task-candidate-workspace">
