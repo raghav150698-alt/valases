@@ -9,6 +9,7 @@ import type { ExcelAssessmentSubmission } from "../tools/ExcelSimulator";
 import type { AccountingAssessmentSubmission, AccountingCase } from "../tools/AccountingTool";
 import type { TaxAssessmentSubmission, TaxCase } from "../tools/TaxTool";
 import type { CorporateTaxAssessmentSubmission, CorporateTaxCase } from "../tools/CorporateTaxTool";
+import type { CaseWorkpaper } from "../tools/CaseWorkpaperWorkbench";
 import { BrandLogo } from "../../components/BrandLogo";
 import { EnglishAssessmentRunner, type EnglishProgress, type EnglishRecording, type EnglishSection } from "./EnglishAssessmentRunner";
 
@@ -26,6 +27,10 @@ const REVIEW_EVIDENCE_EVENT_TYPES = new Set([
   "speaker_identity_mismatch",
   "face_identity_mismatch",
 ]);
+const MCQ_BROWSER_DRAFT_PREFIX = "valases-mcq-draft:";
+const MCQ_SERVER_CHECKPOINT_MS = 5 * 60_000;
+const MCQ_BROWSER_SAVE_MS = 5_000;
+const COMPLEX_ASSESSMENT_CHECKPOINT_MS = 15_000;
 
 type IssuedOption = { id: number; text: string };
 type IssuedQuestion = { question_id: number; question_text: string; question_type: string; options: IssuedOption[] };
@@ -69,6 +74,26 @@ type IssuedExam = {
   } | null;
 };
 
+type BrowserMcqDraft = NonNullable<IssuedExam["draft"]> & { saved_at: string };
+
+function browserDraftKey(issueId: number) {
+  return `${MCQ_BROWSER_DRAFT_PREFIX}${issueId}`;
+}
+
+function readBrowserMcqDraft(issueId: number): BrowserMcqDraft | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(browserDraftKey(issueId)) || "null") as BrowserMcqDraft | null;
+    return parsed && typeof parsed === "object" && parsed.submission_id ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearBrowserMcqDraft(issueId: number | undefined) {
+  if (!issueId) return;
+  try { localStorage.removeItem(browserDraftKey(issueId)); } catch { /* best-effort privacy cleanup */ }
+}
+
 export function IssuedCandidatePanel() {
   const legalBase = `${import.meta.env.BASE_URL}legal`;
   const [token, setToken] = useState<string>("");
@@ -103,7 +128,7 @@ export function IssuedCandidatePanel() {
   const [briefingState, setBriefingState] = useState<"idle" | "playing" | "completed" | "error">("idle");
   const [briefingError, setBriefingError] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "offline">("idle");
-  const [autosaveTick, setAutosaveTick] = useState(0);
+  const [browserSaveTick, setBrowserSaveTick] = useState(0);
   const [restoredTimerState, setRestoredTimerState] = useState<TimerState | null>(null);
   const welcomeSpeechRef = useRef<SpeechSynthesisUtterance | null>(null);
   const welcomeSpeechWatchdogRef = useRef<number | null>(null);
@@ -112,6 +137,15 @@ export function IssuedCandidatePanel() {
   const submissionIdRef = useRef<string>(globalThis.crypto?.randomUUID?.() || `submission-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const autosaveRevisionRef = useRef(0);
   const timerStateRef = useRef<TimerState | null>(null);
+  const activeIssueIdRef = useRef<number | undefined>(undefined);
+  const checkpointInFlightRef = useRef(false);
+  const runtimeDraftRef = useRef<{
+    paper: IssuedExam | null;
+    token: string;
+    answers: Record<number, number[]>;
+    submittedData: Record<string, unknown>;
+    currentQuestionIndex: number;
+  }>({ paper: null, token: "", answers: {}, submittedData: {}, currentQuestionIndex: 0 });
   const { status: gazeStatus, error: gazeError, stream: gazeStream, readiness: proctorReadiness, start: startGazeProctor, stop: stopGazeProctor } = useCandidateGazeProctor(Boolean(paper));
   const uploadReviewClip = useCallback(async (blob: Blob, kind: "camera" | "screen", eventType: string, durationSeconds: number) => {
     if (!token || !blob.size) return;
@@ -125,8 +159,9 @@ export function IssuedCandidatePanel() {
   const flaggedRecorder = useFlaggedSessionRecorder(uploadReviewClip);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const key = String(params.get("issued_key") || "").trim();
+    const fragmentParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const queryParams = new URLSearchParams(window.location.search);
+    const key = String(fragmentParams.get("issued_key") || queryParams.get("issued_key") || "").trim();
     if (key) setAccessKey(key);
   }, []);
 
@@ -161,6 +196,7 @@ export function IssuedCandidatePanel() {
     });
     const me = response.data;
     if (["submitted", "completed", "review_pending", "reviewed", "terminated"].includes(me.status)) {
+      clearBrowserMcqDraft(me.issued_id);
       setPaper(null);
       try { sessionStorage.removeItem("valases-issued-session"); } catch { /* best-effort cleanup */ }
       setClosedMessage(me.next_step || "This assessment has already been submitted. Results and next steps are shared directly by the recruiting organization.");
@@ -168,7 +204,12 @@ export function IssuedCandidatePanel() {
     }
     setClosedMessage("");
     setPaper(me);
-    const draft = me.draft;
+    activeIssueIdRef.current = me.issued_id;
+    const serverDraft = me.draft;
+    const browserDraft = me.assessment_type === "mcq" ? readBrowserMcqDraft(me.issued_id) : null;
+    const serverSavedAt = Date.parse(String(serverDraft?.saved_at || "")) || 0;
+    const browserSavedAt = Date.parse(String(browserDraft?.saved_at || "")) || 0;
+    const draft = browserSavedAt > serverSavedAt ? browserDraft : serverDraft;
     const draftData = draft?.submitted_data || {};
     if (draft?.submission_id) submissionIdRef.current = draft.submission_id;
     autosaveRevisionRef.current = Number(draft?.revision || 0);
@@ -276,7 +317,7 @@ export function IssuedCandidatePanel() {
     setStatus("");
     try {
       const auth = accessKey
-        ? await api.post(`/exams/issued/key/${encodeURIComponent(accessKey)}/login`, { password })
+        ? await api.post("/exams/issued/key-login", { access_key: accessKey, password })
         : await api.post("/exams/issued/login", { email, password });
       await loadMe(String(auth.data.token || ""));
     } catch (error) {
@@ -350,6 +391,7 @@ export function IssuedCandidatePanel() {
     flaggedRecorder.stop();
     stopGazeProctor();
     setCompletion({ title, message: `${message} The recruiting organization will contact you about next steps.` });
+    clearBrowserMcqDraft(activeIssueIdRef.current);
     setPaper(null);
     try { sessionStorage.removeItem("valases-issued-session"); } catch { /* best-effort cleanup */ }
     if (document.fullscreenElement) void document.exitFullscreen();
@@ -560,36 +602,90 @@ export function IssuedCandidatePanel() {
     },
   });
   timerStateRef.current = timerState;
+  runtimeDraftRef.current = {
+    paper,
+    token,
+    answers,
+    submittedData: buildSubmittedData(),
+    currentQuestionIndex: index,
+  };
+
+  const saveBrowserDraft = useCallback(() => {
+    const snapshot = runtimeDraftRef.current;
+    if (!snapshot.paper || snapshot.paper.assessment_type !== "mcq" || submittingRef.current) return;
+    const savedAt = new Date().toISOString();
+    const draft: BrowserMcqDraft = {
+      submission_id: submissionIdRef.current,
+      revision: autosaveRevisionRef.current,
+      saved_at: savedAt,
+      answers: Object.fromEntries(Object.entries(snapshot.answers).map(([questionId, selected]) => [questionId, selected])),
+      submitted_data: {},
+      current_question_index: snapshot.currentQuestionIndex,
+      time_taken_seconds: Math.max(0, Number(snapshot.paper.duration_minutes || 0) * 60 - Number(timerStateRef.current?.remainingAssessmentSec ?? Number(snapshot.paper.duration_minutes || 0) * 60)),
+      timer_state: timerStateRef.current || {},
+    };
+    try {
+      localStorage.setItem(browserDraftKey(snapshot.paper.issued_id), JSON.stringify(draft));
+      setSaveState("saved");
+    } catch {
+      setSaveState("offline");
+    }
+  }, []);
+
+  const saveServerCheckpoint = useCallback(async () => {
+    const snapshot = runtimeDraftRef.current;
+    if (!snapshot.paper || !snapshot.token || submittingRef.current || checkpointInFlightRef.current) return;
+    checkpointInFlightRef.current = true;
+    setSaveState("saving");
+    const revision = autosaveRevisionRef.current + 1;
+    try {
+      const response = await api.post<{ revision: number }>("/exams/issued/autosave", {
+        submission_id: submissionIdRef.current,
+        revision,
+        answers: Object.fromEntries(Object.entries(snapshot.answers).map(([questionId, selected]) => [questionId, selected])),
+        submitted_data: snapshot.submittedData,
+        current_question_index: snapshot.currentQuestionIndex,
+        time_taken_seconds: Math.max(0, Number(snapshot.paper.duration_minutes || 0) * 60 - Number(timerStateRef.current?.remainingAssessmentSec ?? Number(snapshot.paper.duration_minutes || 0) * 60)),
+        timer_state: timerStateRef.current || {},
+      }, { headers: { Authorization: `Bearer ${snapshot.token}` } });
+      autosaveRevisionRef.current = Math.max(autosaveRevisionRef.current, Number(response.data.revision || revision));
+      setSaveState("saved");
+    } catch {
+      setSaveState("offline");
+    } finally {
+      checkpointInFlightRef.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     if (!paper || !consentAccepted || submittingRef.current) return;
-    const intervalId = window.setInterval(() => setAutosaveTick((value) => value + 1), 15_000);
+    const intervalMs = paper.assessment_type === "mcq" ? MCQ_SERVER_CHECKPOINT_MS : COMPLEX_ASSESSMENT_CHECKPOINT_MS;
+    const intervalId = window.setInterval(() => { void saveServerCheckpoint(); }, intervalMs);
+    return () => window.clearInterval(intervalId);
+  }, [consentAccepted, paper, saveServerCheckpoint]);
+
+  useEffect(() => {
+    if (!paper || paper.assessment_type !== "mcq" || !consentAccepted || submittingRef.current) return;
+    const intervalId = window.setInterval(() => setBrowserSaveTick((value) => value + 1), MCQ_BROWSER_SAVE_MS);
     return () => window.clearInterval(intervalId);
   }, [consentAccepted, paper]);
 
   useEffect(() => {
-    if (!paper || !consentAccepted || submittingRef.current) return;
-    setSaveState("saving");
-    const revision = autosaveRevisionRef.current + 1;
-    const timeoutId = window.setTimeout(async () => {
-      try {
-        const response = await api.post<{ revision: number }>("/exams/issued/autosave", {
-          submission_id: submissionIdRef.current,
-          revision,
-          answers: Object.fromEntries(Object.entries(answers).map(([qid, selected]) => [qid, selected])),
-          submitted_data: buildSubmittedData(),
-          current_question_index: index,
-          time_taken_seconds: Math.max(0, Number(paper.duration_minutes || 0) * 60 - Number(timerStateRef.current?.remainingAssessmentSec ?? Number(paper.duration_minutes || 0) * 60)),
-          timer_state: timerStateRef.current || {},
-        }, { headers: { Authorization: `Bearer ${token}` } });
-        autosaveRevisionRef.current = Math.max(autosaveRevisionRef.current, Number(response.data.revision || revision));
-        setSaveState("saved");
-      } catch {
-        setSaveState("offline");
-      }
-    }, 1500);
+    if (!paper || paper.assessment_type !== "mcq" || !consentAccepted || submittingRef.current) return;
+    const timeoutId = window.setTimeout(saveBrowserDraft, 200);
     return () => window.clearTimeout(timeoutId);
-  }, [answers, autosaveTick, buildSubmittedData, consentAccepted, index, paper, token]);
+  }, [answers, browserSaveTick, consentAccepted, index, paper, saveBrowserDraft]);
+
+  useEffect(() => {
+    if (!paper || !consentAccepted) return;
+    const checkpointWhenHidden = () => {
+      if (document.visibilityState !== "hidden") return;
+      saveBrowserDraft();
+      void saveServerCheckpoint();
+    };
+    document.addEventListener("visibilitychange", checkpointWhenHidden);
+    return () => document.removeEventListener("visibilitychange", checkpointWhenHidden);
+  }, [consentAccepted, paper, saveBrowserDraft, saveServerCheckpoint]);
 
   if (completion) {
     return (
@@ -846,6 +942,7 @@ export function IssuedCandidatePanel() {
                   description={paper.task.description}
                   instructions={paper.task.instructions || paper.instructions || ""}
                   caseData={(paper.task.metadata?.accounting_case || {}) as Partial<AccountingCase>}
+                  workpaper={paper.task.metadata?.workpaper as CaseWorkpaper | undefined}
                   initialSubmission={accountingSubmission}
                   candidateMode
                   onAutosave={setAccountingSubmission}
@@ -881,6 +978,7 @@ export function IssuedCandidatePanel() {
                   description={paper.task.description}
                   instructions={paper.task.instructions || paper.instructions || ""}
                   caseData={(paper.task.metadata?.tax_case || {}) as Partial<TaxCase>}
+                  workpaper={paper.task.metadata?.workpaper as CaseWorkpaper | undefined}
                   initialSubmission={taxSubmission}
                   candidateMode
                   onAutosave={setTaxSubmission}
@@ -916,6 +1014,7 @@ export function IssuedCandidatePanel() {
                   description={paper.task.description}
                   instructions={paper.task.instructions || paper.instructions || ""}
                   caseData={(paper.task.metadata?.corporate_tax_case || {}) as Partial<CorporateTaxCase>}
+                  workpaper={paper.task.metadata?.workpaper as CaseWorkpaper | undefined}
                   initialSubmission={corporateTaxSubmission}
                   candidateMode
                   onAutosave={setCorporateTaxSubmission}
@@ -999,6 +1098,7 @@ export function IssuedCandidatePanel() {
               initialProgress={englishProgress}
               submitting={isSubmitting}
               paused={Boolean(policyWarning || escapeWarningVisible || fullscreenRequired)}
+              saveState={saveState}
               onObjectiveAnswer={(id, value) => setEnglishObjectiveAnswers((current) => ({ ...current, [id]: value }))}
               onWritingResponse={(id, value) => setEnglishWritingResponses((current) => ({ ...current, [id]: value }))}
               onSpeakingRecording={uploadEnglishRecording}

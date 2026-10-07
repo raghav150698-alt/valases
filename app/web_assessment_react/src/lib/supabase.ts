@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { isLocalUiPreview } from "./uiPreview";
 
 const supabaseUrl = String(import.meta.env.VITE_SUPABASE_URL || "").trim();
 const supabasePublishableKey = String(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "").trim();
@@ -15,7 +16,7 @@ function isValidSupabaseUrl(value: string): boolean {
 
 export const supabaseConfigured = Boolean(isValidSupabaseUrl(supabaseUrl) && supabasePublishableKey);
 
-export const supabase = supabaseConfigured
+export const supabase = supabaseConfigured && !isLocalUiPreview
   ? createClient(supabaseUrl, supabasePublishableKey, {
       auth: {
         persistSession: true,

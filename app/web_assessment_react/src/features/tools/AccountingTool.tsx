@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CaseEvidenceDesk, type CaseDocument, type CaseMessage } from "./CaseEvidenceDesk";
+import { CaseWorkpaperWorkbench, type CaseWorkpaper } from "./CaseWorkpaperWorkbench";
 import "./AccountingTool.css";
 
 type WorkspacePage = "overview" | "banking" | "transactions" | "register" | "receivables" | "expenses" | "journal" | "reports" | "audit" | "review";
@@ -100,6 +101,7 @@ export type AccountingAssessmentSubmission = {
 };
 
 type AccountingToolProps = {
+  workpaper?: CaseWorkpaper;
   title?: string;
   description?: string;
   instructions?: string;
@@ -391,7 +393,14 @@ function entryAmount(entries: PostedJournalEntry[], debitAccount: string, credit
   return match?.total || 0;
 }
 
-export function AccountingTool({
+export function AccountingTool(props: AccountingToolProps) {
+  if (props.workpaper) return <CaseWorkpaperWorkbench workpaper={props.workpaper} workspace="accounting" initialSubmission={props.initialSubmission} showSubmit={props.showSubmit}
+    onAutosave={submission => props.onAutosave?.(submission as unknown as AccountingAssessmentSubmission)}
+    onSubmit={submission => props.onSubmit?.(submission as unknown as AccountingAssessmentSubmission)} />;
+  return <LegacyAccountingTool {...props} />;
+}
+
+function LegacyAccountingTool({
   title = "LedgeBook",
   description = "Month-end close and exception review",
   instructions = "Complete the close, post the required adjustments, and document every supported exception.",

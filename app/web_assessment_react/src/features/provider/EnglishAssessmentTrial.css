@@ -1,0 +1,18 @@
+.english-trial { position: fixed; inset: 0; z-index: 1000; overflow-y: auto; background: #f4f6fa; color: #172438; padding: 20px; }
+.english-trial-toolbar, .english-trial-navigation { display: flex; align-items: center; gap: 16px; padding: 16px; background: white; border: 1px solid #dbe2eb; border-radius: 12px; margin-bottom: 16px; }
+.english-trial-toolbar div { flex: 1; }
+.english-trial-toolbar small { display: block; margin-top: 5px; }
+.english-trial-toolbar button, .english-trial-navigation button, .english-trial-navigation select, .english-trial-review > button, .english-trial-restart button, .english-trial-welcome button:not(.assessment-primary-btn), .english-trial .assessment-thank-you button { padding: 10px 14px; border: 1px solid #c9d3e1; border-radius: 8px; background: white; color: #172438; cursor: pointer; }
+.english-trial-navigation label { display: grid; gap: 6px; }
+.english-trial-navigation span { max-width: 420px; font-size: 13px; }
+.english-trial-review { max-width: 1000px; margin: auto; padding: 24px; background: white; border-radius: 12px; }
+.english-trial-review-item { border-top: 1px solid #dbe2eb; padding: 18px 0; }
+.english-trial-review blockquote { white-space: pre-wrap; }
+.english-trial-review pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.practical-trial-submit { padding: 16px; display: flex; justify-content: flex-end; }
+.practical-trial-submit button { padding: 12px 18px; border: 1px solid #c9d3e1; border-radius: 8px; background: white; cursor: pointer; }
+.english-trial-welcome { max-width: 1000px; margin: 24px auto; }
+.english-trial-hint { font-size: 14px; color: #53647a; }
+.english-trial-restart { max-width: 1000px; margin: 16px auto; padding: 18px; border: 1px solid #d8b463; border-radius: 12px; background: #fff9eb; }
+.english-trial-restart button, .english-trial .assessment-thank-you button { margin: 8px; }
+@media (max-width: 700px) { .english-trial { padding: 8px; } .english-trial-toolbar, .english-trial-navigation { flex-wrap: wrap; } .english-trial-navigation select { max-width: 85vw; } }

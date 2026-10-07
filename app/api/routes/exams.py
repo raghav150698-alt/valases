@@ -23,7 +23,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from app.api.deps import require_role
 from app.core.config import get_settings
-from app.core.security import hash_password, verify_password
+from app.core.security import hash_generated_secret, verify_generated_secret
 from app.db.session import get_db
 from app.models.entities import (
     ApprovalStatus,
@@ -57,12 +57,19 @@ from app.models.entities import (
 )
 from app.schemas import AssessmentSubmissionIn, AssessmentTaskIn, ExamCreate, ExamOut, ExamRuleUpdate, ExamUpdate, QuestionCreate
 from app.services.ai_review import upsert_ai_review
-from app.services.default_assessments import install_default_assessment_for_provider, seed_default_assessment_templates
+from app.services.english_listening import task_for_issued_attempt
+from app.services.default_assessments import (
+    ensure_provider_default_assessments,
+    install_default_assessment_for_provider,
+    seed_default_assessment_templates,
+)
 from app.services.desktop_session_broker import desktop_app_spec
 from app.services.desktop_session_lifecycle import desktop_session_artifact_payload, finalize_desktop_sessions_for_issue
 from app.services.notifications import send_email
 from app.services.organization_branding import organization_logo_url
 from app.services.proctor_event_fusion import apply_proctor_event_decision, classify_proctor_event
+from app.services.product_events import emit_product_event
+from app.services.assessment_entitlements import require_issue_allowance, reserve_resent_invitation
 from app.services.rule_engine import evaluate_exam_rules
 from app.services.media_storage import delete_storage_reference, resolve_media_url, upload_file_to_cloud_storage
 from pathlib import Path
@@ -73,6 +80,96 @@ ALLOWED_QUESTIONS_PER_ATTEMPT = {25, 30, 35, 40}
 ALLOWED_TIME_PER_QUESTION_SECONDS = {25, 30, 35, 40, 45}
 ALLOWED_ASSESSMENT_TYPES = {x.value for x in AssessmentType}
 STANDALONE_ASSESSMENT_CATEGORY = "__standalone_assessment__"
+
+
+def _issue_organization_id(db: Session, issue: AssessmentIssue) -> int | None:
+    hiring_application_id = getattr(issue, "hiring_application_id", None)
+    if hiring_application_id:
+        application = db.get(HiringApplication, hiring_application_id)
+        if application:
+            return int(application.organization_id)
+    issuer_user_id = getattr(issue, "issuer_user_id", None)
+    if not issuer_user_id:
+        return None
+    issuer = db.get(User, issuer_user_id)
+    membership = _organization_membership(db, issuer) if issuer else None
+    return int(membership.organization_id) if membership else None
+
+
+def _duration_bucket(seconds: int | None) -> str:
+    value = max(0, int(seconds or 0))
+    if value < 300:
+        return "under_5m"
+    if value < 900:
+        return "5_to_15m"
+    if value < 1800:
+        return "15_to_30m"
+    if value < 3600:
+        return "30_to_60m"
+    return "over_60m"
+
+
+def _score_band(score_pct: float | None) -> str:
+    value = max(0.0, min(100.0, float(score_pct or 0)))
+    lower = int(value // 10) * 10
+    return f"{lower:02d}-{min(100, lower + 9):02d}"
+
+
+LANGUAGE_SKILLS = ("listening", "reading", "writing", "speaking")
+LANGUAGE_SKILL_WEIGHTS = {"listening": 0.20, "reading": 0.20, "writing": 0.30, "speaking": 0.30}
+LANGUAGE_RUBRIC_CRITERIA = {
+    "writing": ("task_fulfilment", "organisation", "lexical_resource", "grammar_accuracy"),
+    "speaking": ("task_fulfilment", "fluency", "language_range", "pronunciation"),
+}
+
+
+def _estimated_cefr_band(score: float) -> str:
+    value = max(0.0, min(100.0, float(score)))
+    if value >= 85:
+        return "C1"
+    if value >= 70:
+        return "B2+"
+    if value >= 55:
+        return "B2"
+    if value >= 40:
+        return "B1"
+    return "Below B1"
+
+
+def _language_review_outcome(
+    supplied_scores: dict[str, float],
+    rubric_ratings: dict[str, int],
+    minimum_skill_score: float = 50.0,
+) -> dict[str, Any]:
+    if any(float(supplied_scores.get(skill, -1)) < 0 for skill in LANGUAGE_SKILLS):
+        raise HTTPException(status_code=422, detail="Provide listening, reading, writing, and speaking scores")
+    scores = {
+        skill: round(max(0.0, min(100.0, float(supplied_scores[skill]))), 2)
+        for skill in LANGUAGE_SKILLS
+    }
+    clean_ratings: dict[str, int] = {}
+    for skill, criteria in LANGUAGE_RUBRIC_CRITERIA.items():
+        values = []
+        for criterion in criteria:
+            key = f"{skill}.{criterion}"
+            rating = int(rubric_ratings.get(key, -1))
+            if rating < 0 or rating > 5:
+                raise HTTPException(status_code=422, detail=f"Provide a 0–5 rating for {key}")
+            clean_ratings[key] = rating
+            values.append(rating)
+        scores[skill] = round((sum(values) / (len(values) * 5)) * 100.0, 2)
+    overall = round(sum(scores[skill] * LANGUAGE_SKILL_WEIGHTS[skill] for skill in LANGUAGE_SKILLS), 2)
+    minimum_met = all(scores[skill] >= float(minimum_skill_score) for skill in LANGUAGE_SKILLS)
+    return {
+        "skill_scores": scores,
+        "rubric_ratings": clean_ratings,
+        "overall_score_pct": overall,
+        "estimated_cefr": _estimated_cefr_band(overall),
+        "minimum_skill_score": float(minimum_skill_score),
+        "minimum_skill_threshold_met": minimum_met,
+    }
+
+
 ISSUED_TOKEN_ROLE = "issued_candidate"
 request_logger = logging.getLogger("valases.request")
 
@@ -268,10 +365,16 @@ class IssueAssessmentRequest(BaseModel):
     application_id: int = Field(gt=0)
     candidate_name: str = Field(min_length=2, max_length=200)
     candidate_email: EmailStr
+    send_email: bool = True
 
 
 class IssuedCandidateLoginRequest(BaseModel):
     email: EmailStr | None = None
+    password: str = Field(min_length=6, max_length=120)
+
+
+class IssuedCandidateKeyLoginRequest(BaseModel):
+    access_key: str = Field(min_length=20, max_length=120, pattern=r"^[A-Za-z0-9_-]+$")
     password: str = Field(min_length=6, max_length=120)
 
 
@@ -310,6 +413,8 @@ class IssuedCandidateConsentRequest(BaseModel):
 class AssessmentReviewFinalizeRequest(BaseModel):
     score_pct: float = Field(ge=0, le=100)
     reviewer_notes: str = Field(min_length=10, max_length=4000)
+    skill_scores: dict[str, float] = Field(default_factory=dict, max_length=4)
+    rubric_ratings: dict[str, int] = Field(default_factory=dict, max_length=12)
 
 
 class AssessmentProctorReviewLabelRequest(BaseModel):
@@ -534,6 +639,16 @@ def _integrity_adjusted_score(raw_score_pct: float | None, state: dict) -> float
     return round(max(0.0, float(raw_score_pct)), 2)
 
 
+def _requires_recruiter_review(state: dict) -> bool:
+    """Route any server-classified integrity flag to a human decision."""
+    return bool(
+        state.get("mandatory_review")
+        or state.get("is_flagged")
+        or state.get("review_reasons")
+        or int(state.get("review_event_count") or 0) > 0
+    )
+
+
 def _internal_assessment_id(exam_id: int) -> str:
     return f"ASM-{int(exam_id):06d}"
 
@@ -596,6 +711,14 @@ def _candidate_task_to_dict(task: AssessmentTask | None) -> dict | None:
             "corporate_tax_case",
             "sections",
             "rubric",
+            "english_locale",
+            "english_region",
+            "language",
+            "case_id",
+            "case_version",
+            "case_selection",
+            "tax_year",
+            "workpaper",
         )
         if key in metadata
     }
@@ -607,7 +730,7 @@ def _candidate_task_to_dict(task: AssessmentTask | None) -> dict | None:
             section = dict(raw_section)
             if isinstance(section.get("items"), list):
                 section["items"] = [
-                    {key: value for key, value in item.items() if key not in {"answer", "transcript"}}
+                    {key: value for key, value in item.items() if key not in {"answer", "transcript", "evidence_seconds", "evidence_reference"}}
                     for item in section["items"]
                     if isinstance(item, dict)
                 ]
@@ -807,12 +930,30 @@ def _score_task_submission(task: AssessmentTask, submitted_data: dict) -> tuple[
         )
         objective_weight = float(grading.get("objective_weight", 50) or 50)
         objective_score = (objective_correct / objective_total) * objective_weight if objective_total else 0
+        skill_scores = {}
+        for skill, prefix in (("listening", "l"), ("reading", "r")):
+            skill_keys = [key for key in expected_answers if str(key).startswith(prefix)]
+            skill_correct = sum(
+                1 for key in skill_keys
+                if str(objective.get(key, "")).strip().casefold() == str(expected_answers[key]).strip().casefold()
+            )
+            skill_scores[skill] = {
+                "correct": skill_correct,
+                "total": len(skill_keys),
+                "score_pct": round((skill_correct / len(skill_keys)) * 100.0, 2) if skill_keys else 0.0,
+            }
+        # Listening and reading retain equal weight when their question counts differ.
+        objective_score = sum(
+            (entry["correct"] / entry["total"] if entry["total"] else 0) * objective_weight / 2
+            for entry in skill_scores.values()
+        )
         return round(objective_score, 2), "manual_review", {
             "evaluation_mode": "objective_plus_manual_review",
             "objective_correct": objective_correct,
             "objective_total": objective_total,
             "objective_score": round(objective_score, 2),
             "manual_review_weight": max(0, 100 - objective_weight),
+            "skill_scores": skill_scores,
             "responses_present": {
                 "writing": bool(str(submitted_data.get("writing_response") or "").strip() or submitted_data.get("writing_responses")),
                 "speaking": bool(str(submitted_data.get("speaking_response") or "").strip() or submitted_data.get("speaking_recording") or submitted_data.get("speaking_recordings")),
@@ -912,7 +1053,7 @@ def _safe_send_assessment_issue_email(
     safe_privacy = escape(privacy_url, quote=True)
     safe_retention = escape(retention_url, quote=True)
     valases_logo_url = escape(
-        f"{login_link.split('/?issued_key=', 1)[0].rstrip('/')}/assets/brand/valases-logo.png",
+        f"{login_link.split('#', 1)[0].split('?', 1)[0].rstrip('/')}/assets/brand/valases-logo.png",
         quote=True,
     )
     inline_images: dict[str, tuple[bytes, str, str]] = {}
@@ -1587,8 +1728,8 @@ def issue_assessment_to_candidate(
     )
     if current_user.role != UserRole.ADMIN and not membership:
         raise HTTPException(status_code=403, detail="Candidate application does not belong to your organization")
-    if application.status != "active" or application.stage != "screening":
-        raise HTTPException(status_code=409, detail="Assessments can only be sent to active candidates in screening")
+    if application.status != "active" or application.stage not in {"screening", "assessment"}:
+        raise HTTPException(status_code=409, detail="Assessments can only be sent to active candidates in screening or assessment")
     candidate = db.get(HiringCandidate, application.candidate_id)
     if not candidate or candidate.organization_id != application.organization_id:
         raise HTTPException(status_code=404, detail="Candidate not found")
@@ -1606,6 +1747,8 @@ def issue_assessment_to_candidate(
     candidate_name = str(payload.candidate_name).strip()
     if candidate_email != str(candidate.email).strip().lower():
         raise HTTPException(status_code=422, detail="Candidate email does not match the selected screening application")
+    require_issue_allowance(db, application.organization_id, str(exam.assessment_type), candidate_email)
+    previous_stage = application.stage
     temp_password = secrets.token_urlsafe(16)
     issue = AssessmentIssue(
         exam_id=exam.id,
@@ -1614,19 +1757,21 @@ def issue_assessment_to_candidate(
         candidate_user_id=None,
         candidate_name=candidate_name,
         candidate_email=candidate_email,
-        candidate_password_hash=hash_password(temp_password),
+        candidate_password_hash=hash_generated_secret(temp_password),
         access_key=secrets.token_urlsafe(24),
         access_expires_at=datetime.now(timezone.utc) + timedelta(days=7),
         status="issued",
+        result_json={"_allowance_assessment_type": str(exam.assessment_type)},
     )
     db.add(issue)
+    db.flush()
     application.stage = "assessment"
     db.add(
         HiringStageEvent(
             organization_id=application.organization_id,
             application_id=application.id,
             actor_user_id=current_user.id,
-            from_stage="screening",
+            from_stage=previous_stage,
             to_stage="assessment",
             reason=f"Assessment issued: {exam.title}",
         ),
@@ -1641,28 +1786,45 @@ def issue_assessment_to_candidate(
             details_json={"exam_id": exam.id},
         ),
     )
+    emit_product_event(
+        db,
+        event_type="assessment.issued",
+        organization_id=application.organization_id,
+        aggregate_type="assessment_issue",
+        aggregate_id=issue.id,
+        properties={
+            "assessment_type": str(exam.assessment_type or AssessmentType.MCQ.value),
+            "duration_minutes": int(exam.duration_minutes or 0),
+            "workflow_stage": "assessment",
+            "source": "hiring_application",
+        },
+    )
     db.commit()
     db.refresh(issue)
-    login_link = f"{base_url}/?issued_key={issue.access_key}"
+    login_link = f"{base_url}/#issued_key={issue.access_key}"
     company_name, company_logo_url = _organization_email_branding(
         db,
         application.organization_id,
         (profile.display_name or settings.app_name or "Your organization").strip(),
     )
-    email_delivery = _safe_send_assessment_issue_email(
-        to_email=candidate_email,
-        candidate_name=candidate_name,
-        assessment_title=exam.title,
-        assessment_type=exam.assessment_type,
-        duration_minutes=exam.duration_minutes,
-        login_link=login_link,
-        temporary_password=temp_password,
-        expires_at=issue.access_expires_at,
-        company_name=company_name,
-        company_logo_url=company_logo_url,
-        privacy_url=f"{base_url}/legal/privacy-policy",
-        retention_url=f"{base_url}/legal/data-retention-and-deletion",
-        smtp_config=_organization_smtp_config(db, application.organization_id, "assessment_invites"),
+    email_delivery = (
+        _safe_send_assessment_issue_email(
+            to_email=candidate_email,
+            candidate_name=candidate_name,
+            assessment_title=exam.title,
+            assessment_type=exam.assessment_type,
+            duration_minutes=exam.duration_minutes,
+            login_link=login_link,
+            temporary_password=temp_password,
+            expires_at=issue.access_expires_at,
+            company_name=company_name,
+            company_logo_url=company_logo_url,
+            privacy_url=f"{base_url}/legal/privacy-policy",
+            retention_url=f"{base_url}/legal/data-retention-and-deletion",
+            smtp_config=_organization_smtp_config(db, application.organization_id, "assessment_invites"),
+        )
+        if payload.send_email
+        else {"sent": False, "reason": "Email suppressed for controlled load testing"}
     )
     delivery_details = {
         "sent": bool(email_delivery.get("sent")),
@@ -1761,6 +1923,10 @@ def resend_issued_assessment_invitation(
     exam = db.get(Exam, issue.exam_id)
     if not exam:
         raise HTTPException(status_code=404, detail="Assessment not found")
+    if issue.hiring_application_id:
+        allowance_application = db.get(HiringApplication, issue.hiring_application_id)
+        if allowance_application:
+            reserve_resent_invitation(db, allowance_application.organization_id, exam, issue)
     issuer_profile = db.scalar(
         select(ProviderProfile).where(ProviderProfile.user_id == issue.issuer_user_id),
     )
@@ -1774,7 +1940,7 @@ def resend_issued_assessment_invitation(
         raise HTTPException(status_code=503, detail="Candidate portal URL is invalid")
 
     temporary_password = secrets.token_urlsafe(16)
-    issue.candidate_password_hash = hash_password(temporary_password)
+    issue.candidate_password_hash = hash_generated_secret(temporary_password)
     issue.access_key = secrets.token_urlsafe(24)
     issue.access_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
     issue.credential_used_at = None
@@ -1783,7 +1949,7 @@ def resend_issued_assessment_invitation(
     issue.started_at = None
     issue.completed_at = None
     issue.status = "issued"
-    login_link = f"{base_url}/?issued_key={issue.access_key}"
+    login_link = f"{base_url}/#issued_key={issue.access_key}"
     application = db.get(HiringApplication, issue.hiring_application_id) if issue.hiring_application_id else None
     issuer_user = db.get(User, issue.issuer_user_id) if not application else None
     issuer_membership = _organization_membership(db, issuer_user) if issuer_user else None
@@ -1905,6 +2071,7 @@ def review_issued_assessment_attempt(
         .order_by(AssessmentSubmission.id.desc()),
     )
     task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == issue.exam_id))
+    task = task_for_issued_attempt(task, issue)
     review_labels = list(
         db.scalars(
             select(AssessmentProctorReviewLabel)
@@ -1917,6 +2084,63 @@ def review_issued_assessment_attempt(
         if label.reviewer_label in label_counts:
             label_counts[label.reviewer_label] += 1
     submitted_payload = submission.submitted_data_json if submission and isinstance(submission.submitted_data_json, dict) else {}
+    mcq_responses: list[dict[str, Any]] = []
+    language_objective_responses: list[dict[str, Any]] = []
+    if exam and str(exam.assessment_type or AssessmentType.MCQ.value) == AssessmentType.MCQ.value and submission:
+        questions = _questions_for_issued_attempt(db, issue, exam)
+        question_ids = [question.id for question in questions]
+        options_by_question: dict[int, list[Option]] = {question_id: [] for question_id in question_ids}
+        if question_ids:
+            for option in db.scalars(
+                select(Option)
+                .where(Option.question_id.in_(question_ids))
+                .order_by(Option.question_id.asc(), Option.position.asc(), Option.id.asc()),
+            ).all():
+                options_by_question.setdefault(option.question_id, []).append(option)
+        submitted_answers = submitted_payload.get("answers") if isinstance(submitted_payload.get("answers"), dict) else {}
+        for position, question in enumerate(questions, start=1):
+            selected_raw = submitted_answers.get(str(question.id))
+            if isinstance(selected_raw, int):
+                selected_ids = {selected_raw}
+            elif isinstance(selected_raw, list):
+                selected_ids = {int(value) for value in selected_raw if str(value).isdigit()}
+            else:
+                selected_ids = set()
+            options = options_by_question.get(question.id, [])
+            correct_ids = {option.id for option in options if option.is_correct}
+            mcq_responses.append({
+                "position": position,
+                "question_id": question.id,
+                "question_text": question.question_text,
+                "selected_options": [option.option_text for option in options if option.id in selected_ids],
+                "correct_options": [option.option_text for option in options if option.id in correct_ids],
+                "is_correct": bool(correct_ids) and selected_ids == correct_ids,
+                "marks": float(question.marks or 0),
+            })
+    if exam and str(exam.assessment_type or "") == AssessmentType.ENGLISH_LANGUAGE.value and submission and task:
+        task_metadata = task.metadata_json if isinstance(task.metadata_json, dict) else {}
+        expected_output = task.expected_output_json if isinstance(task.expected_output_json, dict) else {}
+        expected_answers = expected_output.get("objective_answers") if isinstance(expected_output.get("objective_answers"), dict) else {}
+        submitted_answers = submitted_payload.get("objective_answers") if isinstance(submitted_payload.get("objective_answers"), dict) else {}
+        for section in task_metadata.get("sections") or []:
+            if not isinstance(section, dict):
+                continue
+            for item in section.get("items") or []:
+                if not isinstance(item, dict) or item.get("type") not in {"choice", "reading_choice"}:
+                    continue
+                item_id = str(item.get("id") or "")
+                selected = str(submitted_answers.get(item_id) or "")
+                correct = str(expected_answers.get(item_id) or "")
+                language_objective_responses.append({
+                    "item_id": item_id,
+                    "skill": str(section.get("id") or ""),
+                    "label": str(item.get("label") or ""),
+                    "prompt": str(item.get("prompt") or ""),
+                    "selected_answer": selected,
+                    "correct_answer": correct,
+                    "is_correct": bool(correct) and selected.casefold() == correct.casefold(),
+                    "difficulty": str(item.get("difficulty") or ""),
+                })
     speaking_recordings = submitted_payload.get("speaking_recordings") if isinstance(submitted_payload.get("speaking_recordings"), dict) else {}
     language_responses = []
     for item_id, recording in speaking_recordings.items():
@@ -1942,6 +2166,8 @@ def review_issued_assessment_attempt(
         "passed": issue.passed,
         "result": issue.result_json or {},
         "task": _task_to_dict(task, include_expected=True),
+        "mcq_responses": mcq_responses,
+        "language_objective_responses": language_objective_responses,
         "submission": {
             "id": submission.id,
             "submitted_data": submission.submitted_data_json or {},
@@ -2114,6 +2340,7 @@ async def upload_issued_language_response_audio(
     if not clean_item_id:
         raise HTTPException(status_code=400, detail="A valid speaking item id is required")
     task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == issue.exam_id))
+    task = task_for_issued_attempt(task, issue)
     sections = (task.metadata_json or {}).get("sections") if task and isinstance(task.metadata_json, dict) else []
     speaking_item_ids = {
         str(item.get("id") or "")
@@ -2235,6 +2462,16 @@ def finalize_issued_assessment_review(
     if not exam or not submission:
         raise HTTPException(status_code=409, detail="No candidate submission is available for review")
     score_pct = round(float(payload.score_pct), 2)
+    language_outcome: dict[str, Any] | None = None
+    if str(exam.assessment_type or "") == AssessmentType.ENGLISH_LANGUAGE.value:
+        task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == exam.id))
+        grading = task.grading_config_json if task and isinstance(task.grading_config_json, dict) else {}
+        language_outcome = _language_review_outcome(
+            payload.skill_scores,
+            payload.rubric_ratings,
+            float(grading.get("minimum_skill_score", 50) or 50),
+        )
+        score_pct = float(language_outcome["overall_score_pct"])
     reviewer_notes = payload.reviewer_notes.strip()
     if len(reviewer_notes) < 10:
         raise HTTPException(status_code=422, detail="Provide a review reason of at least 10 characters")
@@ -2245,7 +2482,9 @@ def finalize_issued_assessment_review(
     submission.score = final_marks
     submission.status = "reviewed"
     issue.score_pct = score_pct
-    issue.passed = score_pct >= float(exam.pass_score or 70)
+    issue.passed = score_pct >= float(exam.pass_score or 70) and (
+        bool(language_outcome["minimum_skill_threshold_met"]) if language_outcome else True
+    )
     issue.status = "reviewed"
     result = dict(issue.result_json) if isinstance(issue.result_json, dict) else {}
     review_record = {
@@ -2255,6 +2494,8 @@ def finalize_issued_assessment_review(
         "passed": issue.passed,
         "notes": reviewer_notes,
     }
+    if language_outcome:
+        review_record["language_profile"] = language_outcome
     review_history = result.get("review_history") if isinstance(result.get("review_history"), list) else []
     review_history.append(review_record)
     result["review_history"] = review_history[-50:]
@@ -2299,8 +2540,22 @@ def finalize_issued_assessment_review(
                 "final_score_pct": score_pct,
                 "passed": issue.passed,
                 "reason": reviewer_notes,
+                "language_profile": language_outcome,
             },
         ),
+    )
+    emit_product_event(
+        db,
+        event_type="assessment.review_finalized",
+        organization_id=_issue_organization_id(db, issue),
+        aggregate_type="assessment_issue",
+        aggregate_id=issue.id,
+        properties={
+            "assessment_type": str(exam.assessment_type or AssessmentType.MCQ.value),
+            "passed": bool(issue.passed),
+            "score_band": _score_band(score_pct),
+            "advanced_to_interview": application_stage == "interview",
+        },
     )
     db.commit()
     return {
@@ -2308,6 +2563,7 @@ def finalize_issued_assessment_review(
         "score_pct": issue.score_pct,
         "passed": issue.passed,
         "application_stage": application_stage,
+        "language_profile": language_outcome,
     }
 
 
@@ -2320,6 +2576,11 @@ def list_published_assessment_catalog(
     current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
 ):
     _require_assessment_permission(db, current_user, "assessments.view")
+    # Valases assessments are part of every employer workspace. Provisioning is
+    # idempotent, so this also backfills employers created before the platform
+    # library was introduced without exposing another employer's custom exams.
+    if current_user.role == UserRole.PROVIDER:
+        ensure_provider_default_assessments(db, _provider_profile_or_404(db, current_user.id))
     exam_query = (
         select(Exam)
         .join(Course, Course.id == Exam.course_id)
@@ -2412,12 +2673,21 @@ def issued_candidate_login(payload: IssuedCandidateLoginRequest, db: Session = D
     raise HTTPException(status_code=400, detail="Open this assessment from the recruiter email link.")
 
 
+@router.post("/issued/key-login")
+def issued_candidate_key_login(payload: IssuedCandidateKeyLoginRequest, db: Session = Depends(get_db)):
+    return issued_candidate_login_by_key(
+        payload.access_key,
+        IssuedCandidateLoginRequest(password=payload.password),
+        db,
+    )
+
+
 @router.post("/issued/key/{access_key}/login")
 def issued_candidate_login_by_key(access_key: str, payload: IssuedCandidateLoginRequest, db: Session = Depends(get_db)):
     if len(access_key) < 20 or len(access_key) > 120:
         raise HTTPException(status_code=401, detail="Invalid issued assessment credentials")
     issue = db.scalar(select(AssessmentIssue).where(AssessmentIssue.access_key == access_key))
-    if not issue or not verify_password(payload.password, issue.candidate_password_hash):
+    if not issue or not verify_generated_secret(payload.password, issue.candidate_password_hash):
         raise HTTPException(status_code=401, detail="Invalid issued assessment credentials")
     if issue.status == "revoked":
         raise HTTPException(status_code=410, detail="This assessment invitation has been revoked")
@@ -2430,10 +2700,28 @@ def issued_candidate_login_by_key(access_key: str, payload: IssuedCandidateLogin
     issue.credential_used_at = issue.credential_used_at or now
     issue.active_session_token = _session_token_digest(session_token)
     issue.active_session_started_at = now
-    if issue.status == "issued":
+    started_now = issue.status == "issued"
+    if started_now:
+        listening_task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == issue.exam_id))
+        task_for_issued_attempt(listening_task, issue, create=True)
         issue.status = "started"
         issue.started_at = now
     db.add(issue)
+    if started_now:
+        exam = db.get(Exam, issue.exam_id)
+        emit_product_event(
+            db,
+            event_type="assessment.started",
+            organization_id=_issue_organization_id(db, issue),
+            aggregate_type="assessment_issue",
+            aggregate_id=issue.id,
+            properties={
+                "assessment_type": str(exam.assessment_type or AssessmentType.MCQ.value) if exam else "unknown",
+                "duration_minutes": int(exam.duration_minutes or 0) if exam else 0,
+                "resumed": False,
+            },
+            occurred_at=now,
+        )
     db.commit()
     token = _create_issued_candidate_token(issue.id, session_token)
     return {"token": token, "session_token": session_token}
@@ -2455,10 +2743,11 @@ def issued_candidate_get_assessment(
         "Your organization",
     )
     if issue.status in {"completed", "manual_review", "review_pending", "reviewed", "terminated"}:
-        return {"status": "submitted", "message": "Your assessment has been submitted for recruiter review.", "next_step": "The recruiting organization will contact you directly if they would like to continue."}
+        return {"issued_id": issue.id, "status": "submitted", "message": "Your assessment has been submitted successfully.", "next_step": "The recruiting organization will contact you directly if they would like to continue."}
     assessment_type = str(exam.assessment_type or AssessmentType.MCQ.value)
     desktop_spec = desktop_app_spec(assessment_type)
     task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == exam.id)) if assessment_type != AssessmentType.MCQ.value else None
+    task = task_for_issued_attempt(task, issue)
     questions = _questions_for_issued_attempt(db, issue, exam) if assessment_type == AssessmentType.MCQ.value else []
     draft_submission = _latest_issue_submission(db, issue.id)
     draft = None
@@ -2475,9 +2764,19 @@ def issued_candidate_get_assessment(
             "time_taken_seconds": draft_submission.time_taken_seconds,
             "timer_state": runtime.get("timer_state") if isinstance(runtime.get("timer_state"), dict) else {},
         }
+    question_ids = [q.id for q in questions]
+    options_by_question: dict[int, list[Option]] = {question_id: [] for question_id in question_ids}
+    if question_ids:
+        options = db.scalars(
+            select(Option)
+            .where(Option.question_id.in_(question_ids))
+            .order_by(Option.question_id.asc(), Option.position.asc(), Option.id.asc()),
+        ).all()
+        for option in options:
+            options_by_question.setdefault(option.question_id, []).append(option)
     payload_questions = []
     for q in questions:
-        opts = list(db.scalars(select(Option).where(Option.question_id == q.id).order_by(Option.position.asc(), Option.id.asc())).all())
+        opts = options_by_question.get(q.id, [])
         payload_questions.append(
             {
                 "question_id": q.id,
@@ -2667,6 +2966,22 @@ def issued_candidate_proctor_event(
     result["proctoring"] = state
     issue.result_json = result
     db.add(issue)
+    if decision.capture_evidence or decision.disposition != "clear":
+        emit_product_event(
+            db,
+            event_type="assessment.proctor_signal",
+            organization_id=_issue_organization_id(db, issue),
+            aggregate_type="assessment_issue",
+            aggregate_id=issue.id,
+            properties={
+                "signal_type": normalized_event_type,
+                "severity": decision.severity,
+                "disposition": decision.disposition,
+                "capture_evidence": bool(decision.capture_evidence),
+                "mandatory_review": bool(state.get("mandatory_review")),
+                "warning_count": int(state.get("warning_count") or 0),
+            },
+        )
     db.commit()
     return {
         "warning_count": int(state["warning_count"]),
@@ -2699,12 +3014,11 @@ def issued_candidate_submit(
         if payload.submission_id and existing_runtime.get("submission_id") == payload.submission_id:
             return {
                 "status": "submitted",
-                "message": "Your assessment has been submitted for recruiter review.",
+                "message": "Your assessment has been submitted successfully.",
                 "next_step": "The recruiting organization will contact you directly if they would like to continue.",
             }
         raise HTTPException(status_code=409, detail="Assessment already submitted")
     proctoring_state = _issued_proctoring_state(issue)
-    forced_manual_review = bool(proctoring_state.get("mandatory_review"))
     if _json_size_bytes(payload.submitted_data) > 3_000_000:
         raise HTTPException(status_code=413, detail="Assessment submission is too large")
     if _json_size_bytes(payload.answers) > 250_000:
@@ -2716,6 +3030,7 @@ def issued_candidate_submit(
             str(submitted_event.get("event_type") or ""),
             submitted_event.get("details") if isinstance(submitted_event.get("details"), dict) else {},
         )
+    forced_manual_review = _requires_recruiter_review(proctoring_state)
     recorded_events = [*(proctoring_state.get("events") or [])[-100:], *submitted_events][-200:]
     exam = db.get(Exam, issue.exam_id)
     if not exam:
@@ -2727,6 +3042,7 @@ def issued_candidate_submit(
         task = db.scalar(select(AssessmentTask).where(AssessmentTask.assessment_id == exam.id))
         if not task:
             raise HTTPException(status_code=400, detail="Assessment task is missing")
+        task = task_for_issued_attempt(task, issue)
         submitted_data = dict(payload.submitted_data or {})
         desktop_spec = desktop_app_spec(assessment_type)
         if desktop_spec and desktop_spec["configured"]:
@@ -2790,6 +3106,22 @@ def issued_candidate_submit(
         })
         issue.result_json = issue_result
         db.add(issue)
+        emit_product_event(
+            db,
+            event_type="assessment.submitted",
+            organization_id=_issue_organization_id(db, issue),
+            aggregate_type="assessment_issue",
+            aggregate_id=issue.id,
+            properties={
+                "assessment_type": assessment_type,
+                "duration_bucket": _duration_bucket(payload.time_taken_seconds),
+                "review_required": True,
+                "proctor_flagged": bool(proctoring_state.get("is_flagged")),
+                "review_reason_count": len(proctoring_state.get("review_reasons") or []),
+                "score_band": _score_band(score_pct),
+            },
+            occurred_at=submitted_at,
+        )
         db.commit()
         return {
             "status": "submitted",
@@ -2807,6 +3139,16 @@ def issued_candidate_submit(
     competency_earned: dict[str, float] = {}
     competency_correct: dict[str, int] = {}
     competency_questions: dict[str, int] = {}
+    question_ids = [q.id for q in questions]
+    correct_options_by_question: dict[int, list[int]] = {question_id: [] for question_id in question_ids}
+    correct_option_rows = db.execute(
+        select(Option.question_id, Option.id).where(
+            Option.question_id.in_(question_ids),
+            Option.is_correct.is_(True),
+        ),
+    ).all()
+    for question_id, option_id in correct_option_rows:
+        correct_options_by_question.setdefault(int(question_id), []).append(int(option_id))
     for q in questions:
         question_marks = float(q.marks or 0)
         total_marks += question_marks
@@ -2820,7 +3162,7 @@ def issued_candidate_submit(
             selected_ids = [selected_raw]
         elif isinstance(selected_raw, list):
             selected_ids = [int(x) for x in selected_raw if str(x).isdigit()]
-        correct_ids = [int(x) for x in db.scalars(select(Option.id).where(Option.question_id == q.id, Option.is_correct.is_(True))).all()]
+        correct_ids = correct_options_by_question.get(q.id, [])
         is_correct = set(selected_ids) == set(correct_ids) and len(correct_ids) > 0
         if is_correct:
             awarded_marks += question_marks
@@ -2836,9 +3178,10 @@ def issued_candidate_submit(
 
     raw_percentage = round((awarded_marks / total_marks) * 100.0, 2) if total_marks > 0 else 0.0
     percentage = _integrity_adjusted_score(raw_percentage, proctoring_state) or 0.0
-    issue.status = "review_pending"
-    issue.score_pct = None
-    issue.passed = None
+    final_status = "review_pending" if forced_manual_review else "completed"
+    issue.status = final_status
+    issue.score_pct = None if forced_manual_review else percentage
+    issue.passed = None if forced_manual_review else percentage >= float(exam.pass_score or 70)
     issue.completed_at = submitted_at
     competency_labels = {
         "accounting-cycle": "Accounting cycle and general ledger",
@@ -2868,6 +3211,7 @@ def issued_candidate_submit(
         "raw_provisional_score_pct": raw_percentage,
         "integrity_penalty_pct": float(proctoring_state.get("integrity_penalty_pct") or 0),
         "provisional_score_pct": percentage,
+        "review_required": forced_manual_review,
         "detail": {
             "correct_count": correct_count,
             "question_count": len(questions),
@@ -2892,17 +3236,33 @@ def issued_candidate_submit(
     }
     submission.score = awarded_marks
     submission.auto_score = awarded_marks
-    submission.status = "review_pending"
+    submission.status = final_status
     submission.started_at = issue.started_at
     submission.submitted_at = submitted_at
     submission.time_taken_seconds = payload.time_taken_seconds
     submission.proctoring_events_json = recorded_events
     db.add(submission)
     db.add(issue)
+    emit_product_event(
+        db,
+        event_type="assessment.submitted",
+        organization_id=_issue_organization_id(db, issue),
+        aggregate_type="assessment_issue",
+        aggregate_id=issue.id,
+        properties={
+            "assessment_type": assessment_type,
+            "duration_bucket": _duration_bucket(payload.time_taken_seconds),
+            "review_required": forced_manual_review,
+            "proctor_flagged": bool(proctoring_state.get("is_flagged")),
+            "review_reason_count": len(proctoring_state.get("review_reasons") or []),
+            "score_band": _score_band(percentage),
+        },
+        occurred_at=submitted_at,
+    )
     db.commit()
 
     return {
         "status": "submitted",
-        "message": "Your assessment has been submitted for recruiter review.",
+        "message": "Your assessment has been submitted successfully.",
         "next_step": "The recruiting organization will contact you directly if they would like to continue.",
     }

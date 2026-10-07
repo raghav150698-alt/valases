@@ -18,6 +18,7 @@ from app.api.routes.exams import (
     issued_candidate_login_by_key,
     issued_candidate_proctor_event,
     issued_candidate_submit,
+    review_issued_assessment_attempt,
 )
 from app.core.security import hash_password
 from app.models.entities import (
@@ -184,6 +185,8 @@ class AssessmentWorkflowE2ETest(unittest.TestCase):
         self.assertEqual(submitted["status"], "submitted")
         self.assertNotIn("score", submitted)
         self.assertNotIn("passed", submitted)
+        self.assertEqual(issue.status, "review_pending")
+        self.assertIsNone(issue.score_pct)
         self.assertEqual(issue.result_json["proctoring"]["mobile_phone_detection_count"], 1)
         self.assertEqual(issue.result_json["proctoring"]["integrity_penalty_pct"], 0)
         self.assertEqual(issue.result_json["provisional_score_pct"], 100)
@@ -225,6 +228,93 @@ class AssessmentWorkflowE2ETest(unittest.TestCase):
             self.db.query(AssessmentSubmission).filter(AssessmentSubmission.issue_id == issue.id).count(),
             1,
         )
+
+    def test_clean_mcq_is_completed_automatically_and_key_remains_reviewable(self) -> None:
+        provider_user = User(
+            email="clean-provider@example.com",
+            full_name="Clean Provider",
+            password_hash="supabase",
+            role=UserRole.PROVIDER,
+            is_active=True,
+        )
+        self.db.add(provider_user)
+        self.db.flush()
+        provider = ProviderProfile(
+            user_id=provider_user.id,
+            provider_type=ProviderType.BUSINESS,
+            display_name="Clean Company",
+        )
+        self.db.add(provider)
+        self.db.flush()
+        course = Course(provider_id=provider.id, title="Assessments", description="", category="assessment")
+        self.db.add(course)
+        self.db.flush()
+        exam = Exam(
+            course_id=course.id,
+            title="Clean MCQ",
+            assessment_type="mcq",
+            duration_minutes=15,
+            questions_per_attempt=1,
+            pass_score=70,
+            status=ExamStatus.PUBLISHED,
+        )
+        self.db.add(exam)
+        self.db.flush()
+        question = Question(
+            exam_id=exam.id,
+            question_text="Which answer is correct?",
+            question_type=QuestionType.MCQ_SINGLE,
+            marks=10,
+        )
+        self.db.add(question)
+        self.db.flush()
+        correct = Option(question_id=question.id, option_text="The correct answer", is_correct=True, position=1)
+        incorrect = Option(question_id=question.id, option_text="The distractor", is_correct=False, position=2)
+        self.db.add_all([correct, incorrect])
+        self.db.flush()
+        password = "clean-candidate-password"
+        issue = AssessmentIssue(
+            exam_id=exam.id,
+            issuer_user_id=provider_user.id,
+            candidate_name="Clean Candidate",
+            candidate_email="clean-candidate@example.com",
+            candidate_password_hash=hash_password(password),
+            access_key="clean-access-key-with-sufficient-entropy",
+            access_expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+            status="issued",
+        )
+        self.db.add(issue)
+        self.db.commit()
+
+        login = issued_candidate_login_by_key(
+            issue.access_key,
+            IssuedCandidateLoginRequest(password=password),
+            self.db,
+        )
+        submitted = issued_candidate_submit(
+            IssuedCandidateSubmitRequest(
+                submission_id="clean-submit-0123456789",
+                answers={str(question.id): [correct.id]},
+                time_taken_seconds=45,
+            ),
+            f"Bearer {login['token']}",
+            self.db,
+        )
+
+        self.assertEqual(submitted["status"], "submitted")
+        self.assertNotIn("score", submitted)
+        self.assertEqual(issue.status, "completed")
+        self.assertEqual(issue.score_pct, 100)
+        self.assertTrue(issue.passed)
+        submission = self.db.query(AssessmentSubmission).filter(AssessmentSubmission.issue_id == issue.id).one()
+        self.assertEqual(submission.status, "completed")
+
+        review = review_issued_assessment_attempt(issue.id, self.db, provider_user)
+        self.assertEqual(review["status"], "completed")
+        self.assertEqual(review["mcq_responses"][0]["question_text"], "Which answer is correct?")
+        self.assertEqual(review["mcq_responses"][0]["selected_options"], ["The correct answer"])
+        self.assertEqual(review["mcq_responses"][0]["correct_options"], ["The correct answer"])
+        self.assertTrue(review["mcq_responses"][0]["is_correct"])
 
 
 if __name__ == "__main__":

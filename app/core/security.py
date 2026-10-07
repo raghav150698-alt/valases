@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -21,6 +23,20 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
+
+
+def hash_generated_secret(secret: str) -> str:
+    """Hash a server-generated high-entropy secret without a costly password KDF."""
+    key = get_settings().jwt_secret_key.encode("utf-8")
+    digest = hmac.new(key, secret.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"hmac_sha256${digest}"
+
+
+def verify_generated_secret(secret: str, hashed_secret: str) -> bool:
+    if not str(hashed_secret or "").startswith("hmac_sha256$"):
+        # Invitations created before this optimization remain valid.
+        return verify_password(secret, hashed_secret)
+    return hmac.compare_digest(hash_generated_secret(secret), hashed_secret)
 
 
 def create_access_token(subject: str, role: str) -> str:

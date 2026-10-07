@@ -53,7 +53,8 @@ from app.schemas import (
 )
 from app.services.notifications import send_email
 from app.services.account_rules import sync_existing_accounts
-from app.services.organization_branding import normalize_organization_logo
+from app.services.default_assessments import ensure_provider_default_assessments
+from app.services.organization_branding import normalize_organization_logo, organization_logo_url
 from app.services.supabase_auth import ensure_supabase_user
 from app.core.config import get_settings
 
@@ -71,6 +72,11 @@ class AdminCompanyCreate(BaseModel):
     business_name: str = Field(min_length=2, max_length=200)
     email: EmailStr
     password: str = Field(min_length=12, max_length=128)
+    logo_data_url: str = Field(default="", max_length=800000)
+
+
+class AdminCompanyProfileUpdate(BaseModel):
+    company_name: str = Field(min_length=2, max_length=200)
     logo_data_url: str = Field(default="", max_length=800000)
 
 
@@ -374,7 +380,9 @@ def _create_company_account(
         provider.id,
         {"email": email, "company": company_name, "owner_user_id": user.id},
     )
-    db.commit()
+    # Every employer receives the current Valases assessment library at
+    # provisioning time. Employer-created assessments remain provider-owned.
+    ensure_provider_default_assessments(db, provider)
     return {
         "user_id": user.id,
         "provider_id": provider.id,
@@ -439,7 +447,9 @@ def admin_workspace_companies(
     ).all()
     items = []
     for provider, owner in rows:
-        if needle and needle not in f"{provider.display_name} {owner.full_name} {owner.email}".lower():
+        organization = _organization_for_owner(db, owner)
+        company_name = organization.name if organization else provider.display_name
+        if needle and needle not in f"{company_name} {owner.full_name} {owner.email}".lower():
             continue
         issued_count = int(db.scalar(select(func.count(AssessmentIssue.id)).where(AssessmentIssue.issuer_user_id == owner.id)) or 0)
         completed_count = int(
@@ -452,11 +462,11 @@ def admin_workspace_companies(
             or 0
         )
         billing = db.scalar(select(ProviderBillingAccount).where(ProviderBillingAccount.provider_id == provider.id))
-        organization = _organization_for_owner(db, owner)
         items.append({
             "provider_id": provider.id,
             "organization_id": organization.id if organization else None,
-            "company_name": provider.display_name,
+            "company_name": company_name,
+            "logo_url": organization_logo_url(organization.settings_json) if organization else "",
             "owner_user_id": owner.id,
             "owner_name": owner.full_name,
             "owner_email": owner.email,
@@ -949,7 +959,9 @@ def admin_workspace_users(
         account_state = str(user.account_state or "active")
         if state != "all" and account_state != state:
             continue
-        if needle and needle not in f"{user.full_name} {user.email} {provider.display_name if provider else ''}".lower():
+        organization = _organization_for_owner(db, user) if provider else None
+        company_name = organization.name if organization else (provider.display_name if provider else "Valases")
+        if needle and needle not in f"{user.full_name} {user.email} {company_name}".lower():
             continue
         issued_count = int(db.scalar(select(func.count(AssessmentIssue.id)).where(AssessmentIssue.issuer_user_id == user.id)) or 0)
         items.append({
@@ -957,7 +969,7 @@ def admin_workspace_users(
             "full_name": user.full_name,
             "email": user.email,
             "role": user.role.value,
-            "company_name": provider.display_name if provider else "Valases",
+            "company_name": company_name,
             "provider_id": provider.id if provider else None,
             "is_active": bool(user.is_active),
             "account_state": account_state,
@@ -999,6 +1011,7 @@ def admin_workspace_usage(
     rows = db.execute(select(ProviderProfile, User).join(User, User.id == ProviderProfile.user_id)).all()
     items = []
     for provider, owner in rows:
+        organization = _organization_for_owner(db, owner)
         issued = int(db.scalar(select(func.count(AssessmentIssue.id)).where(AssessmentIssue.issuer_user_id == owner.id, AssessmentIssue.issued_at >= since)) or 0)
         completed = int(db.scalar(select(func.count(AssessmentIssue.id)).where(AssessmentIssue.issuer_user_id == owner.id, AssessmentIssue.completed_at >= since)) or 0)
         candidates = int(db.scalar(select(func.count(func.distinct(AssessmentIssue.candidate_email))).where(AssessmentIssue.issuer_user_id == owner.id, AssessmentIssue.issued_at >= since)) or 0)
@@ -1012,7 +1025,7 @@ def admin_workspace_usage(
         )
         items.append({
             "provider_id": provider.id,
-            "company_name": provider.display_name,
+            "company_name": organization.name if organization else provider.display_name,
             "owner_email": owner.email,
             "issued": issued,
             "completed": completed,
@@ -1022,6 +1035,67 @@ def admin_workspace_usage(
         })
     items.sort(key=lambda item: item["issued"], reverse=True)
     return {"days": days, "items": items}
+
+
+@router.put("/workspace/companies/{provider_id}/profile")
+def admin_workspace_update_company_profile(
+    provider_id: int,
+    payload: AdminCompanyProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    provider = db.get(ProviderProfile, provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Company not found.")
+    owner = db.get(User, provider.user_id)
+    if not owner:
+        raise HTTPException(status_code=404, detail="Company owner not found.")
+    organization = _organization_for_owner(db, owner)
+    if not organization:
+        organization = _ensure_company_organization(
+            db,
+            provider=provider,
+            owner=owner,
+            actor_user_id=current_user.id,
+        )
+
+    company_name = payload.company_name.strip()
+    previous_name = organization.name
+    provider.display_name = company_name
+    organization.name = company_name
+    logo = normalize_organization_logo(payload.logo_data_url)
+    if logo:
+        settings_json = dict(organization.settings_json or {})
+        settings_json["branding"] = {
+            **dict(settings_json.get("branding") or {}),
+            "logo_data_url": logo,
+        }
+        organization.settings_json = settings_json
+    _audit(
+        db,
+        current_user.id,
+        "company_profile_updated",
+        "provider",
+        provider.id,
+        {"previous_name": previous_name, "company_name": company_name, "logo_changed": bool(logo)},
+    )
+    db.add(
+        OrganizationAuditEvent(
+            organization_id=organization.id,
+            actor_user_id=current_user.id,
+            action="organization_profile_updated_by_platform_admin",
+            target_type="organization",
+            target_id=organization.id,
+            details_json={"previous_name": previous_name, "company_name": company_name, "logo_changed": bool(logo)},
+        ),
+    )
+    db.commit()
+    return {
+        "provider_id": provider.id,
+        "organization_id": organization.id,
+        "company_name": organization.name,
+        "logo_url": organization_logo_url(organization.settings_json),
+    }
 
 
 @router.put("/workspace/companies/{provider_id}/billing")

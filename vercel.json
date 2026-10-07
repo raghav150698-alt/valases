@@ -1,15 +1,26 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "version": 2,
-  "buildCommand": "npx --yes pnpm@10.15.1 --dir app/web_assessment_react install --frozen-lockfile && npm --prefix app/web_assessment_react run build",
+  "buildCommand": "npx --yes pnpm@10.15.1 --dir app/web_assessment_react install --frozen-lockfile && npm --prefix app/web_assessment_react run build && node app/web_assessment_react/scripts/prepare-vercel-static.mjs",
   "functions": {
-    "api/index.py": {
-      "includeFiles": "app/web_assessment_react/dist/**"
+    "api/**/*.py": {
+      "excludeFiles": "{app/web/**,app/web_assessment_react/**,public/**}"
     }
   },
-  "routes": [
-    { "src": "/assets/(.*)", "dest": "/api/index" },
-    { "src": "/media/(.*)", "dest": "/api/index" },
-    { "src": "/(.*)", "dest": "/api/index" }
+  "crons": [
+    { "path": "/api/admin/outreach/cron/send", "schedule": "0 15 * * *" }
+  ],
+  "redirects": [
+    { "source": "/", "destination": "/assessment/", "permanent": false },
+    { "source": "/assessment", "destination": "/assessment/", "permanent": false }
+  ],
+  "headers": [
+    {
+      "source": "/assessment/assets/:path*",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    },
+    {
+      "source": "/assessment/index.html",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }]
+    }
   ]
 }

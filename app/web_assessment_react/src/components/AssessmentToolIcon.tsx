@@ -1,4 +1,4 @@
-import { BookOpenCheck } from "lucide-react";
+import { BookOpenCheck, Building2, FileUser } from "lucide-react";
 
 type AssessmentToolIconProps = {
   assessmentType?: string;
@@ -25,7 +25,8 @@ export function AssessmentToolIcon(props: AssessmentToolIconProps) {
     return <span className={className} aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a4 4 0 0 0-5-5L12 3.6 9.6 6 7.3 3.7a4 4 0 0 0 5 5l-7.8 7.8a2.1 2.1 0 1 0 3 3l7.8-7.8a4 4 0 0 0 5-5L17 10l-2.4-2.4 2.3-2.3Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg></span>;
   }
   if (kind === "tax-1040" || kind === "tax-1120") {
-    return <span className={className} role="img" aria-label={kind === "tax-1040" ? "1040 Individual Tax" : "1120 Corporate Tax"}><span>{kind === "tax-1040" ? "1040" : "1120"}</span></span>;
+    const TaxIcon = kind === "tax-1040" ? FileUser : Building2;
+    return <span className={className} role="img" aria-label={kind === "tax-1040" ? "1040 Individual Tax" : "1120 Corporate Tax"}><TaxIcon aria-hidden="true" /><span>{kind === "tax-1040" ? "1040" : "1120"}</span></span>;
   }
   if (kind === "ledgebook") {
     return <span className={className} role="img" aria-label="LedgeBook"><BookOpenCheck aria-hidden="true" /></span>;

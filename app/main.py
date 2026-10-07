@@ -1,4 +1,5 @@
 from pathlib import Path
+from hashlib import sha256
 import json
 import logging
 import time
@@ -14,8 +15,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.ops_metrics import ops_metrics
-from app.core.rate_limit import InMemoryRateLimiter, LimitRule
+from app.core.rate_limit import LimitRule, ResilientRateLimiter
 from app.db.init_db import init_db, verify_database_schema
+from app.services.analytics import create_clickhouse_analytics, normalized_analytics_route
 
 settings = get_settings()
 app = FastAPI(
@@ -34,7 +36,21 @@ ASSETS_DIR = WEB_DIR / "assets"
 ASSESSMENT_WEB_DIST_DIR = Path(__file__).resolve().parent / "web_assessment_react" / "dist"
 MEDIA_DIR = Path(settings.resolved_media_dir)
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-rate_limiter = InMemoryRateLimiter()
+rate_limiter = ResilientRateLimiter(
+    redis_url=settings.redis_url,
+    enabled=settings.redis_rate_limit_enabled,
+    key_prefix=settings.redis_key_prefix,
+)
+analytics = create_clickhouse_analytics(settings)
+
+
+def _api_route_path(request_path: str) -> str:
+    """Return the logical API path for both local and /api-prefixed deployments."""
+    if request_path == "/api":
+        return "/"
+    if request_path.startswith("/api/"):
+        return request_path[4:]
+    return request_path
 
 
 def _database_error_code(exc: Exception) -> str:
@@ -69,7 +85,8 @@ async def apply_security_headers(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or uuid4().hex
     request.state.request_id = request_id
     method = request.method
-    path = request.url.path or "/"
+    request_path = request.url.path or "/"
+    path = _api_route_path(request_path)
     status_code = 500
     if startup_configuration_errors and path != "/health":
         return JSONResponse(
@@ -90,14 +107,15 @@ async def apply_security_headers(request: Request, call_next):
         status_code = int(response.status_code)
     except Exception:
         elapsed_ms = (time.perf_counter() - started_at) * 1000.0
-        ops_metrics.record(route=path, status_code=status_code, latency_ms=elapsed_ms)
+        safe_path = normalized_analytics_route(None, path)
+        ops_metrics.record(route=safe_path, status_code=status_code, latency_ms=elapsed_ms)
         request_logger.exception(
             "request_error",
             extra={
                 "request_log": {
                     "request_id": request_id,
                     "method": method,
-                    "path": path,
+                    "path": safe_path,
                     "status_code": status_code,
                     "duration_ms": round(elapsed_ms, 2),
                 },
@@ -105,14 +123,23 @@ async def apply_security_headers(request: Request, call_next):
         )
         raise
     elapsed_ms = (time.perf_counter() - started_at) * 1000.0
-    ops_metrics.record(route=path, status_code=status_code, latency_ms=elapsed_ms)
+    route_template = getattr(request.scope.get("route"), "path", None)
+    safe_path = normalized_analytics_route(route_template, path)
+    ops_metrics.record(route=safe_path, status_code=status_code, latency_ms=elapsed_ms)
+    analytics.record_request(
+        method=method,
+        route=safe_path,
+        status_code=status_code,
+        duration_ms=elapsed_ms,
+        deployment_region=settings.resolved_deployment_region,
+    )
     if settings.ops_enable_request_logs:
         request_logger.info(
             json.dumps(
                 {
                     "request_id": request_id,
                     "method": method,
-                    "path": path,
+                    "path": safe_path,
                     "status_code": status_code,
                     "duration_ms": round(elapsed_ms, 2),
                 },
@@ -126,7 +153,7 @@ async def apply_security_headers(request: Request, call_next):
                     "event": "slow_request",
                     "request_id": request_id,
                     "method": method,
-                    "path": path,
+                    "path": safe_path,
                     "status_code": status_code,
                     "duration_ms": round(elapsed_ms, 2),
                     "threshold_ms": int(settings.ops_slow_request_ms),
@@ -188,7 +215,8 @@ async def enforce_basic_rate_limits(request: Request, call_next):
             return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header"})
     if not settings.rate_limit_enabled:
         return await call_next(request)
-    path = request.url.path or "/"
+    request_path = request.url.path or "/"
+    path = _api_route_path(request_path)
     if (
         path.startswith("/assets/")
         or path.startswith("/media/")
@@ -200,18 +228,77 @@ async def enforce_basic_rate_limits(request: Request, call_next):
         client_ip = forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
     else:
         client_ip = request.client.host if request.client else "unknown"
+    candidate_login_route = (
+        path == "/exams/issued/login"
+        or path == "/exams/issued/key-login"
+        or (path.startswith("/exams/issued/key/") and path.endswith("/login"))
+    )
+    candidate_session_route = path in {
+        "/exams/issued/me",
+        "/exams/issued/autosave",
+        "/exams/issued/consent",
+        "/exams/issued/proctor-event",
+        "/exams/issued/submit",
+        "/exams/issued/language-response-audio",
+        "/exams/issued/review-clips",
+    }
     auth_route = (
         path.startswith("/auth/")
         or path.startswith("/config/firebase")
-        or path == "/exams/issued/login"
-        or (path.startswith("/exams/issued/key/") and path.endswith("/login"))
+        or candidate_login_route
     )
+    if candidate_login_route or candidate_session_route:
+        # Many legitimate candidates can share one corporate, campus, testing
+        # centre, or carrier NAT address. Keep a high shared-IP ceiling, then
+        # enforce the strict limit against the invitation/session credential.
+        ip_allowed, ip_retry_after = await rate_limiter.allow(
+            f"{client_ip}:candidate-ip",
+            LimitRule(
+                max_requests=settings.rate_limit_candidate_ip_requests_per_minute,
+                window_seconds=60,
+            ),
+        )
+        if not ip_allowed:
+            req_id = request.headers.get("x-request-id") or uuid4().hex
+            return Response(
+                content='{"detail":"Too many requests"}',
+                status_code=429,
+                media_type="application/json",
+                headers={"Retry-After": str(ip_retry_after), "X-Request-ID": req_id},
+            )
+        # The current login endpoint keeps the access key in the request body so
+        # it cannot leak through proxy/access-log URLs. Its shared-IP ceiling is
+        # intentionally high for campuses and recruitment drives. The legacy URL
+        # endpoint retains a strict per-invitation-path limiter during migration.
+        if path == "/exams/issued/key-login":
+            return await call_next(request)
+        credential = path if candidate_login_route else request.headers.get("authorization", "")
+        credential_digest = sha256(credential.encode("utf-8")).hexdigest()
+        credential_scope = "candidate-login" if candidate_login_route else "candidate-session"
+        credential_limit = (
+            settings.rate_limit_auth_requests_per_minute
+            if candidate_login_route
+            else settings.rate_limit_requests_per_minute
+        )
+        allowed, retry_after = await rate_limiter.allow(
+            f"{credential_scope}:{credential_digest}",
+            LimitRule(max_requests=credential_limit, window_seconds=60),
+        )
+        if not allowed:
+            req_id = request.headers.get("x-request-id") or uuid4().hex
+            return Response(
+                content='{"detail":"Too many requests"}',
+                status_code=429,
+                media_type="application/json",
+                headers={"Retry-After": str(retry_after), "X-Request-ID": req_id},
+            )
+        return await call_next(request)
     rule = LimitRule(
         max_requests=settings.rate_limit_auth_requests_per_minute if auth_route else settings.rate_limit_requests_per_minute,
         window_seconds=60,
     )
     key = f"{client_ip}:{'auth' if auth_route else 'api'}"
-    allowed, retry_after = rate_limiter.allow(key, rule)
+    allowed, retry_after = await rate_limiter.allow(key, rule)
     if not allowed:
         req_id = request.headers.get("x-request-id") or uuid4().hex
         return Response(
@@ -264,6 +351,20 @@ def on_startup() -> None:
             raise
 
 
+@app.on_event("startup")
+async def start_optional_infrastructure() -> None:
+    analytics.start()
+    if settings.redis_rate_limit_enabled:
+        await rate_limiter.ping()
+
+
+@app.on_event("shutdown")
+async def stop_optional_infrastructure() -> None:
+    await analytics.stop()
+    await rate_limiter.close()
+
+
+@app.get("/api/health", include_in_schema=False)
 @app.get("/health")
 def health():
     try:
@@ -276,6 +377,8 @@ def health():
         "database": "not_checked" if configuration_blocked else ("unavailable" if database_startup_failed else "ready"),
         "configuration": "invalid" if configuration_blocked else "ready",
         "region": region,
+        "redis": rate_limiter.status(),
+        "clickhouse": analytics.status()["status"],
     }
     if configuration_blocked:
         payload["configuration_errors"] = startup_configuration_errors
@@ -307,10 +410,13 @@ def apple_touch_icon():
     return Response(status_code=204)
 
 
+@app.get("/api/config/firebase", include_in_schema=False)
 @app.get("/config/firebase")
 def firebase_config():
     return {
         "auth_mode": settings.auth_mode,
+        "allowSelfServiceSignup": bool(settings.allow_self_service_signup),
+        "allowEmployerSelfServiceSignup": bool(settings.auth_mode.lower() == "supabase" and settings.allow_employer_self_service_signup),
         "apiKey": settings.firebase_web_api_key,
         "authDomain": settings.firebase_auth_domain,
         "projectId": settings.firebase_project_id,
@@ -323,7 +429,12 @@ def firebase_config():
 
 
 app.include_router(api_router)
-app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
+app.include_router(api_router, prefix="/api", include_in_schema=False)
+if ASSETS_DIR.exists():
+    # Local development keeps the legacy static shell available. Vercel omits
+    # this directory from the function bundle and serves the React build from
+    # its CDN output instead.
+    app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 

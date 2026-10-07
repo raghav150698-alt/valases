@@ -51,6 +51,7 @@ type Company = {
   provider_id: number;
   organization_id: number | null;
   company_name: string;
+  logo_url: string;
   owner_user_id: number;
   owner_name: string;
   owner_email: string;
@@ -239,6 +240,9 @@ export function AdminConsole() {
   const [createdCompany, setCreatedCompany] = useState<{ business_name: string; email: string } | null>(null);
   const [newCompany, setNewCompany] = useState({ business_name: "", email: "", password: "", logo_data_url: "" });
   const [companyLogoError, setCompanyLogoError] = useState("");
+  const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+  const [companyProfileForm, setCompanyProfileForm] = useState({ company_name: "", logo_data_url: "" });
+  const [companyProfileLogoError, setCompanyProfileLogoError] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null);
   const [billingForm, setBillingForm] = useState<Billing>(emptyBilling);
   const [ssoForm, setSsoForm] = useState(emptySsoOperation);
@@ -371,6 +375,25 @@ export function AdminConsole() {
     },
   });
 
+  const saveCompanyProfile = useMutation({
+    mutationFn: async () => {
+      if (!editingCompany) throw new Error("Select a company.");
+      return (await api.put(`/admin/workspace/companies/${editingCompany.provider_id}/profile`, companyProfileForm)).data;
+    },
+    onSuccess: async () => {
+      setEditingCompany(null);
+      setCompanyProfileForm({ company_name: "", logo_data_url: "" });
+      setCompanyProfileLogoError("");
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["admin-companies"] }),
+        qc.invalidateQueries({ queryKey: ["admin-users"] }),
+        qc.invalidateQueries({ queryKey: ["admin-usage"] }),
+        qc.invalidateQueries({ queryKey: ["admin-sso-connections"] }),
+        qc.invalidateQueries({ queryKey: ["admin-audit-events"] }),
+      ]);
+    },
+  });
+
   const saveBilling = useMutation({
     mutationFn: async () => {
       if (!selectedProviderId) throw new Error("Select a company.");
@@ -482,7 +505,7 @@ export function AdminConsole() {
   return (
     <section className="admin-console">
       <aside className="admin-rail">
-        <div className="admin-brand"><BrandLogo className="workspace-brand-logo" /><div><strong>Valases</strong><small>Administration</small></div></div>
+        <div className="admin-brand"><BrandLogo className="workspace-brand-logo" /></div>
         <nav aria-label="Administration">
           {(["overview", "companies", "users", "usage", "billing", "applications", "sso", "governance", "requests", "audit", "settings"] as AdminTab[]).map((item) => (
             <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item === "sso" ? "SSO" : item[0].toUpperCase() + item.slice(1)}</button>
@@ -529,7 +552,7 @@ export function AdminConsole() {
             <div className="admin-toolbar"><input aria-label="Search companies" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search company, owner, or email" /><span>{companyRows.length} companies</span></div>
             <div className="admin-table companies-table">
               <div className="admin-table-head"><span>Company</span><span>Owner</span><span>Status</span><span>Usage</span><span>Plan</span><span>Action</span></div>
-              {companyRows.map((company) => <div className="admin-table-row" key={company.provider_id}><div><strong>{company.company_name}</strong><small>Added {formatDate(company.created_at)}</small></div><div><strong>{company.owner_name}</strong><small>{company.owner_email}</small></div><span className={`admin-state state-${company.account_state}`}>{company.account_state}</span><span>{company.completed_count} / {company.issued_count} completed</span><div><strong>{company.billing.plan_code}</strong><small>{formatMoney(company.billing.monthly_price, company.billing.currency)} monthly</small></div><button type="button" onClick={() => { setSelectedProviderId(company.provider_id); setTab("billing"); }}>Manage billing</button></div>)}
+              {companyRows.map((company) => <div className="admin-table-row" key={company.provider_id}><div><strong>{company.company_name}</strong><small>Added {formatDate(company.created_at)}</small></div><div><strong>{company.owner_name}</strong><small>{company.owner_email}</small></div><span className={`admin-state state-${company.account_state}`}>{company.account_state}</span><span>{company.completed_count} / {company.issued_count} completed</span><div><strong>{company.billing.plan_code}</strong><small>{formatMoney(company.billing.monthly_price, company.billing.currency)} monthly</small></div><div className="admin-company-actions"><button type="button" onClick={() => { setEditingCompany(company); setCompanyProfileForm({ company_name: company.company_name, logo_data_url: "" }); setCompanyProfileLogoError(""); }}>Edit profile</button><button type="button" onClick={() => { setSelectedProviderId(company.provider_id); setTab("billing"); }}>Billing</button></div></div>)}
             </div>
           </section>
         )}
@@ -777,6 +800,42 @@ export function AdminConsole() {
                 <div className="admin-form-actions"><button type="button" onClick={() => setShowNewCompany(false)}>Cancel</button><button className="admin-primary" type="submit" disabled={createCompany.isPending || !newCompany.logo_data_url}>{createCompany.isPending ? "Creating..." : "Create company"}</button></div>
               </form>
             )}
+          </section>
+        </div>
+      )}
+
+      {editingCompany && (
+        <div className="admin-modal-backdrop" role="presentation" onMouseDown={() => setEditingCompany(null)}>
+          <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="edit-company-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div><h2 id="edit-company-title">Edit company profile</h2><p>Changes are synchronized with the company workspace immediately.</p></div>
+              <button type="button" aria-label="Close" onClick={() => setEditingCompany(null)}><X size={17} /></button>
+            </header>
+            <form className="admin-user-form" onSubmit={(event) => { event.preventDefault(); saveCompanyProfile.mutate(); }}>
+              <label>Company name<input required minLength={2} maxLength={200} autoFocus value={companyProfileForm.company_name} onChange={(event) => setCompanyProfileForm((value) => ({ ...value, company_name: event.target.value }))} /></label>
+              <label className="admin-company-logo-field">
+                Company logo <small>Optional. Leave unchanged to keep the existing logo.</small>
+                <span className="admin-company-logo-control">
+                  <span className="admin-company-logo-preview">{companyProfileForm.logo_data_url || editingCompany.logo_url ? <img src={companyProfileForm.logo_data_url || editingCompany.logo_url} alt="Company logo preview" /> : <span aria-hidden="true">+</span>}</span>
+                  <span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const logo_data_url = await readCompanyLogo(file);
+                      setCompanyProfileForm((value) => ({ ...value, logo_data_url }));
+                      setCompanyProfileLogoError("");
+                    } catch (reason) {
+                      setCompanyProfileForm((value) => ({ ...value, logo_data_url: "" }));
+                      setCompanyProfileLogoError(reason instanceof Error ? reason.message : "The logo could not be used.");
+                    }
+                  }} /><small>PNG, JPEG, or WebP. Maximum 256 KB.</small></span>
+                </span>
+              </label>
+              <label>Owner account<input value={editingCompany.owner_email} disabled /><small>Login email changes require a separate identity workflow.</small></label>
+              {companyProfileLogoError && <div className="admin-error">{companyProfileLogoError}</div>}
+              {saveCompanyProfile.isError && <div className="admin-error">{apiMessage(saveCompanyProfile.error, "The company profile could not be updated.")}</div>}
+              <div className="admin-form-actions"><button type="button" onClick={() => setEditingCompany(null)}>Cancel</button><button className="admin-primary" type="submit" disabled={saveCompanyProfile.isPending}>{saveCompanyProfile.isPending ? "Saving..." : "Save profile"}</button></div>
+            </form>
           </section>
         </div>
       )}

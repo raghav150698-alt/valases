@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CaseEvidenceDesk, type CaseDocument, type CaseMessage } from "./CaseEvidenceDesk";
+import { CaseWorkpaperWorkbench, type CaseWorkpaper } from "./CaseWorkpaperWorkbench";
 import "./TaxTool.css";
 
 type CorporateTaxPage = "overview" | "corporation" | "income" | "deductions" | "reconciliation" | "diagnostics" | "forms" | "review";
@@ -78,6 +79,7 @@ export type CorporateTaxCase = {
 };
 
 type CorporateTaxToolProps = {
+  workpaper?: CaseWorkpaper;
   title?: string;
   description?: string;
   instructions?: string;
@@ -348,7 +350,14 @@ function inputComplete(value: string) {
   return value.trim() !== "" && Number.isFinite(Number(value.replaceAll(",", "")));
 }
 
-export function CorporateTaxTool({
+export function CorporateTaxTool(props: CorporateTaxToolProps) {
+  if (props.workpaper) return <CaseWorkpaperWorkbench workpaper={props.workpaper} workspace="tax_1120" initialSubmission={props.initialSubmission} showSubmit={props.showSubmit}
+    onAutosave={submission => props.onAutosave?.(submission as unknown as CorporateTaxAssessmentSubmission)}
+    onSubmit={submission => props.onSubmit?.(submission as unknown as CorporateTaxAssessmentSubmission)} />;
+  return <LegacyCorporateTaxTool {...props} />;
+}
+
+function LegacyCorporateTaxTool({
   title = "1120 Corporate Tax",
   description = "Corporate return preparation and book-tax reconciliation",
   instructions = "Prepare Form 1120 from source documents, complete the tax reconciliation, and resolve supported diagnostics.",

@@ -1,0 +1,9 @@
+Source: AMI Meeting Corpus, AMI Consortium / University of Edinburgh
+https://groups.inf.ed.ac.uk/ami/corpus/
+Licence: Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+Changes: bounded excerpts of Mix-Headset meeting recordings, loudness
+normalisation and MP3 encoding. Original voices and speech timing are retained.
+Recordings are design-team role-play discussions. No endorsement is implied.
+Per-file source meeting and excerpt times: app/content/english_listening_bank.json.

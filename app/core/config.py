@@ -15,6 +15,30 @@ class Settings(BaseSettings):
     deployment_region: str = "tokyo"
     database_url: str = "sqlite:///./valases.db"
     database_tenant_rls_enabled: bool = False
+    database_pool_size: int = Field(default=10, ge=1, le=100)
+    database_max_overflow: int = Field(default=10, ge=0, le=100)
+    database_pool_timeout_seconds: int = Field(default=30, ge=1, le=120)
+    database_pool_recycle_seconds: int = Field(default=1800, ge=60, le=7200)
+    redis_url: str = ""
+    redis_rate_limit_enabled: bool = False
+    redis_key_prefix: str = "valases"
+    clickhouse_analytics_enabled: bool = False
+    clickhouse_url: str = "http://localhost:8123"
+    clickhouse_user: str = "default"
+    clickhouse_password: str = ""
+    clickhouse_database: str = "valases_analytics"
+    clickhouse_retention_days: int = 90
+    clickhouse_batch_size: int = 250
+    clickhouse_flush_interval_seconds: float = 2.0
+    clickhouse_queue_size: int = 10_000
+    product_event_capture_enabled: bool = True
+    product_event_pipeline_enabled: bool = False
+    product_event_stream: str = "valases:product-events:v1"
+    product_event_consumer_group: str = "clickhouse-analytics-v1"
+    product_event_stream_max_length: int = 100_000
+    product_event_batch_size: int = 200
+    product_event_poll_seconds: float = 1.0
+    analytics_id_hash_key: str = ""
     jwt_secret_key: str = "change_me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 120
@@ -22,6 +46,7 @@ class Settings(BaseSettings):
     enable_ai_review: bool = False
     allow_dev_role_override: bool = False
     allow_self_service_signup: bool = False
+    allow_employer_self_service_signup: bool = True  # confirmed work email via Supabase only
     enable_legacy_password_auth: bool = False
     enable_admin_recovery: bool = False
     enable_server_code_execution: bool = False
@@ -57,10 +82,10 @@ class Settings(BaseSettings):
     supabase_storage_signed_url_ttl_seconds: int = 3600
     billing_provider: str = "disabled"  # disabled | cashfree
     billing_plan_catalog_json: str = (
-        '{"launch":{"name":"Launch","monthly_amount_minor":99900,"currency":"INR",'
-        '"description":"Core hiring workspace with usage-based assessments"},'
-        '"growth":{"name":"Growth","monthly_amount_minor":499900,"currency":"INR",'
-        '"description":"Expanded team access, reporting, and integrations"}}'
+        '{"hire-core":{"name":"Hire Core","monthly_amount_minor":14900,"currency":"USD",'
+        '"description":"Monthly Hire plan. Assess activation and usage are agreed separately."},'
+        '"hire-growth":{"name":"Hire Growth","monthly_amount_minor":34900,"currency":"USD",'
+        '"description":"Monthly Hire plan with expanded access. Assess usage is agreed separately."}}'
     )
     billing_return_url: str = ""
     cashfree_app_id: str = ""
@@ -69,7 +94,7 @@ class Settings(BaseSettings):
     cashfree_api_version: str = "2025-01-01"
     integration_oauth_config_json: str = ""
     integration_token_encryption_key: str = ""
-    object_storage_backend: str = "s3"  # supabase | s3 | firebase | bunny | local | auto
+    object_storage_backend: str = "auto"  # supabase | s3 | firebase | bunny | local | auto
     aws_region: str = ""
     aws_s3_bucket_name: str = ""
     aws_access_key_id: str = ""
@@ -92,6 +117,15 @@ class Settings(BaseSettings):
     smtp_sender: str = "noreply@valases.com"
     smtp_sender_name: str = "Valases Assessments"
     smtp_reply_to: str = ""
+    outreach_enabled: bool = False
+    outreach_daily_send_limit: int = Field(default=15, ge=1, le=50)
+    outreach_cron_secret: str = ""
+    outreach_openai_api_key: str = ""
+    outreach_openai_model: str = "gpt-5-mini"
+    outreach_alert_email: str = ""
+    outreach_mailing_address: str = ""
+    outreach_booking_url: str = ""
+    outreach_webhook_secret: str = ""
     admin_emails: str = "admin@valases.com"
     identity_verify_enforce: bool = True
     identity_verify_timeout_seconds: int = 15
@@ -146,6 +180,7 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_requests_per_minute: int = 180
     rate_limit_auth_requests_per_minute: int = 35
+    rate_limit_candidate_ip_requests_per_minute: int = 6000
     max_request_body_bytes: int = 4_000_000
     max_proctor_evidence_bytes: int = 8_000_000
     ops_enable_request_logs: bool = True
@@ -340,6 +375,10 @@ class Settings(BaseSettings):
                 errors.append("BILLING_RETURN_URL or APP_BASE_URL must use HTTPS when billing is enabled")
         if not self.rate_limit_enabled:
             errors.append("RATE_LIMIT_ENABLED must be true in production")
+        if self.redis_rate_limit_enabled and not str(self.redis_url or "").startswith(("redis://", "rediss://")):
+            errors.append("REDIS_URL must use redis:// or rediss:// when Redis rate limiting is enabled")
+        if self.clickhouse_analytics_enabled and not str(self.clickhouse_url or "").startswith(("http://", "https://")):
+            errors.append("CLICKHOUSE_URL must use HTTP or HTTPS when ClickHouse analytics is enabled")
         if not self.admin_email_set:
             errors.append("ADMIN_EMAILS must contain at least one platform administrator")
         return errors

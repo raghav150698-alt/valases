@@ -17,6 +17,7 @@ _REQUIRED_PRODUCTION_TABLES = {
     "assessment_submissions",
     "assessment_proctor_review_labels",
     "assessment_templates",
+    "product_event_outbox",
     "proctor_sessions",
     "proctor_events",
     "audit_logs",

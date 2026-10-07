@@ -17,6 +17,8 @@ app/web_assessment_react/node_modules/
 app/web_assessment_react/.vite/
 app/web_assessment_react/dist/
 app/web_assessment_react/dist-candidate/
+.vercel-static/
+public/assessment/
 app/web_assessment_react/public/vendor/mediapipe/*
 _credivo_export_*/
 _credivo_export_path.txt
@@ -28,3 +30,19 @@ data/proctoring/*
 !data/proctoring/models/**
 .git-corrupt-backup/
 assessment_standalone/data/*.db
+.pilot-runs/
+scripts/product_fit_pilot.local.json
+
+.vercel
+.env*
+
+# Separate products and local publishing checkout
+valases_jobs/
+.publish/
+# Local tooling and generated training outputs
+.agents/
+skills-lock.json
+*.tsbuildinfo
+data/proctoring/models/proctor_vision_ultra/
+data/proctoring/models/supervised_external_video/
+data/proctoring/models/voice_overlap*/

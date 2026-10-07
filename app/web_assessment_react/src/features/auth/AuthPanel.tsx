@@ -2,6 +2,7 @@ import { useForm } from "react-hook-form";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { BrandLogo } from "../../components/BrandLogo";
 import { api } from "../../lib/api";
 import { useSessionStore } from "../../lib/sessionStore";
 import { supabase, supabaseConfigured } from "../../lib/supabase";
@@ -9,6 +10,11 @@ import { supabase, supabaseConfigured } from "../../lib/supabase";
 const schema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  full_name: z.string().optional(),
+  legal_name: z.string().optional(),
+  brand_name: z.string().optional(),
+  country: z.string().optional(),
+  website: z.string().optional(),
 });
 
 type Form = z.infer<typeof schema>;
@@ -16,6 +22,8 @@ type Form = z.infer<typeof schema>;
 type FirebaseConfigResponse = {
   apiKey?: string;
   auth_mode?: string;
+  allowSelfServiceSignup?: boolean;
+  allowEmployerSelfServiceSignup?: boolean;
 };
 
 type FirebasePasswordLoginResponse = {
@@ -69,8 +77,12 @@ export function AuthPanel() {
   const { register, handleSubmit, getValues, formState } = useForm<Form>({ resolver: zodResolver(schema) });
   const setSession = useSessionStore((s) => s.setSession);
   const [error, setError] = useState("");
+  const [signupNotice, setSignupNotice] = useState("");
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isSsoLoading, setIsSsoLoading] = useState(false);
+  const [authMode, setAuthMode] = useState("");
+  const [signupAllowed, setSignupAllowed] = useState(false);
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
 
   const completeSupabaseSession = async (accessToken: string) => {
     const context = await api.get("/auth/me/context", {
@@ -80,15 +92,24 @@ export function AuthPanel() {
   };
 
   useEffect(() => {
+    let active = true;
+    void api.get<FirebaseConfigResponse>("/config/firebase")
+      .then(({ data }) => {
+        if (!active) return;
+        setAuthMode(String(data.auth_mode || "").trim().toLowerCase());
+        setSignupAllowed(Boolean(data.allowSelfServiceSignup || data.allowEmployerSelfServiceSignup));
+      })
+      .catch(() => {
+        if (active) setError("Unable to load the authentication configuration.");
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     if (!supabaseConfigured || !supabase) return;
     let active = true;
     void (async () => {
       try {
-        const { data: authConfig } = await api.get<FirebaseConfigResponse>("/config/firebase");
-        if (String(authConfig?.auth_mode || "").trim().toLowerCase() === "dummy") {
-          await supabase.auth.signOut({ scope: "local" });
-          return;
-        }
         const { data, error: sessionError } = await supabase.auth.getSession();
         if (!active || sessionError || !data.session?.access_token) return;
         await completeSupabaseSession(data.session.access_token);
@@ -101,12 +122,48 @@ export function AuthPanel() {
 
   const onSubmit = async (values: Form) => {
     setError("");
+    setSignupNotice("");
     try {
       const { data: authConfig } = await api.get<FirebaseConfigResponse>("/config/firebase");
-      const authMode = String(authConfig?.auth_mode || "").trim().toLowerCase();
+      const configuredAuthMode = String(authConfig?.auth_mode || "").trim().toLowerCase();
 
-      if (authMode === "dummy") {
-        const { data } = await api.post("/auth/login", values);
+      if (isCreatingAccount) {
+        const fullName = String(values.full_name || "").trim();
+        if (fullName.length < 2) {
+          setError("Enter the employer or recruiter name.");
+          return;
+        }
+        const businessProfile = { legal_name: (values.legal_name || "").trim(), brand_name: (values.brand_name || "").trim(), country: (values.country || "").trim(), website: (values.website || "").trim() };
+        if (businessProfile.legal_name.length < 2 || businessProfile.brand_name.length < 2 || businessProfile.country.length < 2) throw new Error("Enter your legal business name, brand name and country.");
+        if (businessProfile.website && !/^https?:\/\//i.test(businessProfile.website)) throw new Error("Enter a website URL beginning with https:// or http://.");
+        if (configuredAuthMode === "supabase" && supabase) {
+          if (!authConfig.allowEmployerSelfServiceSignup) throw new Error("Employer self setup is not enabled.");
+          const emailDomain = values.email.trim().toLowerCase().split("@")[1];
+          if (["gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.in", "outlook.com", "hotmail.com", "live.com", "icloud.com", "aol.com", "proton.me", "protonmail.com", "mail.com"].includes(emailDomain)) throw new Error("Use your company-domain email to create a free workspace. Contact support if your business uses a personal email.");
+          if (values.password.length < 12) throw new Error("Use a password with at least 12 characters.");
+          const { data, error: signupError } = await supabase.auth.signUp({
+            email: values.email.trim(), password: values.password,
+            options: { data: { full_name: fullName, business_profile: businessProfile }, emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}` },
+          });
+          if (signupError) throw signupError;
+          if (data.session?.access_token) await completeSupabaseSession(data.session.access_token);
+          else {
+            setSignupNotice("Check your work email to confirm your account, then sign in. Mailbox confirmation is required before free workspace access.");
+            setIsCreatingAccount(false);
+          }
+          return;
+        }
+        await api.post("/auth/signup", {
+          email: values.email.trim(),
+          full_name: fullName,
+          password: values.password,
+          role: "provider",
+          business_profile: businessProfile,
+        });
+        const { data } = await api.post("/auth/login", {
+          email: values.email.trim(),
+          password: values.password,
+        });
         setSession(data.access_token, data.role);
         return;
       }
@@ -133,7 +190,7 @@ export function AuthPanel() {
         }
       }
 
-      if (authMode === "firebase") {
+      if (configuredAuthMode === "firebase") {
         const apiKey = String(authConfig?.apiKey || "").trim();
         if (!apiKey) throw new Error("Firebase login is enabled, but the web API key is missing.");
 
@@ -211,8 +268,8 @@ export function AuthPanel() {
   return (
     <section className="auth-panel">
       <div className="auth-panel-copy">
-        <span className="auth-context-label">Recruiter workspace</span>
-        <h1>Sign in to Valases</h1>
+        <BrandLogo className="auth-brand-logo" />
+        <h1>Sign in</h1>
         <p>Manage assessments, candidate invitations, and completed submissions.</p>
         <div className="auth-trust-row">
           <div className="auth-trust-item">
@@ -229,25 +286,55 @@ export function AuthPanel() {
       <div className="auth-panel-card">
         <div className="auth-card-head">
           <div>
-            <strong>Sign in</strong>
-            <small>Use your work account</small>
+            <strong>{isCreatingAccount ? "Create employer account" : "Sign in"}</strong>
+            <small>{isCreatingAccount ? "Set up your free workspace with a work email" : "Use your work account"}</small>
           </div>
         </div>
         <form onSubmit={handleSubmit(onSubmit)} className="auth-form-grid">
+          {isCreatingAccount && <label className="field-stack">
+            <span>Administrator full name</span>
+            <input required maxLength={200} autoComplete="name" placeholder="Your full name" {...register("full_name")} />
+          </label>}
+          {isCreatingAccount && <>
+            <label className="field-stack"><span>Legal / registered business name</span><input required minLength={2} maxLength={240} placeholder="Green House Pvt Ltd" {...register("legal_name")} /><small>The name on your business registration, if registered.</small></label>
+            <label className="field-stack"><span>Brand / trading name</span><input required minLength={2} maxLength={200} autoComplete="organization" placeholder="Uncut Trees" {...register("brand_name")} /><small>Shown to your hiring team and candidates. It can match your legal name.</small></label>
+            <label className="field-stack"><span>Business country</span><input required minLength={2} maxLength={80} autoComplete="country-name" placeholder="India" {...register("country")} /></label>
+            <label className="field-stack"><span>Business website · optional</span><input type="url" maxLength={500} placeholder="https://uncuttrees.com" {...register("website")} /></label>
+            <p className="auth-input-hint">Confirm your company email to start free. Business registration checks, including GSTIN, are separate and optional.</p>
+          </>}
           <label className="field-stack">
-            <span>Email</span>
-            <input placeholder="recruiter@company.com" {...register("email")} />
+            <span>{isCreatingAccount ? "Administrator work email" : "Email"}</span>
+            <input type="email" autoComplete="email" placeholder="admin@uncuttrees.com" {...register("email")} />
           </label>
           <label className="field-stack">
             <span>Password</span>
             <input placeholder="Enter password" type="password" {...register("password")} />
           </label>
-          <div className="auth-input-hint">{supabaseConfigured ? "Sign in securely with your Supabase workspace account." : "Supabase is not configured yet. Dummy auth is active temporarily."}</div>
+          <div className="auth-input-hint">
+            {supabaseConfigured
+              ? "Sign in securely with your organization account."
+              : "Sign in with your Valases employer account."}
+          </div>
           <div className="auth-actions">
-            <button type="submit" disabled={formState.isSubmitting}>
-              {formState.isSubmitting ? "Signing In..." : "Sign In"}
+            <button className="auth-primary-btn" type="submit" disabled={formState.isSubmitting}>
+              {formState.isSubmitting
+                ? (isCreatingAccount ? "Creating account..." : "Signing in...")
+                : (isCreatingAccount ? "Create employer account" : "Sign in")}
             </button>
           </div>
+          {signupAllowed && ["legacy", "supabase"].includes(authMode) && <button
+            className="auth-google-btn"
+            type="button"
+            onClick={() => {
+              setError("");
+              setSignupNotice("");
+              setIsCreatingAccount((current) => !current);
+            }}
+            disabled={formState.isSubmitting}
+          >
+            {isCreatingAccount ? "Already have an account? Sign in" : "Create your free employer account"}
+          </button>}
+          {signupNotice && <p role="status">{signupNotice}</p>}
           {supabaseConfigured && <>
             <div className="auth-divider"><span>or</span></div>
             <button className="auth-google-btn" type="button" onClick={() => void signInWithGoogle()} disabled={isGoogleLoading || formState.isSubmitting}>

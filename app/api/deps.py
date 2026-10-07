@@ -202,16 +202,19 @@ def get_current_user(
         if db.scalar(select(BannedIdentity.id).where(BannedIdentity.phone_number == phone_number)):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account is banned.")
     if not user:
+        from app.services.business_onboarding import verified_business_email, employer_signup_rejection
+        self_service_employer = verified_business_email(payload, settings) and role_claim not in {"student", "admin"}
         configured_admin = is_configured_admin_email(email_norm, settings.admin_email_set)
-        if not configured_admin and not settings.allow_self_service_signup:
+        if not configured_admin and not settings.allow_self_service_signup and not self_service_employer:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="This account has not been provisioned. Contact your Valases administrator.",
+                detail=employer_signup_rejection(payload, settings),
             )
         role = resolve_identity_role(
             email=email_norm,
             role_claim=role_claim,
             admin_emails=settings.admin_email_set,
+            default_role=UserRole.PROVIDER if self_service_employer else UserRole.STUDENT,
         )
         user = User(
             email=email_norm or f"{firebase_uid}@firebase.local",
@@ -229,8 +232,11 @@ def get_current_user(
             if not approval:
                 approval = UserApproval(user_id=user.id)
                 db.add(approval)
-            approval.status = ApprovalStatus.APPROVED if configured_admin else ApprovalStatus.PENDING
+            approval.status = ApprovalStatus.APPROVED if configured_admin or self_service_employer else ApprovalStatus.PENDING
             approval.rejection_reason = None
+            if self_service_employer:
+                from app.services.business_onboarding import bootstrap_business_profile
+                bootstrap_business_profile(db, user, payload)
             db.commit()
             db.refresh(user)
             return user

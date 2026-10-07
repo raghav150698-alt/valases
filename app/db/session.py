@@ -8,6 +8,7 @@ from app.core.config import get_settings
 settings = get_settings()
 
 database_url = settings.resolved_database_url
+engine_options = {"pool_pre_ping": True}
 if database_url.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
 else:
@@ -15,7 +16,16 @@ else:
     # statements across pooled connections.
     parsed_url = urlparse(database_url)
     connect_args = {"prepare_threshold": None} if parsed_url.port == 6543 else {}
-engine = create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
+    engine_options.update(
+        {
+            "pool_size": settings.database_pool_size,
+            "max_overflow": settings.database_max_overflow,
+            "pool_timeout": settings.database_pool_timeout_seconds,
+            "pool_recycle": settings.database_pool_recycle_seconds,
+            "pool_use_lifo": True,
+        },
+    )
+engine = create_engine(database_url, connect_args=connect_args, **engine_options)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

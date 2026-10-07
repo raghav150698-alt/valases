@@ -324,6 +324,10 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
         role=payload.role,
     )
     db.add(user)
+    if payload.role == UserRole.PROVIDER and payload.business_profile:
+        db.flush()
+        from app.services.business_onboarding import bootstrap_business_profile
+        bootstrap_business_profile(db, user, {'user_metadata': {'business_profile': payload.business_profile}})
     db.commit()
     db.refresh(user)
     return user
@@ -437,16 +441,19 @@ def me_context(
         role_from_claim = UserRole(role_claim)
     if not current_user:
         _assert_not_banned_identity(db, email=email_norm, phone_number=phone_number)
+        from app.services.business_onboarding import verified_business_email, employer_signup_rejection
+        self_service_employer = verified_business_email(token_payload, settings) and role_claim not in {"student", "admin"}
         configured_admin = is_configured_admin_email(email_norm, settings.admin_email_set)
-        if not configured_admin and not settings.allow_self_service_signup:
+        if not configured_admin and not settings.allow_self_service_signup and not self_service_employer:
             raise HTTPException(
                 status_code=403,
-                detail="This account has not been provisioned. Contact your Valases administrator.",
+                detail=employer_signup_rejection(token_payload, settings),
             )
         desired_role = resolve_identity_role(
             email=email_norm,
             role_claim=role_from_claim.value if role_from_claim else None,
             admin_emails=settings.admin_email_set,
+            default_role=UserRole.PROVIDER if self_service_employer else UserRole.STUDENT,
         )
         if desired_role == UserRole.ADMIN:
             current_user = User(
@@ -484,8 +491,11 @@ def me_context(
             if not approval:
                 approval = UserApproval(user_id=current_user.id)
                 db.add(approval)
-            approval.status = ApprovalStatus.PENDING
+            approval.status = ApprovalStatus.APPROVED if self_service_employer else ApprovalStatus.PENDING
             approval.rejection_reason = None
+            if self_service_employer:
+                from app.services.business_onboarding import bootstrap_business_profile
+                bootstrap_business_profile(db, current_user, token_payload)
             db.commit()
             db.refresh(current_user)
             _safe_sync_claims(firebase_uid, current_user, approval.status)

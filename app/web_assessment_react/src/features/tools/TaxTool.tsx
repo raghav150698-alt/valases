@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CaseEvidenceDesk, type CaseDocument, type CaseMessage } from "./CaseEvidenceDesk";
+import { CaseWorkpaperWorkbench, type CaseWorkpaper } from "./CaseWorkpaperWorkbench";
 import "./TaxTool.css";
 
 type TaxPage = "overview" | "taxpayer" | "income" | "business" | "adjustments" | "diagnostics" | "forms" | "review";
@@ -59,6 +60,7 @@ export type TaxCase = {
 };
 
 type TaxToolProps = {
+  workpaper?: CaseWorkpaper;
   title?: string;
   description?: string;
   instructions?: string;
@@ -289,7 +291,14 @@ function inputComplete(value: string) {
   return value.trim() !== "" && Number.isFinite(Number(value));
 }
 
-export function TaxTool({
+export function TaxTool(props: TaxToolProps) {
+  if (props.workpaper) return <CaseWorkpaperWorkbench workpaper={props.workpaper} workspace="tax" initialSubmission={props.initialSubmission} showSubmit={props.showSubmit}
+    onAutosave={submission => props.onAutosave?.(submission as unknown as TaxAssessmentSubmission)}
+    onSubmit={submission => props.onSubmit?.(submission as unknown as TaxAssessmentSubmission)} />;
+  return <LegacyTaxTool {...props} />;
+}
+
+function LegacyTaxTool({
   title = "1040 Individual Tax",
   description = "Complex individual return preparation and review",
   instructions = "Prepare the return from source documents, resolve supported diagnostics, and document unresolved compliance issues.",

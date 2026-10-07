@@ -1,0 +1,4 @@
+.workspace-ui-preview { width: 100%; min-width: 0; height: 100dvh; overflow: hidden; }
+.workspace-ui-preview > .hiring-shell { height: 100%; }
+.workspace-preview-notice { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 10000; width: max-content; max-width: calc(100% - 32px); display: flex; align-items: center; gap: 16px; padding: 14px 18px; background: #fff; color: #233d35; border: 1px solid #b2c8b9; border-radius: 4px; box-shadow: 0 4px 18px #203b3020; font-size: 13px; }
+.workspace-preview-notice button { background: transparent; color: #176449; padding: 8px; border: 1px solid #b2c8b9; border-radius: 3px; }

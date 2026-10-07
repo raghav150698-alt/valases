@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
+from app.services.assessment_entitlements import public_usage
 from app.api.routes.hiring import _organization_context, _require_permission, _write_audit
 from app.core.config import get_settings
 from app.db.session import get_db
@@ -42,6 +43,30 @@ class CheckoutRequest(BaseModel):
     billing_phone: str = Field(pattern=r"^\+?[0-9]{8,15}$")
 
 
+class AssessActivationRequest(BaseModel):
+    enabled: bool
+    reason: str = Field(min_length=10, max_length=1000)
+
+
+@router.put("/organizations/{organization_id}/assess-activation")
+def activate_organization_assess(
+    organization_id: int,
+    payload: AssessActivationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    from app.models.entities import Organization, OrganizationAuditEvent
+    organization = db.get(Organization, organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    organization.settings_json = {**(organization.settings_json or {}), "assess_enabled": payload.enabled}
+    db.add(OrganizationAuditEvent(organization_id=organization.id, actor_user_id=current_user.id,
+        action="assess_activation_updated", target_type="organization", target_id=organization.id,
+        details_json={"enabled": payload.enabled, "reason": payload.reason}))
+    db.commit()
+    return public_usage(db, organization.id)
+
+
 def _account(db: Session, organization_id: int, email: str | None = None) -> OrganizationBillingAccount:
     account = db.scalar(
         select(OrganizationBillingAccount).where(OrganizationBillingAccount.organization_id == organization_id),
@@ -51,8 +76,8 @@ def _account(db: Session, organization_id: int, email: str | None = None) -> Org
     account = OrganizationBillingAccount(
         organization_id=organization_id,
         billing_email=email,
-        status="trialing",
-        plan_code="trial",
+        status="active",
+        plan_code="free",
     )
     db.add(account)
     db.flush()
@@ -174,6 +199,7 @@ def organization_billing(
     )
     db.commit()
     return {
+        "free_allowance": public_usage(db, organization.id),
         "provider": "cashfree",
         "provider_ready": cashfree_ready(settings),
         "checkout_mode": cashfree_mode(settings),
@@ -181,6 +207,17 @@ def organization_billing(
         "plans": plans,
         "orders": [_serialize_order(order) for order in orders],
     }
+
+
+@router.get("/organization/allowance")
+def organization_allowance(
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "assessments.view")
+    return public_usage(db, organization.id)
 
 
 @router.post("/checkout")

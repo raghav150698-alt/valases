@@ -41,7 +41,9 @@ def verify_supabase_token(token: str | None, settings: Settings) -> dict[str, An
     )
     if response.status_code == 200:
         data = response.json()
+        server_verified_email = bool(data.get("email_confirmed_at"))
     else:
+        server_verified_email = False
         # Some Supabase projects reject the publishable key on the user lookup
         # endpoint while still exposing their signed access-token keys. Verify
         # the token against the project JWKS as a secure fallback.
@@ -76,6 +78,7 @@ def verify_supabase_token(token: str | None, settings: Settings) -> dict[str, An
     return {
         **data,
         "uid": data.get("id"),
+        "_server_verified_email": server_verified_email,
         "name": metadata.get("full_name") or metadata.get("name") or str(data["email"]).split("@", 1)[0],
         # app_metadata is administrator-controlled; user_metadata is editable by
         # the account holder and must never grant an application role.

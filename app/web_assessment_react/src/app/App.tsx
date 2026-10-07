@@ -38,7 +38,7 @@ type View = "provider";
 
 function CandidatePortalRedirect({ accessKey }: { accessKey: string }) {
   const candidateBaseUrl = String(import.meta.env.VITE_CANDIDATE_APP_URL || "").trim().replace(/\/$/, "");
-  const candidateUrl = candidateBaseUrl ? `${candidateBaseUrl}/?issued_key=${encodeURIComponent(accessKey)}` : "";
+  const candidateUrl = candidateBaseUrl ? `${candidateBaseUrl}/#issued_key=${encodeURIComponent(accessKey)}` : "";
 
   useEffect(() => {
     if (candidateUrl) window.location.replace(candidateUrl);
@@ -155,9 +155,10 @@ export function App() {
   const setSession = useSessionStore((s) => s.setSession);
   const [sessionResolved, setSessionResolved] = useState(!token);
   const params = new URLSearchParams(window.location.search);
+  const fragmentParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   const embedded = params.get("embedded") === "1";
   const tool = String(params.get("tool") || "").trim().toLowerCase();
-  const issuedAccessKey = String(params.get("issued_key") || "").trim();
+  const issuedAccessKey = String(fragmentParams.get("issued_key") || params.get("issued_key") || "").trim();
   const recruiterAuthenticated = role === "provider";
   const handleToolSubmit = useCallback(() => {
     if (!window.confirm("Submit this assessment? You will not be able to continue after submission.")) return;
@@ -279,15 +280,6 @@ export function App() {
   if (!recruiterAuthenticated) {
     return (
       <div className="auth-page-shell">
-        <header className="auth-page-topbar">
-          <div className="auth-page-brand">
-            <BrandLogo className="auth-brand-logo" />
-            <div>
-              <strong>Valases</strong>
-              <small>Assessment platform</small>
-            </div>
-          </div>
-        </header>
         <main className="auth-page-main">
           <AuthPanel />
         </main>
@@ -297,9 +289,7 @@ export function App() {
 
   return (
     <div className="workspace-page-shell">
-      <div className="shell workspace-content">
-        {view === "provider" && recruiterWorkspaceBody}
-      </div>
+      {view === "provider" && recruiterWorkspaceBody}
     </div>
   );
 }

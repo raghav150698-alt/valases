@@ -1,0 +1,315 @@
+{
+  "bank_version": 4,
+  "stored_recordings": 36,
+  "unique_audio_files": 36,
+  "regional_recordings": 30,
+  "media_checked": true,
+  "regions": {
+    "en-US": {
+      "recording_count": 15,
+      "source_conversation_count": 4,
+      "natural_count": 13,
+      "scripted_count": 2,
+      "duration_min_seconds": 121.9,
+      "duration_max_seconds": 247,
+      "difficulty_labels": [
+        "B1",
+        "B2"
+      ],
+      "questions_per_attempt": 6,
+      "recordings_per_attempt": 1,
+      "calibration_status": "Not calibrated",
+      "readiness": "Pilot content",
+      "target_recording_count": 20,
+      "warnings": [
+        "Small pool: recordings will repeat across a large candidate cohort.",
+        "Some clips share a source conversation and speakers; clip count is not independent conversation count.",
+        "This pool includes scripted teaching dialogues; natural replacements are still needed.",
+        "This regional pool includes international conversations with mixed accents.",
+        "Some recordings fall outside the proposed 2\u20133.5 minute range; difficulty review is pending.",
+        "New excerpts have transcript-backed questions; independent listening review is pending.",
+        "Difficulty labels are editorial estimates. US/UK equivalence and pass thresholds need an all-role pilot."
+      ]
+    },
+    "en-GB": {
+      "recording_count": 15,
+      "source_conversation_count": 4,
+      "natural_count": 15,
+      "scripted_count": 0,
+      "duration_min_seconds": 108,
+      "duration_max_seconds": 205,
+      "difficulty_labels": [
+        "B1",
+        "B2"
+      ],
+      "questions_per_attempt": 6,
+      "recordings_per_attempt": 1,
+      "calibration_status": "Not calibrated",
+      "readiness": "Pilot content",
+      "target_recording_count": 20,
+      "warnings": [
+        "Small pool: recordings will repeat across a large candidate cohort.",
+        "Some clips share a source conversation and speakers; clip count is not independent conversation count.",
+        "This regional pool includes international conversations with mixed accents.",
+        "Some recordings fall outside the proposed 2\u20133.5 minute range; difficulty review is pending.",
+        "New excerpts have transcript-backed questions; independent listening review is pending.",
+        "Difficulty labels are editorial estimates. US/UK equivalence and pass thresholds need an all-role pilot."
+      ]
+    }
+  },
+  "media": [
+    {
+      "id": "ami-es2002-finance",
+      "bytes": 1944808,
+      "declared_seconds": 162,
+      "sha256": "d9e85721f3524c49c7e6f37d4e618f50654e110566a80c7c86300a44e356826e",
+      "actual_seconds": 162.0
+    },
+    {
+      "id": "ami-es2002-positioning",
+      "bytes": 2700896,
+      "declared_seconds": 225,
+      "sha256": "dd7233e07b798ffc1c1a7a417d93c449003268945d02884bc0aff9208498683a",
+      "actual_seconds": 225.0
+    },
+    {
+      "id": "ami-es2004-price",
+      "bytes": 1296866,
+      "declared_seconds": 108,
+      "sha256": "624ea3c7087fcad5f9bcdc8e6a5344a53b99aff8d1ae6bfc9b7da3abc6ec3941",
+      "actual_seconds": 108.0
+    },
+    {
+      "id": "ami-es2004-usability",
+      "bytes": 2268935,
+      "declared_seconds": 189,
+      "sha256": "3fffeb3703560123936f67d81d5c9ed6309a7dab5e8d9c7e42d988c93660c8c0",
+      "actual_seconds": 189.0
+    },
+    {
+      "id": "ami-is1009-features",
+      "bytes": 1465061,
+      "declared_seconds": 122,
+      "sha256": "2b045b2f7970229e8038e444e52dd0ff11672303cc7ced649d4af70f8dcf13fc",
+      "actual_seconds": 122.0
+    },
+    {
+      "id": "ami-is1009-findability",
+      "bytes": 1729002,
+      "declared_seconds": 144,
+      "sha256": "31e4c1d4bb63646855fd9b60faebcdaabe0d70b172be08079fbad79cb9ed78bc",
+      "actual_seconds": 144.0
+    },
+    {
+      "id": "ami-ts3003-briefing",
+      "bytes": 2340719,
+      "declared_seconds": 195,
+      "sha256": "c1164b5e2e7a27f6cdefc99d04c5bae0b95a134dcdb7fcf99bd10a55a405af97",
+      "actual_seconds": 195.0
+    },
+    {
+      "id": "ami-ts3003-durability",
+      "bytes": 2196837,
+      "declared_seconds": 183,
+      "sha256": "143d0208f44c11992933aa82aecdc43fbf44bbc04b55b993b90132503ba481ef",
+      "actual_seconds": 183.0
+    },
+    {
+      "id": "voa-budget-cuts",
+      "bytes": 3964841,
+      "declared_seconds": 247,
+      "sha256": "16cfce77c4a93fef1de7cdc6a8c41ce9bd7e38b916827914012c9e9403f46845",
+      "actual_seconds": 247.743
+    },
+    {
+      "id": "voa-the-interview",
+      "bytes": 3927287,
+      "declared_seconds": 245,
+      "sha256": "44bb1411913f7b46c52e84c38d03a355c4de9d8841cb6f65fbf34c27586e9a30",
+      "actual_seconds": 245.373
+    },
+    {
+      "id": "edacc-c08-childhood-tv",
+      "bytes": 2212510,
+      "declared_seconds": 184.3,
+      "sha256": "2a34186e7b4d0054bd3603493cc77fc01c9f07e21e89daa12be4e87b3692bbe5",
+      "actual_seconds": 184.3
+    },
+    {
+      "id": "edacc-c08-holidays",
+      "bytes": 1600305,
+      "declared_seconds": 133.3,
+      "sha256": "7d4a52947eec9f7404369148fa6b5c3eeedf13162c8f49394444643720516645",
+      "actual_seconds": 133.3
+    },
+    {
+      "id": "edacc-c08-food-city",
+      "bytes": 1718169,
+      "declared_seconds": 143.12,
+      "sha256": "765fc46e3317ac58afa7781226c40311be1f4e4e1bc458bfdaf406e1cd397b06",
+      "actual_seconds": 143.12
+    },
+    {
+      "id": "edacc-c19-meals",
+      "bytes": 1478052,
+      "declared_seconds": 123.1,
+      "sha256": "f4f97845e150ce646ba6c8b8a2a24917c96753654b24b040b7c6470101c59b91",
+      "actual_seconds": 123.1
+    },
+    {
+      "id": "edacc-c19-study-careers",
+      "bytes": 2394950,
+      "declared_seconds": 199.5,
+      "sha256": "f9c841282f90091ee68443a4c42a9195be7dae1b46f7c7ef676ebc3e412af99b",
+      "actual_seconds": 199.5
+    },
+    {
+      "id": "edacc-c19-home-transport",
+      "bytes": 2519710,
+      "declared_seconds": 209.9,
+      "sha256": "f28a63a52c88773280457c4de8e1176a4865d88a5e21cd68a5ab2cb0a7ce7aea",
+      "actual_seconds": 209.9
+    },
+    {
+      "id": "edacc-c19-renting",
+      "bytes": 1669895,
+      "declared_seconds": 139.1,
+      "sha256": "c186f8dfab6a3bff6e596e39b17a66b2789f8e8e65dfb21fbed52db0636ed54c",
+      "actual_seconds": 139.1
+    },
+    {
+      "id": "edacc-c19-moving",
+      "bytes": 1463632,
+      "declared_seconds": 121.9,
+      "sha256": "c3cc8600a73c5bf74073c419540ef64ebd61282091a71f4084d265bcff8f2297",
+      "actual_seconds": 121.9
+    },
+    {
+      "id": "edacc-c64-games",
+      "bytes": 2418773,
+      "declared_seconds": 201.5,
+      "sha256": "ce654a1364bbb077823139453aeec3e27fb12606a323b56a15d9b922f90168a2",
+      "actual_seconds": 201.5
+    },
+    {
+      "id": "edacc-c64-pretend-teacher",
+      "bytes": 1517549,
+      "declared_seconds": 126.4,
+      "sha256": "4e6677d16eeb2aa89e31c7a93b1620f402e285921395d89b9171480ce7e7aeff",
+      "actual_seconds": 126.4
+    },
+    {
+      "id": "edacc-c64-school-sports",
+      "bytes": 1493725,
+      "declared_seconds": 124.4,
+      "sha256": "b053a80b2ed5847d25a9358c3488b8e05a7b8f787a22a8f804fbf6684c844d3a",
+      "actual_seconds": 124.4
+    },
+    {
+      "id": "edacc-c64-detective-books",
+      "bytes": 1606574,
+      "declared_seconds": 133.8,
+      "sha256": "1c20cbb202efa4ce90392d30ab5d6a53b5956e80c36322f558f684afc4a17188",
+      "actual_seconds": 133.8
+    },
+    {
+      "id": "edacc-c64-sitcoms",
+      "bytes": 1821301,
+      "declared_seconds": 151.7,
+      "sha256": "f72c5c730ba2f0a2e6ab30c0366cfe4b89fac027c042b28ba04f220863610d74",
+      "actual_seconds": 151.7
+    },
+    {
+      "id": "edacc-c64-book-rentals",
+      "bytes": 1685568,
+      "declared_seconds": 140.4,
+      "sha256": "701c6fcc023846dd663475d2997bda29fdfabe1bb8c5e6c32a1bd086c7d14490",
+      "actual_seconds": 140.4
+    },
+    {
+      "id": "edacc-c64-fish-sauce",
+      "bytes": 2277085,
+      "declared_seconds": 189.7,
+      "sha256": "9b7ef29bfa0804f2ce2f704765c75efeffd1a4a40d690a132734f33a4ada72ad",
+      "actual_seconds": 189.7
+    },
+    {
+      "id": "edacc-c64-snack-memories",
+      "bytes": 2391188,
+      "declared_seconds": 199.2,
+      "sha256": "472c84ca3e311181c79d373850ed5186c0e3bd3eff5fbe1aaeabab389e20656a",
+      "actual_seconds": 199.2
+    },
+    {
+      "id": "edacc-c46_p1-coastal-visits",
+      "bytes": 2091198,
+      "declared_seconds": 174.2,
+      "sha256": "9df9e06efc677c074dd46e8906bd84b4c65bc85cb1b75db0bf136dd6aa982980",
+      "actual_seconds": 174.2
+    },
+    {
+      "id": "edacc-c46_p1-remote-travel",
+      "bytes": 2205301,
+      "declared_seconds": 183.7,
+      "sha256": "5d6ab45041a20752b475c7439e6642e5eb1d6a7150f4410a269fbe941823e853",
+      "actual_seconds": 183.7
+    },
+    {
+      "id": "edacc-c46_p1-tourism-booking",
+      "bytes": 2460778,
+      "declared_seconds": 205,
+      "sha256": "f6efbab77b2da12ab21190ef49dda63c53c096d5725574a6b40c7c33b31bb154",
+      "actual_seconds": 205.0
+    },
+    {
+      "id": "edacc-c46_p1-shared-stays",
+      "bytes": 2309686,
+      "declared_seconds": 192.4,
+      "sha256": "aeb07c86858f314a7ecce1cde64e8594fc7712822153a0d5ec275fe765b38b1f",
+      "actual_seconds": 192.4
+    },
+    {
+      "id": "edacc-c46_p1-cycling-spaces",
+      "bytes": 2387740,
+      "declared_seconds": 198.9,
+      "sha256": "943f0a411fe40a24d245c80dc73b5340f29a1829a5a345beb05c0f8b9737751a",
+      "actual_seconds": 198.9
+    },
+    {
+      "id": "edacc-c46_p1-recycling",
+      "bytes": 1949510,
+      "declared_seconds": 162.4,
+      "sha256": "520d74247a4db2dd106f477985236d42399ef0aa5124dc6a3ca62a8b91fb8514",
+      "actual_seconds": 162.4
+    },
+    {
+      "id": "edacc-c46_p1-electric-cars",
+      "bytes": 1911266,
+      "declared_seconds": 159.2,
+      "sha256": "b2f5d0227d56b9538f16473d552b4f201f74084e22d024675cde76fa40087800",
+      "actual_seconds": 159.2
+    },
+    {
+      "id": "edacc-c46_p2-family-books",
+      "bytes": 2169252,
+      "declared_seconds": 180.7,
+      "sha256": "aaab8163683814e9024ce36c0c8d940e4176f2c6eb95ec6a1a43ca26f867f95e",
+      "actual_seconds": 180.7
+    },
+    {
+      "id": "edacc-c32_p2-learning-work",
+      "bytes": 2158280,
+      "declared_seconds": 179.8,
+      "sha256": "3198b890a7b23a121fb9ea04ec332c904c50971a36e7ae43c443dcff4ddb980f",
+      "actual_seconds": 179.8
+    },
+    {
+      "id": "edacc-c32_p2-photos-plans",
+      "bytes": 1761115,
+      "declared_seconds": 146.7,
+      "sha256": "368e4628310bf0bca7e9bba890b8f659fe0e236d5e74d4d88b7cb4c9bd806368",
+      "actual_seconds": 146.7
+    }
+  ],
+  "errors": []
+}

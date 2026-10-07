@@ -15,7 +15,7 @@ from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 import jwt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -27,12 +27,15 @@ from app.models.entities import (
     ApprovalStatus,
     AssessmentIssue,
     HiringApplication,
+    HiringAutomationDelivery,
     HiringCandidate,
     HiringCommunication,
+    HiringEmailChannel,
     HiringComplianceCheck,
     HiringIntegration,
     HiringInterview,
     HiringOffer,
+    HiringOnboarding,
     HiringScorecard,
     HiringStageEvent,
     JobRequisition,
@@ -102,20 +105,16 @@ _ROLE_PERMISSIONS = {
 }
 _PIPELINE_STAGES = ["applied", "screening", "assessment", "interview", "offer", "hired", "rejected", "withdrawn"]
 _INTEGRATION_CATALOG = {
-    "greenhouse": {"category": "ats", "connection_mode": "oauth_or_api_key", "capabilities": ["jobs", "candidates", "applications", "stage_updates"]},
-    "lever": {"category": "ats", "connection_mode": "oauth", "capabilities": ["jobs", "candidates", "applications", "stage_updates"]},
-    "workday": {"category": "ats", "connection_mode": "enterprise_api", "capabilities": ["jobs", "candidates", "applications"]},
-    "ashby": {"category": "ats", "connection_mode": "api_key", "capabilities": ["jobs", "candidates", "applications", "stage_updates"]},
-    "bamboohr": {"category": "ats", "connection_mode": "oauth", "capabilities": ["jobs", "candidates", "employees"]},
-    "successfactors": {"category": "ats", "connection_mode": "enterprise_api", "capabilities": ["jobs", "candidates", "applications"]},
     "google_calendar": {"category": "calendar", "connection_mode": "oauth", "capabilities": ["availability", "calendar_events", "video_meet_links"]},
     "outlook_calendar": {"category": "calendar", "connection_mode": "oauth", "capabilities": ["availability", "calendar_events"]},
-    "microsoft_teams": {"category": "meeting", "connection_mode": "oauth", "capabilities": ["meeting_links", "calendar_events"]},
-    "zoom": {"category": "meeting", "connection_mode": "oauth", "capabilities": ["meeting_links"]},
-    "twilio_voice": {"category": "voice", "connection_mode": "service_credentials", "capabilities": ["candidate_calls", "scheduling_prompts"]},
-    "custom_api": {"category": "custom", "connection_mode": "signed_webhook", "capabilities": ["jobs", "candidates", "applications"]},
 }
 _INTEGRATION_PROVIDERS = set(_INTEGRATION_CATALOG)
+_EMAIL_PURPOSES = {
+    "candidate_updates": "Candidate updates",
+    "assessment_invites": "Assessment invitations",
+    "onboarding": "Onboarding and welcome",
+    "system": "System and team notifications",
+}
 
 
 class OrganizationCreate(BaseModel):
@@ -126,6 +125,9 @@ class OrganizationCreate(BaseModel):
 class OrganizationProfileUpdate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     logo_data_url: str = Field(default="", max_length=800000)
+    legal_name: str | None = Field(default=None, min_length=2, max_length=240)
+    country: str | None = Field(default=None, min_length=2, max_length=80)
+    website: str | None = Field(default=None, max_length=500)
 
 
 class CurrentUserProfileUpdate(BaseModel):
@@ -229,6 +231,17 @@ class ApplicationCreate(BaseModel):
     source: str = Field(default="manual", max_length=80)
 
 
+class PublicApplicationCreate(BaseModel):
+    first_name: str = Field(min_length=1, max_length=120)
+    last_name: str = Field(default="", max_length=120)
+    email: EmailStr
+    phone_number: str | None = Field(default=None, max_length=40)
+    location: str = Field(default="", max_length=180)
+    headline: str = Field(default="", max_length=300)
+    resume_text: str = Field(default="", max_length=120000)
+    consent_obtained: bool = False
+
+
 class AtsApplicationImport(BaseModel):
     external_application_id: str = Field(min_length=1, max_length=240)
     external_candidate_id: str = Field(default="", max_length=240)
@@ -254,6 +267,18 @@ class AtsApplicationBatch(BaseModel):
 class StageUpdate(BaseModel):
     stage: Literal["applied", "screening", "assessment", "interview", "offer", "hired", "rejected", "withdrawn"]
     reason: str = Field(default="", max_length=3000)
+
+
+class OnboardingUpdate(BaseModel):
+    status: Literal["not_started", "in_progress", "ready", "complete"] | None = None
+    manager_user_id: int | None = Field(default=None, gt=0)
+    manager_name: str | None = Field(default=None, max_length=240)
+    start_date: datetime | None = None
+    checklist: list[dict] | None = None
+    documents: list[dict] | None = None
+    access_requests: list[dict] | None = None
+    first_day_plan: str | None = Field(default=None, max_length=12000)
+    welcome_email_status: Literal["pending", "ready", "sent", "failed"] | None = None
 
 
 class RejectionRequest(BaseModel):
@@ -346,6 +371,21 @@ class IntegrationUpdate(BaseModel):
     sync_scope: list[str] = Field(default_factory=list, max_length=20)
 
 
+class EmailChannelUpdate(BaseModel):
+    purpose: Literal["candidate_updates", "assessment_invites", "onboarding", "system"]
+    smtp_host: str = Field(default="", max_length=240)
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = Field(default="", max_length=320)
+    smtp_password: str | None = Field(default=None, max_length=1000)
+    sender: str = Field(default="", max_length=320)
+    sender_name: str = Field(default="", max_length=200)
+    reply_to: str = Field(default="", max_length=320)
+
+
+class EmailTestRequest(BaseModel):
+    purpose: Literal["candidate_updates", "assessment_invites", "onboarding", "system"] = "system"
+
+
 def _list_strings(values: list[str]) -> list[str]:
     return list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
 
@@ -373,6 +413,75 @@ def _write_audit(db: Session, organization_id: int, actor_user_id: int | None, a
             details_json=details or {},
         ),
     )
+
+
+def _utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _automation_email_base_url() -> str:
+    settings = get_settings()
+    return str(settings.candidate_app_base_url or settings.app_base_url or "").strip().rstrip("/")
+
+
+def _automation_delivery(
+    db: Session,
+    *,
+    organization_id: int,
+    automation_key: str,
+    automation_type: str,
+    recipient_email: str,
+    application_id: int | None = None,
+    interview_id: int | None = None,
+    assessment_issue_id: int | None = None,
+) -> HiringAutomationDelivery | None:
+    if db.scalar(select(HiringAutomationDelivery).where(HiringAutomationDelivery.automation_key == automation_key)):
+        return None
+    delivery = HiringAutomationDelivery(
+        organization_id=organization_id,
+        automation_key=automation_key,
+        automation_type=automation_type,
+        application_id=application_id,
+        interview_id=interview_id,
+        assessment_issue_id=assessment_issue_id,
+        recipient_email=recipient_email,
+        status="pending",
+    )
+    db.add(delivery)
+    db.flush()
+    return delivery
+
+
+def _send_automation_email(
+    db: Session,
+    organization_id: int,
+    delivery: HiringAutomationDelivery,
+    *,
+    purpose: str,
+    subject: str,
+    body: str,
+) -> bool:
+    try:
+        result = send_email(
+            delivery.recipient_email,
+            subject,
+            body,
+            smtp_config=_email_channel_smtp_config(db, organization_id, purpose),
+        )
+        if result.get("sent"):
+            delivery.status = "sent"
+            delivery.sent_at = datetime.now(timezone.utc)
+            return True
+        delivery.status = "failed"
+        delivery.provider_error = str(result.get("reason") or "Email provider did not send the message")[:500]
+    except Exception as exc:
+        delivery.status = "failed"
+        delivery.provider_error = str(exc)[:500]
+    return False
 
 
 def _clean_permissions(role: str, permissions: list[str] | None = None) -> list[str]:
@@ -447,6 +556,58 @@ def _integration_fernet() -> Fernet:
         raise HTTPException(status_code=503, detail="Integration token encryption is not configured")
     derived = base64.urlsafe_b64encode(hashlib.sha256(settings.jwt_secret_key.encode("utf-8")).digest())
     return Fernet(derived)
+
+
+def _create_calendar_event(
+    integration: HiringIntegration,
+    candidate: HiringCandidate,
+    job: JobRequisition,
+    scheduled_at: datetime,
+    duration_minutes: int,
+) -> dict[str, str]:
+    encrypted = str((integration.config_json or {}).get("credentials_encrypted") or "")
+    if not encrypted:
+        raise RuntimeError("Calendar credentials are not available")
+    try:
+        credentials = json.loads(_integration_fernet().decrypt(encrypted.encode("ascii")).decode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError("Calendar credentials could not be decrypted") from exc
+    access_token = str(credentials.get("access_token") or "").strip()
+    if not access_token:
+        raise RuntimeError("Calendar access token is missing")
+    start = scheduled_at.astimezone(timezone.utc)
+    end = start + timedelta(minutes=duration_minutes)
+    subject = f"Interview: {candidate.first_name} {candidate.last_name} · {job.title}".strip(" ·")
+    description = f"Structured interview for {candidate.email}. Manage the scorecard in Valases."
+    if integration.provider == "google_calendar":
+        endpoint = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+        body = {
+            "summary": subject,
+            "description": description,
+            "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
+            "end": {"dateTime": end.isoformat(), "timeZone": "UTC"},
+            "attendees": [{"email": candidate.email}],
+        }
+    elif integration.provider == "outlook_calendar":
+        endpoint = "https://graph.microsoft.com/v1.0/me/events"
+        body = {
+            "subject": subject,
+            "body": {"contentType": "text", "content": description},
+            "start": {"dateTime": start.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": "UTC"},
+            "end": {"dateTime": end.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": "UTC"},
+            "attendees": [{"emailAddress": {"address": candidate.email}, "type": "required"}],
+        }
+    else:
+        raise RuntimeError("Unsupported calendar provider")
+    response = httpx.post(endpoint, json=body, headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}, timeout=20)
+    if response.status_code not in {200, 201}:
+        raise RuntimeError(f"Calendar provider returned HTTP {response.status_code}")
+    payload = response.json()
+    event_id = str(payload.get("id") or "").strip()
+    event_url = str(payload.get("htmlLink") or payload.get("webLink") or "").strip()
+    if not event_id:
+        raise RuntimeError("Calendar provider did not return an event id")
+    return {"event_id": event_id, "event_url": event_url}
 
 
 def _ensure_bootstrap_organization(db: Session, user: User) -> tuple[Organization, OrganizationMembership]:
@@ -529,6 +690,49 @@ def _application_or_404(db: Session, organization_id: int, application_id: int) 
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
     return application
+
+
+def _default_onboarding_checklist() -> list[dict]:
+    return [
+        {"id": "employee-profile", "label": "Complete employee profile", "owner": "People team", "due_date": None, "completed": False},
+        {"id": "manager-assignment", "label": "Confirm reporting manager", "owner": "Hiring manager", "due_date": None, "completed": False},
+        {"id": "documents", "label": "Collect HR and payroll documents", "owner": "People team", "due_date": None, "completed": False},
+        {"id": "equipment-access", "label": "Request equipment and system access", "owner": "IT / Operations", "due_date": None, "completed": False},
+        {"id": "hris-handoff", "label": "Complete HRIS and payroll handoff", "owner": "Payroll", "due_date": None, "completed": False},
+        {"id": "welcome-plan", "label": "Send welcome email and first-day plan", "owner": "Hiring manager", "due_date": None, "completed": False},
+    ]
+
+
+def _default_onboarding_documents() -> list[dict]:
+    return [
+        {"id": "identity", "label": "Identity verification", "status": "requested", "required": True},
+        {"id": "tax", "label": "Tax and payroll forms", "status": "requested", "required": True},
+        {"id": "bank", "label": "Bank or payment details", "status": "requested", "required": True},
+    ]
+
+
+def _default_onboarding_access_requests() -> list[dict]:
+    return [
+        {"id": "email", "label": "Company email", "system": "Identity / email", "status": "not_requested"},
+        {"id": "hris", "label": "HRIS profile", "system": "HRIS", "status": "not_requested"},
+        {"id": "finance", "label": "Finance and payroll access", "system": "Finance", "status": "not_requested"},
+    ]
+
+
+def _ensure_onboarding(db: Session, application: HiringApplication) -> HiringOnboarding:
+    onboarding = db.scalar(select(HiringOnboarding).where(HiringOnboarding.application_id == application.id))
+    if onboarding:
+        return onboarding
+    onboarding = HiringOnboarding(
+        organization_id=application.organization_id,
+        application_id=application.id,
+        checklist_json=_default_onboarding_checklist(),
+        documents_json=_default_onboarding_documents(),
+        access_requests_json=_default_onboarding_access_requests(),
+    )
+    db.add(onboarding)
+    db.flush()
+    return onboarding
 
 
 def _serialize_job(job: JobRequisition, db: Session | None = None) -> dict:
@@ -674,6 +878,7 @@ def _send_candidate_communication(
                 html_body=html_body,
                 inline_images=inline_images,
                 reply_to=actor.email if sender_mode == "recruiter" else None,
+                smtp_config=_email_channel_smtp_config(db, organization.id, "assessment_invites" if "assessment" in template_key.lower() else "candidate_updates"),
             )
             record.status = "sent" if result.get("sent") else "failed"
             record.provider_error = str(result.get("reason") or "")[:500] or None
@@ -990,6 +1195,8 @@ def hiring_workspace(
             "slug": organization.slug,
             "plan_code": organization.plan_code,
             "logo_url": organization_logo_url(organization.settings_json),
+            "legal_name": organization.legal_name or "",
+            "business_profile": dict((organization.settings_json or {}).get("business_profile") or {}),
         },
         "membership_role": membership.role if membership else "platform_admin",
         "current_user": {
@@ -1016,10 +1223,48 @@ def update_organization_profile(
     organization, membership = _organization_context(db, current_user, organization_id)
     _require_permission(current_user, membership, "organization.manage")
     name = payload.name.strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=422, detail="Enter a brand name of at least two characters.")
     logo = normalize_organization_logo(payload.logo_data_url)
     previous_name = organization.name
     organization.name = name
+    owner_user_id = db.scalar(
+        select(OrganizationMembership.user_id)
+        .where(
+            OrganizationMembership.organization_id == organization.id,
+            OrganizationMembership.role == "owner",
+            OrganizationMembership.status == "active",
+        )
+        .order_by(OrganizationMembership.id.asc()),
+    )
+    if owner_user_id:
+        provider = db.scalar(select(ProviderProfile).where(ProviderProfile.user_id == owner_user_id))
+        if provider:
+            provider.display_name = name
     organization_settings = dict(organization.settings_json or {})
+    business_profile = dict(organization_settings.get("business_profile") or {})
+    if payload.legal_name is not None:
+        if len(payload.legal_name.strip()) < 2:
+            raise HTTPException(status_code=422, detail="Enter your legal business name.")
+        if organization.legal_name != payload.legal_name.strip():
+            business_profile["registry_status"] = "not_checked"
+        organization.legal_name = payload.legal_name.strip()
+    if payload.country is not None:
+        if len(payload.country.strip()) < 2:
+            raise HTTPException(status_code=422, detail="Enter your business country.")
+        if business_profile.get("country") != payload.country.strip():
+            business_profile["registry_status"] = "not_checked"
+        business_profile["country"] = payload.country.strip()
+    if payload.website is not None:
+        from app.services.business_onboarding import BusinessProfileInput
+        try:
+            business_profile["website"] = BusinessProfileInput.website_url(payload.website.strip())
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Enter a valid http:// or https:// website URL.")
+    if previous_name != name:
+        business_profile["registry_status"] = "not_checked"
+    organization_settings["business_profile"] = business_profile
+    organization.settings_json = organization_settings
     if logo:
         organization_settings["branding"] = {
             **dict(organization_settings.get("branding") or {}),
@@ -1040,6 +1285,8 @@ def update_organization_profile(
         "id": organization.id,
         "name": organization.name,
         "logo_url": organization_logo_url(organization.settings_json),
+        "legal_name": organization.legal_name or "",
+        "business_profile": dict((organization.settings_json or {}).get("business_profile") or {}),
     }
 
 
@@ -1317,6 +1564,101 @@ def remove_member(
     target.status = "removed"
     _write_audit(db, organization.id, current_user.id, "organization_member_removed", "membership", target.id)
     db.commit()
+
+
+@router.get("/public/jobs/{organization_slug}/{job_code}")
+def public_job_detail(
+    organization_slug: str,
+    job_code: str,
+    db: Session = Depends(get_db),
+):
+    organization = db.scalar(select(Organization).where(Organization.slug == organization_slug.strip().lower(), Organization.status == "active"))
+    if not organization:
+        raise HTTPException(status_code=404, detail="This role is no longer available")
+    job = db.scalar(select(JobRequisition).where(JobRequisition.organization_id == organization.id, JobRequisition.job_code == job_code.strip(), JobRequisition.status == "open"))
+    if not job:
+        raise HTTPException(status_code=404, detail="This role is no longer available")
+    return {
+        "organization": {"name": organization.name, "logo_url": organization_logo_url(organization.settings_json)},
+        "job": {
+            "job_code": job.job_code,
+            "title": job.title,
+            "department": job.department,
+            "location": job.location,
+            "employment_type": job.employment_type,
+            "work_arrangement": job.work_arrangement,
+            "description": job.description,
+            "responsibilities": job.responsibilities_json or [],
+            "requirements": job.requirements_json or [],
+            "skills": job.skills_json or [],
+        },
+    }
+
+
+@router.post("/public/jobs/{organization_slug}/{job_code}/applications", status_code=status.HTTP_201_CREATED)
+def public_job_application(
+    organization_slug: str,
+    job_code: str,
+    payload: PublicApplicationCreate,
+    db: Session = Depends(get_db),
+):
+    if not payload.consent_obtained:
+        raise HTTPException(status_code=422, detail="Consent is required to submit this application")
+    organization = db.scalar(select(Organization).where(Organization.slug == organization_slug.strip().lower(), Organization.status == "active"))
+    if not organization:
+        raise HTTPException(status_code=404, detail="This role is no longer available")
+    job = db.scalar(select(JobRequisition).where(JobRequisition.organization_id == organization.id, JobRequisition.job_code == job_code.strip(), JobRequisition.status == "open"))
+    if not job:
+        raise HTTPException(status_code=404, detail="This role is no longer available")
+    email = str(payload.email).strip().lower()
+    candidate = db.scalar(select(HiringCandidate).where(HiringCandidate.organization_id == organization.id, func.lower(HiringCandidate.email) == email))
+    if not candidate:
+        candidate = HiringCandidate(
+            organization_id=organization.id,
+            first_name=payload.first_name.strip(),
+            last_name=payload.last_name.strip(),
+            email=email,
+            phone_number=payload.phone_number.strip() if payload.phone_number else None,
+            location=payload.location.strip(),
+            headline=payload.headline.strip(),
+            resume_text=payload.resume_text.strip(),
+            source="public_application",
+            consent_status="consented",
+            consented_at=datetime.now(timezone.utc),
+        )
+        db.add(candidate)
+        db.flush()
+    else:
+        candidate.first_name = payload.first_name.strip() or candidate.first_name
+        candidate.last_name = payload.last_name.strip() or candidate.last_name
+        candidate.phone_number = payload.phone_number.strip() if payload.phone_number else candidate.phone_number
+        candidate.location = payload.location.strip() or candidate.location
+        candidate.headline = payload.headline.strip() or candidate.headline
+        candidate.resume_text = payload.resume_text.strip() or candidate.resume_text
+        candidate.consent_status = "consented"
+        candidate.consented_at = candidate.consented_at or datetime.now(timezone.utc)
+    existing = db.scalar(select(HiringApplication).where(HiringApplication.organization_id == organization.id, HiringApplication.job_id == job.id, HiringApplication.candidate_id == candidate.id))
+    if existing:
+        return {"application_id": existing.id, "status": "already_received", "message": "We already have an application for this role from this email address."}
+    application = HiringApplication(organization_id=organization.id, job_id=job.id, candidate_id=candidate.id, stage="applied", status="active", source="public_application")
+    db.add(application)
+    db.flush()
+    db.add(HiringStageEvent(organization_id=organization.id, application_id=application.id, actor_user_id=None, from_stage=None, to_stage="applied", reason="Public application submitted"))
+    _write_audit(db, organization.id, None, "public_application_submitted", "application", application.id, {"job_code": job.job_code})
+    db.commit()
+    company_logo = organization_logo_url(organization.settings_json)
+    confirmation_body = (
+        f"Hi {candidate.first_name},\n\n"
+        f"Thank you for applying for {job.title} at {organization.name}. We have received your application.\n\n"
+        "Our hiring team will review your information and contact you if there is a next step. Please keep this email for your records.\n\n"
+        f"Regards,\n{organization.name}"
+    )
+    confirmation_html = f"<p>Hi {escape(candidate.first_name)},</p><p>Thank you for applying for <strong>{escape(job.title)}</strong> at <strong>{escape(organization.name)}</strong>.</p><p>We have received your application. Our hiring team will review your information and contact you if there is a next step.</p><p>Regards,<br>{escape(organization.name)}</p>"
+    try:
+        delivery = send_email(email, f"Application received | {organization.name}", confirmation_body, html_body=confirmation_html, reply_to=None, smtp_config=_email_channel_smtp_config(db, organization.id, "candidate_updates"))
+    except Exception as exc:
+        delivery = {"sent": False, "reason": str(exc)[:300]}
+    return {"application_id": application.id, "status": "received", "message": "Your application has been received. We will contact you if there is a next step.", "confirmation_email": {"sent": bool(delivery.get("sent")), "reason": str(delivery.get("reason") or "")[:300] or None}}
 
 
 @router.get("/jobs")
@@ -2008,6 +2350,7 @@ def update_application_stage(
         application.human_decision = payload.stage
     if payload.stage == "hired":
         db.flush()
+        _ensure_onboarding(db, application)
         job = _job_or_404(db, organization.id, application.job_id)
         hired_count = int(
             db.scalar(
@@ -2031,6 +2374,242 @@ def update_application_stage(
     )
     db.commit()
     return {"id": application.id, "stage": application.stage, "status": application.status}
+
+
+@router.get("/onboarding")
+def list_onboarding(
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "pipeline.view")
+    applications = list(db.scalars(select(HiringApplication).where(HiringApplication.organization_id == organization.id, HiringApplication.stage == "hired").order_by(HiringApplication.updated_at.desc())).all())
+    rows = []
+    for application in applications:
+        onboarding = _ensure_onboarding(db, application)
+        candidate = _candidate_or_404(db, organization.id, application.candidate_id)
+        job = _job_or_404(db, organization.id, application.job_id)
+        rows.append({
+            "id": onboarding.id,
+            "application_id": application.id,
+            "candidate": {"id": candidate.id, "full_name": f"{candidate.first_name} {candidate.last_name}".strip(), "email": candidate.email},
+            "job_title": job.title,
+            "status": onboarding.status,
+            "manager_user_id": onboarding.manager_user_id,
+            "manager_name": onboarding.manager_name,
+            "start_date": onboarding.start_date,
+            "checklist": onboarding.checklist_json or [],
+            "documents": onboarding.documents_json or [],
+            "access_requests": onboarding.access_requests_json or [],
+            "first_day_plan": onboarding.first_day_plan,
+            "welcome_email_status": onboarding.welcome_email_status,
+        })
+    db.commit()
+    return rows
+
+
+@router.patch("/onboarding/{application_id}")
+def update_onboarding(
+    application_id: int,
+    payload: OnboardingUpdate,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "pipeline.manage")
+    application = _application_or_404(db, organization.id, application_id)
+    if application.stage != "hired":
+        raise HTTPException(status_code=409, detail="Onboarding is available after the candidate is hired")
+    onboarding = _ensure_onboarding(db, application)
+    values = payload.model_dump(exclude_unset=True)
+    if "status" in values: onboarding.status = values["status"]
+    if "manager_user_id" in values: onboarding.manager_user_id = values["manager_user_id"]
+    if "manager_name" in values: onboarding.manager_name = str(values["manager_name"] or "").strip()
+    if "start_date" in values: onboarding.start_date = values["start_date"]
+    if "checklist" in values: onboarding.checklist_json = values["checklist"]
+    if "documents" in values: onboarding.documents_json = values["documents"]
+    if "access_requests" in values: onboarding.access_requests_json = values["access_requests"]
+    if "first_day_plan" in values: onboarding.first_day_plan = str(values["first_day_plan"] or "").strip()
+    if "welcome_email_status" in values: onboarding.welcome_email_status = values["welcome_email_status"]
+    _write_audit(db, organization.id, current_user.id, "onboarding_updated", "application", application.id, {"status": onboarding.status})
+    db.commit()
+    return {"id": onboarding.id, "application_id": application.id, "status": onboarding.status}
+
+
+@router.post("/onboarding/{application_id}/welcome-email")
+def send_onboarding_welcome_email(
+    application_id: int,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "pipeline.manage")
+    application = _application_or_404(db, organization.id, application_id)
+    if application.stage != "hired":
+        raise HTTPException(status_code=409, detail="The welcome email is available after the candidate is hired")
+    onboarding = _ensure_onboarding(db, application)
+    candidate = _candidate_or_404(db, organization.id, application.candidate_id)
+    job = _job_or_404(db, organization.id, application.job_id)
+    if not onboarding.first_day_plan.strip():
+        raise HTTPException(status_code=422, detail="Add a first-day plan before sending the welcome email")
+    company_name, company_logo = _organization_branding(organization)
+    body = (
+        f"Hi {candidate.first_name},\n\n"
+        f"Welcome to {company_name}. We are excited to have you join us as {job.title}.\n\n"
+        "Your first-day plan:\n"
+        f"{onboarding.first_day_plan.strip()}\n\n"
+        "If you have any questions before your start date, reply to this email."
+    )
+    subject = f"Welcome to {company_name} | {job.title}"
+    try:
+        html_body, inline_images = _candidate_message_email_content(company_name, company_logo, body)
+        result = send_email(candidate.email, subject, body, html_body=html_body, inline_images=inline_images, reply_to=current_user.email, smtp_config=_email_channel_smtp_config(db, organization.id, "onboarding"))
+    except Exception as exc:
+        onboarding.welcome_email_status = "failed"
+        db.commit()
+        raise HTTPException(status_code=502, detail=f"Welcome email could not be sent: {str(exc)[:240]}") from exc
+    if not result.get("sent"):
+        onboarding.welcome_email_status = "failed"
+        db.commit()
+        raise HTTPException(status_code=502, detail=str(result.get("reason") or "The email provider did not accept the message")[:300])
+    onboarding.welcome_email_status = "sent"
+    _write_audit(db, organization.id, current_user.id, "onboarding_welcome_email_sent", "application", application.id, {"recipient": candidate.email})
+    db.commit()
+    return {"application_id": application.id, "welcome_email_status": onboarding.welcome_email_status}
+
+
+@router.get("/automations/status")
+def hiring_automation_status(
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "integrations.view")
+    last_run = db.scalar(
+        select(OrganizationAuditEvent)
+        .where(OrganizationAuditEvent.organization_id == organization.id, OrganizationAuditEvent.action == "hiring_automations_run")
+        .order_by(OrganizationAuditEvent.created_at.desc())
+    )
+    delivery_count = int(db.scalar(select(func.count(HiringAutomationDelivery.id)).where(HiringAutomationDelivery.organization_id == organization.id)) or 0)
+    return {
+        "supported": ["assessment_expiry_reminders", "interview_reminders", "onboarding_manager_reminders"],
+        "rules": [
+            {"key": "assessment_expiry_reminders", "label": "Assessment expiry reminder", "when": "An issued assessment expires within 48 hours", "recipient": "Candidate", "channel": "Assessment invitations"},
+            {"key": "interview_reminders", "label": "Interview reminder", "when": "A scheduled interview starts within 24 hours", "recipient": "Candidate", "channel": "Candidate updates"},
+            {"key": "onboarding_manager_reminders", "label": "Onboarding manager reminder", "when": "A hired employee starts within 7 days and onboarding is incomplete", "recipient": "Assigned manager", "channel": "Onboarding"},
+        ],
+        "execution_model": "external_trigger",
+        "delivery_count": delivery_count,
+        "last_run_at": last_run.created_at if last_run else None,
+        "last_run": (last_run.details_json or {}) if last_run else None,
+    }
+
+
+@router.post("/automations/run")
+def run_hiring_automations(
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    """Run safe, idempotent hiring reminders.
+
+    This endpoint is intentionally externally triggerable instead of using an in-process scheduler;
+    production deployments can call it from a managed cron or queue worker.
+    """
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "pipeline.manage")
+    now = datetime.now(timezone.utc)
+    summary = {"sent": 0, "failed": 0, "skipped": 0, "assessment_expiry_reminders": 0, "interview_reminders": 0, "onboarding_manager_reminders": 0}
+    candidate_url = _automation_email_base_url()
+
+    issues = list(db.scalars(select(AssessmentIssue).where(AssessmentIssue.status == "issued", AssessmentIssue.hiring_application_id.is_not(None))).all())
+    for issue in issues:
+        expires_at = _utc_datetime(issue.access_expires_at)
+        if not expires_at or not (now < expires_at <= now + timedelta(hours=48)):
+            continue
+        application = db.get(HiringApplication, issue.hiring_application_id)
+        if not application or application.organization_id != organization.id or application.stage not in {"assessment", "interview", "offer"}:
+            continue
+        candidate = _candidate_or_404(db, organization.id, application.candidate_id)
+        key = f"assessment_expiry_reminder:{issue.id}:{expires_at.date().isoformat()}"
+        delivery = _automation_delivery(db, organization_id=organization.id, automation_key=key, automation_type="assessment_expiry_reminder", recipient_email=candidate.email, application_id=application.id, assessment_issue_id=issue.id)
+        if not delivery:
+            summary["skipped"] += 1
+            continue
+        body = (
+            f"Hi {candidate.first_name},\n\n"
+            "This is a reminder that your hiring assessment is approaching its access deadline.\n"
+            f"Access deadline: {expires_at.strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+            f"Open the assessment: {candidate_url}/#issued_key={issue.access_key}\n\n"
+            "If you need an accommodation or have access trouble, reply to this email before the deadline."
+        )
+        if _send_automation_email(db, organization.id, delivery, purpose="assessment_invites", subject="Reminder: your hiring assessment is expiring soon", body=body):
+            summary["sent"] += 1
+            summary["assessment_expiry_reminders"] += 1
+        else:
+            summary["failed"] += 1
+
+    interviews = list(db.scalars(select(HiringInterview).where(HiringInterview.organization_id == organization.id, HiringInterview.status == "scheduled", HiringInterview.scheduled_at.is_not(None))).all())
+    for interview in interviews:
+        scheduled_at = _utc_datetime(interview.scheduled_at)
+        if not scheduled_at or not (now < scheduled_at <= now + timedelta(hours=24)):
+            continue
+        application = _application_or_404(db, organization.id, interview.application_id)
+        candidate = _candidate_or_404(db, organization.id, application.candidate_id)
+        job = _job_or_404(db, organization.id, application.job_id)
+        key = f"interview_reminder:{interview.id}:{scheduled_at.date().isoformat()}"
+        delivery = _automation_delivery(db, organization_id=organization.id, automation_key=key, automation_type="interview_reminder", recipient_email=candidate.email, application_id=application.id, interview_id=interview.id)
+        if not delivery:
+            summary["skipped"] += 1
+            continue
+        meeting = interview.meeting_url or interview.calendar_event_url or "Use the interview details shared by the recruiting team."
+        body = (
+            f"Hi {candidate.first_name},\n\n"
+            f"A reminder that your {job.title} interview is scheduled for {scheduled_at.strftime('%Y-%m-%d %H:%M UTC')}.\n"
+            f"Format: {interview.interview_type} ({interview.duration_minutes} minutes)\n"
+            f"Meeting details: {meeting}\n\n"
+            "If you need to reschedule or request an accommodation, reply to this email."
+        )
+        if _send_automation_email(db, organization.id, delivery, purpose="candidate_updates", subject=f"Reminder: {job.title} interview", body=body):
+            summary["sent"] += 1
+            summary["interview_reminders"] += 1
+        else:
+            summary["failed"] += 1
+
+    onboarding_rows = list(db.scalars(select(HiringOnboarding).where(HiringOnboarding.organization_id == organization.id, HiringOnboarding.status.in_(["not_started", "in_progress", "ready"]))).all())
+    for onboarding in onboarding_rows:
+        start_date = _utc_datetime(onboarding.start_date)
+        if not onboarding.manager_user_id or not start_date or not (now < start_date <= now + timedelta(days=7)):
+            continue
+        manager = db.get(User, onboarding.manager_user_id)
+        if not manager or not manager.email:
+            continue
+        application = _application_or_404(db, organization.id, onboarding.application_id)
+        candidate = _candidate_or_404(db, organization.id, application.candidate_id)
+        key = f"onboarding_manager_reminder:{onboarding.id}:{start_date.date().isoformat()}"
+        delivery = _automation_delivery(db, organization_id=organization.id, automation_key=key, automation_type="onboarding_manager_reminder", recipient_email=manager.email, application_id=application.id)
+        if not delivery:
+            summary["skipped"] += 1
+            continue
+        body = (
+            f"Hi {manager.full_name or 'Manager'},\n\n"
+            f"{candidate.first_name} {candidate.last_name} starts on {start_date.strftime('%Y-%m-%d')}.\n"
+            f"Their onboarding workspace is currently {onboarding.status.replace('_', ' ')}.\n\n"
+            "Please review owners, documents, equipment/access requests, and the first-day plan before the start date."
+        )
+        if _send_automation_email(db, organization.id, delivery, purpose="onboarding", subject=f"Onboarding reminder: {candidate.first_name} starts soon", body=body):
+            summary["sent"] += 1
+            summary["onboarding_manager_reminders"] += 1
+        else:
+            summary["failed"] += 1
+
+    _write_audit(db, organization.id, current_user.id, "hiring_automations_run", "organization", organization.id, summary)
+    db.commit()
+    return {"run_at": now, **summary}
 
 
 @router.post("/applications/{application_id}/reject")
@@ -2331,6 +2910,7 @@ def release_offer(
                 ),
             ],
             reply_to=offer.recruiter_email_snapshot,
+            smtp_config=_email_channel_smtp_config(db, organization.id, "candidate_updates"),
         )
     except Exception as exc:
         delivery = {"sent": False, "reason": str(exc)}
@@ -2487,6 +3067,7 @@ def decide_public_offer(
                         ),
                     ],
                     reply_to=offer.recruiter_email_snapshot,
+                    smtp_config=_email_channel_smtp_config(db, organization.id, "candidate_updates"),
                 )
             except Exception:
                 pass
@@ -2539,10 +3120,40 @@ def list_interviews(
             "scheduled_at": interview.scheduled_at,
             "duration_minutes": interview.duration_minutes,
             "meeting_url": interview.meeting_url,
+            "calendar_provider": interview.calendar_provider,
+            "calendar_event_url": interview.calendar_event_url,
+            "calendar_sync_status": interview.calendar_sync_status,
+            "calendar_sync_error": interview.calendar_sync_error,
             "interviewer_user_ids": interview.interviewers_json or [],
         }
         for interview, application, candidate, job in rows
     ]
+
+
+@router.get("/calendar/status")
+def calendar_status(
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "interviews.view")
+    connected = db.scalar(
+        select(HiringIntegration)
+        .where(
+            HiringIntegration.organization_id == organization.id,
+            HiringIntegration.provider.in_(["google_calendar", "outlook_calendar"]),
+            HiringIntegration.status == "connected",
+        )
+        .order_by(HiringIntegration.updated_at.desc())
+    )
+    provider_labels = {"google_calendar": "Google Calendar", "outlook_calendar": "Outlook Calendar"}
+    return {
+        "status": "connected" if connected else "not_connected",
+        "provider": connected.provider if connected else None,
+        "provider_label": provider_labels.get(connected.provider) if connected else None,
+        "available": bool(connected),
+    }
 
 
 @router.post("/interviews", status_code=status.HTTP_201_CREATED)
@@ -2557,6 +3168,8 @@ def create_interview(
     application = _application_or_404(db, organization.id, payload.application_id)
     if application.status != "active" or application.stage != "interview":
         raise HTTPException(status_code=409, detail="Interviews can only be scheduled for active candidates in the interview stage")
+    candidate = _candidate_or_404(db, organization.id, application.candidate_id)
+    job = _job_or_404(db, organization.id, application.job_id)
     interview = HiringInterview(
         organization_id=organization.id,
         application_id=application.id,
@@ -2567,6 +3180,30 @@ def create_interview(
         meeting_url=(payload.meeting_url or "").strip() or None,
         interviewers_json=list(dict.fromkeys(payload.interviewer_user_ids)),
     )
+    calendar = db.scalar(
+        select(HiringIntegration)
+        .where(
+            HiringIntegration.organization_id == organization.id,
+            HiringIntegration.provider.in_(["google_calendar", "outlook_calendar"]),
+            HiringIntegration.status == "connected",
+        )
+        .order_by(HiringIntegration.updated_at.desc())
+    )
+    if not payload.scheduled_at:
+        interview.calendar_sync_status = "not_scheduled"
+    elif not calendar:
+        interview.calendar_sync_status = "not_connected"
+    else:
+        interview.calendar_provider = calendar.provider
+        try:
+            event = _create_calendar_event(calendar, candidate, job, payload.scheduled_at, payload.duration_minutes)
+            interview.calendar_event_id = event["event_id"]
+            interview.calendar_event_url = event["event_url"] or None
+            interview.calendar_sync_status = "synced"
+            calendar.last_synced_at = datetime.now(timezone.utc)
+        except Exception as exc:
+            interview.calendar_sync_status = "failed"
+            interview.calendar_sync_error = str(exc)[:500]
     db.add(interview)
     if application.stage not in {"offer", "hired", "rejected", "withdrawn"}:
         previous_stage = application.stage
@@ -2575,7 +3212,7 @@ def create_interview(
     db.flush()
     _write_audit(db, organization.id, current_user.id, "interview_scheduled", "interview", interview.id, {"application_id": application.id})
     db.commit()
-    return {"id": interview.id, "status": interview.status, "scheduled_at": interview.scheduled_at}
+    return {"id": interview.id, "status": interview.status, "scheduled_at": interview.scheduled_at, "calendar_sync_status": interview.calendar_sync_status, "calendar_event_url": interview.calendar_event_url}
 
 
 @router.post("/interviews/{interview_id}/scorecard", status_code=status.HTTP_201_CREATED)
@@ -2778,6 +3415,131 @@ def list_integrations(
     ]
 
 
+@router.get("/email/status")
+def email_delivery_status(
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "integrations.view")
+    settings = get_settings()
+    channels = list(db.scalars(select(HiringEmailChannel).where(HiringEmailChannel.organization_id == organization.id).order_by(HiringEmailChannel.id.asc())).all())
+    return {
+        "provider": "smtp",
+        "status": "connected" if channels and all(channel.status == "connected" for channel in channels) else ("connected" if settings.smtp_host and settings.smtp_username and settings.smtp_password else "not_configured"),
+        "sender": settings.smtp_sender,
+        "sender_name": settings.smtp_sender_name,
+        "reply_to": settings.smtp_reply_to,
+        "channels_configured": len([channel for channel in channels if channel.status == "connected"]),
+        "channels_total": len(_EMAIL_PURPOSES),
+        "organization_id": organization.id,
+    }
+
+
+def _email_channel_smtp_config(db: Session, organization_id: int, purpose: str) -> dict | None:
+    channel = db.scalar(select(HiringEmailChannel).where(HiringEmailChannel.organization_id == organization_id, HiringEmailChannel.purpose == purpose, HiringEmailChannel.status == "connected"))
+    if not channel or not channel.smtp_password_encrypted:
+        return None
+    try:
+        password = _integration_fernet().decrypt(channel.smtp_password_encrypted.encode("ascii")).decode("utf-8")
+    except Exception:
+        return None
+    return {
+        "smtp_host": channel.smtp_host,
+        "smtp_port": channel.smtp_port,
+        "smtp_username": channel.smtp_username,
+        "smtp_password": password,
+        "sender": channel.sender,
+        "sender_name": channel.sender_name,
+        "reply_to": channel.reply_to,
+    }
+
+
+@router.get("/email/channels")
+def list_email_channels(
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "integrations.view")
+    rows = {channel.purpose: channel for channel in db.scalars(select(HiringEmailChannel).where(HiringEmailChannel.organization_id == organization.id)).all()}
+    return [{
+        "purpose": purpose,
+        "label": label,
+        "provider": rows[purpose].provider if purpose in rows else "smtp",
+        "status": rows[purpose].status if purpose in rows else "not_configured",
+        "smtp_host": rows[purpose].smtp_host if purpose in rows else "",
+        "smtp_port": rows[purpose].smtp_port if purpose in rows else 587,
+        "smtp_username": rows[purpose].smtp_username if purpose in rows else "",
+        "sender": rows[purpose].sender if purpose in rows else "",
+        "sender_name": rows[purpose].sender_name if purpose in rows else "",
+        "reply_to": rows[purpose].reply_to if purpose in rows else "",
+        "last_tested_at": rows[purpose].last_tested_at if purpose in rows else None,
+        "password_configured": bool(rows[purpose].smtp_password_encrypted) if purpose in rows else False,
+    } for purpose, label in _EMAIL_PURPOSES.items()]
+
+
+@router.put("/email/channels")
+def configure_email_channel(
+    payload: EmailChannelUpdate,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "integrations.manage")
+    if not payload.sender or "@" not in payload.sender:
+        raise HTTPException(status_code=422, detail="Enter a valid sender email address")
+    channel = db.scalar(select(HiringEmailChannel).where(HiringEmailChannel.organization_id == organization.id, HiringEmailChannel.purpose == payload.purpose))
+    if not channel:
+        channel = HiringEmailChannel(organization_id=organization.id, purpose=payload.purpose)
+        db.add(channel)
+    channel.smtp_host = payload.smtp_host.strip()
+    channel.smtp_port = payload.smtp_port
+    channel.smtp_username = payload.smtp_username.strip()
+    channel.sender = payload.sender.strip().lower()
+    channel.sender_name = payload.sender_name.strip() or organization.name
+    channel.reply_to = payload.reply_to.strip().lower()
+    if payload.smtp_password is not None and payload.smtp_password.strip():
+        channel.smtp_password_encrypted = _integration_fernet().encrypt(payload.smtp_password.strip().encode("utf-8")).decode("ascii")
+    if not channel.smtp_host or not channel.smtp_username or not channel.smtp_password_encrypted:
+        channel.status = "not_configured"
+    else:
+        channel.status = "connected"
+    _write_audit(db, organization.id, current_user.id, "email_channel_configured", "email_channel", channel.id, {"purpose": payload.purpose, "status": channel.status})
+    db.commit()
+    return {"purpose": channel.purpose, "status": channel.status, "sender": channel.sender}
+
+
+@router.post("/email/test")
+def send_email_test(
+    payload: EmailTestRequest,
+    organization_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER, UserRole.ADMIN)),
+):
+    organization, membership = _organization_context(db, current_user, organization_id)
+    _require_permission(current_user, membership, "integrations.manage")
+    channel_config = _email_channel_smtp_config(db, organization.id, payload.purpose)
+    result = send_email(
+        current_user.email,
+        f"Valases email delivery test | {_EMAIL_PURPOSES[payload.purpose]}",
+        f"This is a delivery test from the {organization.name} hiring workspace for {_EMAIL_PURPOSES[payload.purpose].lower()}.",
+        reply_to=current_user.email,
+        smtp_config=channel_config,
+    )
+    if not result.get("sent"):
+        raise HTTPException(status_code=502, detail=str(result.get("reason") or "The email provider did not accept the test message")[:300])
+    channel = db.scalar(select(HiringEmailChannel).where(HiringEmailChannel.organization_id == organization.id, HiringEmailChannel.purpose == payload.purpose))
+    if channel:
+        channel.last_tested_at = datetime.now(timezone.utc)
+    _write_audit(db, organization.id, current_user.id, "email_delivery_test_sent", "organization", organization.id, {"recipient": current_user.email, "purpose": payload.purpose, "client_channel": bool(channel_config)})
+    db.commit()
+    return {"status": "sent", "recipient": current_user.email}
+
+
 @router.put("/integrations")
 def configure_integration(
     payload: IntegrationUpdate,
@@ -2833,7 +3595,7 @@ def begin_integration_connection(
     authorization_url = str(config.get("authorization_url") or "").strip()
     if not client_id or not authorization_url.startswith("https://"):
         raise HTTPException(status_code=503, detail="The integration OAuth configuration is incomplete")
-    callback_url = str(config.get("redirect_uri") or f"{get_settings().app_base_url.rstrip('/')}/hiring/integrations/oauth/callback")
+    callback_url = str(config.get("redirect_uri") or f"{get_settings().app_base_url.rstrip('/')}/api/hiring/integrations/oauth/callback")
     query = {
         "client_id": client_id,
         "redirect_uri": callback_url,
@@ -2875,7 +3637,7 @@ def complete_integration_connection(
     token_url = str(config.get("token_url") or "").strip()
     client_id = str(config.get("client_id") or "").strip()
     client_secret = str(config.get("client_secret") or "").strip()
-    callback_url = str(config.get("redirect_uri") or f"{settings.app_base_url.rstrip('/')}/hiring/integrations/oauth/callback")
+    callback_url = str(config.get("redirect_uri") or f"{settings.app_base_url.rstrip('/')}/api/hiring/integrations/oauth/callback")
     if not token_url.startswith("https://") or not client_id or not client_secret:
         raise HTTPException(status_code=503, detail="Integration token exchange is not configured")
     response = httpx.post(

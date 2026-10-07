@@ -1,13 +1,27 @@
 import axios from "axios";
 import { useSessionStore } from "./sessionStore";
 import { supabase } from "./supabase";
+import { isLocalUiPreview } from "./uiPreview";
+
+const configuredApiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "").trim();
+const defaultApiBaseUrl = import.meta.env.DEV ? "/" : "/api/";
+// A legacy same-origin "/" setting would send production API calls into the
+// static SPA. Preserve absolute external API URLs, but normalize same-origin
+// production traffic to the dedicated serverless boundary.
+const resolvedApiBaseUrl = import.meta.env.PROD && configuredApiBaseUrl === "/"
+  ? "/api/"
+  : configuredApiBaseUrl || defaultApiBaseUrl;
 
 export const api = axios.create({
-  baseURL: String(import.meta.env.VITE_API_BASE_URL || "/").trim() || "/",
+  baseURL: resolvedApiBaseUrl,
   headers: { "Content-Type": "application/json" },
 });
 
 api.interceptors.request.use((config) => {
+  if (isLocalUiPreview) {
+    config.headers.delete("Authorization");
+    return config;
+  }
   const token = useSessionStore.getState().token;
   // Issued-candidate requests provide their own short-lived bearer token.
   // Never replace it with a recruiter token retained for this domain.

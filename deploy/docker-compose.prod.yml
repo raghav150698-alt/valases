@@ -42,6 +42,14 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MEDIA_DIR: /app/app/web/media
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REDIS_RATE_LIMIT_ENABLED: "true"
+      CLICKHOUSE_ANALYTICS_ENABLED: "true"
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-valases_analytics}
+      PRODUCT_EVENT_CAPTURE_ENABLED: "true"
     volumes:
       - media_data:/app/app/web/media
       - app_logs:/app/logs
@@ -53,6 +61,47 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+
+  hiring-automation-worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    command: ["sh", "-c", "while true; do python scripts/run_hiring_automations.py; sleep 900; done"]
+
+  product-event-worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CLICKHOUSE_ANALYTICS_ENABLED: "true"
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-valases_analytics}
+      PRODUCT_EVENT_PIPELINE_ENABLED: "true"
+    command: ["python", "scripts/run_product_event_pipeline.py"]
 
   postgres:
     image: postgres:16-alpine
@@ -70,16 +119,43 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:8.8.2-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.3.12.3-alpine
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-valases_analytics}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user \"$$CLICKHOUSE_USER\" --password \"$$CLICKHOUSE_PASSWORD\" --query 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
 volumes:
   caddy_data:
   caddy_config:
   postgres_data:
   redis_data:
+  clickhouse_data:
+  clickhouse_logs:
   media_data:
   app_logs:

@@ -1,0 +1,8 @@
+.english-content-summary { border: 1px solid #dbe2eb; background: #f8fafc; border-radius: 12px; padding: 18px; margin: 16px 0; color: #172438; }
+.english-content-heading { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.english-content-heading span { font-size: 12px; padding: 4px 9px; border-radius: 6px; background: #fff0cf; color: #735117; }
+.english-content-summary dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 18px 0; }
+.english-content-summary dt { color: #53647a; font-size: 12px; }
+.english-content-summary dd { margin: 4px 0 0; font-size: 14px; font-weight: 600; }
+.english-content-summary ul, .english-content-summary p { color: #53647a; font-size: 13px; line-height: 1.6; }
+@media (max-width: 700px) { .english-content-summary dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

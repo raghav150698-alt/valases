@@ -5,7 +5,7 @@ import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/api";
 
 self.MonacoEnvironment = {
@@ -20,7 +20,7 @@ self.MonacoEnvironment = {
 
 loader.config({ monaco });
 
-type CodingFile = {
+export type CodingFile = {
   id: string;
   name: string;
   language: "javascript" | "python" | "typescript" | "sql";
@@ -109,11 +109,18 @@ async function runCode(language: "javascript" | "python", code: string): Promise
   return lines.length ? lines : [`Process exited with code ${data.exit_code ?? "unknown"}.`];
 }
 
-export function CodingEnv({ assessmentMode = false }: { assessmentMode?: boolean }) {
-  const [files, setFiles] = useState<CodingFile[]>(() => cloneStarterFiles());
-  const [activeFileId, setActiveFileId] = useState(STARTER_FILES[0].id);
+export function CodingEnv({ assessmentMode = false, initialFiles, onFilesChange, executionDisabledReason }: {
+  assessmentMode?: boolean;
+  initialFiles?: CodingFile[];
+  onFilesChange?: (files: CodingFile[]) => void;
+  executionDisabledReason?: string;
+}) {
+  const seedFiles = () => initialFiles?.length ? initialFiles.map(file => ({ ...file })) : cloneStarterFiles();
+  const [files, setFiles] = useState<CodingFile[]>(seedFiles);
+  const [activeFileId, setActiveFileId] = useState(files[0].id);
   const [output, setOutput] = useState<string[]>(["Ready. Open a JavaScript file and click Run."]);
   const [isRunning, setIsRunning] = useState(false);
+  useEffect(() => { onFilesChange?.(files); }, [files, onFilesChange]);
 
   const activeFile = useMemo(
     () => files.find((file) => file.id === activeFileId) ?? files[0],
@@ -160,7 +167,7 @@ export function CodingEnv({ assessmentMode = false }: { assessmentMode?: boolean
   };
 
   const resetWorkspace = () => {
-    const resetFiles = cloneStarterFiles();
+    const resetFiles = seedFiles();
     setFiles(resetFiles);
     setActiveFileId(resetFiles[0].id);
     setOutput(["Workspace reset to starter files."]);
@@ -203,7 +210,7 @@ export function CodingEnv({ assessmentMode = false }: { assessmentMode?: boolean
           <button type="button" onClick={renameActiveFile}>Rename</button>
           <button type="button" onClick={deleteActiveFile}>Delete</button>
           <button type="button" onClick={resetWorkspace}>Reset</button>
-          <button type="button" onClick={runActiveFile} disabled={isRunning}>
+          <button type="button" onClick={runActiveFile} disabled={isRunning || Boolean(executionDisabledReason)} title={executionDisabledReason}>
             {isRunning ? "Running..." : "Run"}
           </button>
         </div>
@@ -239,7 +246,7 @@ export function CodingEnv({ assessmentMode = false }: { assessmentMode?: boolean
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
-            <small>{canRun ? "Backend runner active" : "Edit-only until backend runner is connected"}</small>
+            <small>{executionDisabledReason || (canRun ? "Run uses the configured execution service" : "Execution is available for JavaScript and Python")}</small>
           </div>
 
           <div className="editor-frame">

@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -584,6 +584,9 @@ class ProviderBillingAccount(Base):
 
 class AssessmentSubmission(Base):
     __tablename__ = "assessment_submissions"
+    __table_args__ = (
+        Index("ix_assessment_submissions_issue_id_id", "issue_id", "id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     assessment_id: Mapped[int] = mapped_column(ForeignKey("exams.id"), index=True)
@@ -611,6 +614,9 @@ class AssessmentReviewClip(Base):
     """
 
     __tablename__ = "assessment_review_clips"
+    __table_args__ = (
+        Index("ix_assessment_review_clips_issue_id_created_at", "issue_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     issue_id: Mapped[int] = mapped_column(ForeignKey("assessment_issues.id"), index=True)
@@ -886,6 +892,27 @@ class AuditLog(Base):
     target_type: Mapped[str] = mapped_column(String(80), index=True)
     target_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     details_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProductEventOutbox(Base):
+    """Durable product event written in the same transaction as domain state."""
+
+    __tablename__ = "product_event_outbox"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    event_id: Mapped[str] = mapped_column(String(36), unique=True, index=True, default=lambda: str(uuid4()))
+    event_type: Mapped[str] = mapped_column(String(120), index=True)
+    organization_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    aggregate_type: Mapped[str] = mapped_column(String(80), index=True)
+    aggregate_id: Mapped[str] = mapped_column(String(120))
+    properties_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    publish_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_error: Mapped[str | None] = mapped_column(String(160), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -1513,3 +1540,52 @@ class DataSubjectRequest(Base):
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class OutreachLead(Base):
+    __tablename__ = "outreach_leads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    company: Mapped[str] = mapped_column(String(240), index=True)
+    website: Mapped[str] = mapped_column(String(500), default="")
+    contact_name: Mapped[str] = mapped_column(String(200), default="")
+    contact_title: Mapped[str] = mapped_column(String(200), default="")
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    campaign: Mapped[str] = mapped_column(String(40), index=True)
+    evidence: Mapped[str] = mapped_column(Text)
+    source_url: Mapped[str] = mapped_column(String(1000))
+    personalization_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(30), default="research", index=True)
+    last_contacted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class OutreachEmail(Base):
+    __tablename__ = "outreach_emails"
+    __table_args__ = (UniqueConstraint("lead_id", "sequence_number", name="uq_outreach_email_sequence"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("outreach_leads.id"), index=True)
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    subject: Mapped[str] = mapped_column(String(300))
+    html_body: Mapped[str] = mapped_column(Text)
+    text_body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OutreachInboundMessage(Base):
+    __tablename__ = "outreach_inbound_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True)
+    from_email: Mapped[str] = mapped_column(String(320), index=True)
+    subject: Mapped[str] = mapped_column(String(300), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    classification: Mapped[str] = mapped_column(String(40), default="unknown", index=True)
+    reply_draft: Mapped[str] = mapped_column(Text, default="")
+    needs_owner: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

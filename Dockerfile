@@ -28,6 +28,8 @@ RUN python -m pip install --upgrade pip \
 
 COPY app ./app
 COPY api ./api
+COPY scripts/run_hiring_automations.py ./scripts/run_hiring_automations.py
+COPY scripts/run_product_event_pipeline.py ./scripts/run_product_event_pipeline.py
 COPY ml ./ml
 COPY data/proctoring/models ./data/proctoring/models
 COPY --from=assessment-build /src/app/web_assessment_react/dist ./app/web_assessment_react/dist
@@ -36,4 +38,4 @@ RUN mkdir -p /app/app/web/media /app/logs
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers", "--forwarded-allow-ips", "*"]

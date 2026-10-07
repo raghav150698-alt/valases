@@ -1,0 +1,2411 @@
+{
+  "id": "professional-english-communication-uk",
+  "title": "English Language Assessment · UK",
+  "summary": "UK workplace English: regional listening, vocabulary, reading, writing and speaking. One randomly selected conversation per attempt.",
+  "assessment_type": "english_language",
+  "duration_minutes": 60,
+  "pass_score": 70,
+  "topics": [
+    "Listening comprehension",
+    "Reading comprehension",
+    "Written communication",
+    "Spoken communication"
+  ],
+  "tools": [
+    "Audio player",
+    "Speech recorder",
+    "Response workspace"
+  ],
+  "instructions": "Complete four 15-minute sections in order. Each section begins with an instruction screen and presents one task at a time. Audio can be played once. You cannot return to a completed section.",
+  "about": "A rigorous English communication assessment for roles that require clear, accurate, and confident workplace communication.",
+  "task": {
+    "title": "English Language Assessment · UK",
+    "description": "Demonstrate practical command of English through realistic workplace and public-service communication scenarios.",
+    "instructions": "The assessment contains four timed sections. Listening and reading include objective questions. Writing and speaking require original responses and are reviewed for coherence, vocabulary, grammar, fluency, pronunciation, and task fulfilment. Use UK workplace vocabulary and spelling where appropriate; clear communication and intelligibility remain the scoring criteria.",
+    "marks": 100,
+    "metadata": {
+      "workspace": "english_language",
+      "answer_format": "structured_response",
+      "format": "guided_section_flow",
+      "bank_version": "2026.2",
+      "shuffle_ready": true,
+      "standard": {
+        "name": "Valases Workplace English Framework",
+        "alignment": "CEFR-informed",
+        "target_range": [
+          "B1",
+          "B2",
+          "B2+",
+          "C1"
+        ],
+        "use_case": "Corporate recruitment screening",
+        "disclaimer": "The reported CEFR band is an assessment estimate, not an accredited language certificate."
+      },
+      "score_profile": {
+        "weights": {
+          "listening": 20,
+          "reading": 20,
+          "writing": 30,
+          "speaking": 30
+        },
+        "minimum_skill_score": 50,
+        "overall_pass_score": 70,
+        "bands": [
+          {
+            "label": "Below B1",
+            "minimum": 0
+          },
+          {
+            "label": "B1",
+            "minimum": 40
+          },
+          {
+            "label": "B2",
+            "minimum": 55
+          },
+          {
+            "label": "B2+",
+            "minimum": 70
+          },
+          {
+            "label": "C1",
+            "minimum": 85
+          }
+        ]
+      },
+      "sections": [
+        {
+          "id": "listening",
+          "label": "Listening",
+          "minutes": 15,
+          "description": "Listen to one everyday or workplace conversation and answer questions about detail, purpose and inference.",
+          "intro": "You will hear one everyday or workplace conversation. The recording plays once. Answer the questions from memory after it finishes.",
+          "rules": [
+            "Use headphones if available.",
+            "Audio plays once and cannot be restarted.",
+            "Notes on paper are not permitted."
+          ],
+          "items": [
+            {
+              "id": "listen-ami-es2004-price",
+              "type": "audio",
+              "label": "Conversation 1 · Pricing trade-offs and target customers",
+              "prompt": "Listen to the complete discussion. The questions will appear after the recording.",
+              "audio_url": "/assessment-audio/conversations/ami-es2004-price.mp3",
+              "duration_seconds": 108,
+              "source": "AMI Meeting Corpus",
+              "source_url": "https://groups.inf.ed.ac.uk/ami/corpus/",
+              "license": "CC BY 4.0",
+              "license_url": "https://creativecommons.org/licenses/by/4.0/",
+              "attribution": "AMI Meeting Corpus, AMI Consortium / University of Edinburgh. Excerpts trimmed and loudness-normalised; original speech timing and voices preserved.",
+              "conversation_id": "ami-es2004-price",
+              "accent_label": "UK-led international discussion · mixed accents"
+            },
+            {
+              "id": "l-ami-es2004-price-1",
+              "type": "choice",
+              "label": "Listening comprehension 1",
+              "prompt": "How does the leader initially react to the estimated price in pounds?",
+              "options": [
+                "She cancels the budget",
+                "She says the currency does not matter",
+                "She thinks it sounds expensive",
+                "She confirms it is free"
+              ],
+              "answer": "She thinks it sounds expensive",
+              "difficulty": "B1",
+              "evidence_seconds": 584
+            },
+            {
+              "id": "l-ami-es2004-price-2",
+              "type": "choice",
+              "label": "Listening comprehension 2",
+              "prompt": "What comparison does a colleague make with existing products?",
+              "options": [
+                "Current remotes can only be rented",
+                "Some current remote controls cost about twenty pounds",
+                "There are no remote controls on the market",
+                "All current remotes cost five pounds"
+              ],
+              "answer": "Some current remote controls cost about twenty pounds",
+              "difficulty": "B1",
+              "evidence_seconds": 596
+            },
+            {
+              "id": "l-ami-es2004-price-3",
+              "type": "choice",
+              "label": "Listening comprehension 3",
+              "prompt": "What concern is raised about lowering the price?",
+              "options": [
+                "The team would have to abandon all customers",
+                "The product would automatically become illegal",
+                "The product might appear to be a cheap option",
+                "The currency would have to change"
+              ],
+              "answer": "The product might appear to be a cheap option",
+              "difficulty": "B2",
+              "evidence_seconds": 608
+            },
+            {
+              "id": "l-ami-es2004-price-4",
+              "type": "choice",
+              "label": "Listening comprehension 4",
+              "prompt": "What fraction of the selling price is the production cost?",
+              "options": [
+                "One tenth",
+                "One half",
+                "Three quarters",
+                "The entire selling price"
+              ],
+              "answer": "One half",
+              "difficulty": "B1",
+              "evidence_seconds": 615
+            },
+            {
+              "id": "l-ami-es2004-price-5",
+              "type": "choice",
+              "label": "Listening comprehension 5",
+              "prompt": "How certain is the leader that the profit target refers to the first year?",
+              "options": [
+                "She states that the target is for a single week",
+                "She refuses to consider the question",
+                "She treats it as an assumption rather than a confirmed fact",
+                "She reads an explicit first-year guarantee"
+              ],
+              "answer": "She treats it as an assumption rather than a confirmed fact",
+              "difficulty": "B2",
+              "evidence_seconds": 630
+            },
+            {
+              "id": "l-ami-es2004-price-6",
+              "type": "choice",
+              "label": "Listening comprehension 6",
+              "prompt": "Who is the intended user group?",
+              "options": [
+                "Only professional television installers",
+                "Only buyers living in the city",
+                "A broad range of users rather than one specialist business group",
+                "Only the meeting participants"
+              ],
+              "answer": "A broad range of users rather than one specialist business group",
+              "difficulty": "B2",
+              "evidence_seconds": 638
+            }
+          ],
+          "attribution": "AMI Meeting Corpus, AMI Consortium / University of Edinburgh. Excerpts trimmed and loudness-normalised; original speech timing and voices preserved."
+        },
+        {
+          "id": "reading",
+          "label": "Reading",
+          "minutes": 15,
+          "description": "Read two professional texts and distinguish central claims, supporting detail, exceptions, and implications.",
+          "intro": "Each question includes the text you need. Read for meaning rather than matching isolated words. Choose one answer and continue.",
+          "rules": [
+            "One question is shown at a time.",
+            "You may reread the passage while answering.",
+            "Completed questions cannot be reopened."
+          ],
+          "items": [
+            {
+              "id": "r1",
+              "type": "reading_choice",
+              "label": "Policy analysis",
+              "difficulty": "B1",
+              "passage": "Remote work requests are reviewed according to business continuity rather than seniority. Employees should submit a request at least five working days in advance and explain how customer coverage, confidential information, and handovers will be managed. A manager may approve a shorter notice period when an unexpected event makes the normal process impractical. Approval is not permanent: arrangements are reviewed every quarter, and an arrangement may be changed if service levels decline or security controls are not followed.",
+              "prompt": "Which principle has the greatest influence on approval?",
+              "options": [
+                "Length of service",
+                "Operational continuity",
+                "The employee's commute",
+                "The permanence of the request"
+              ],
+              "answer": "Operational continuity"
+            },
+            {
+              "id": "r2",
+              "type": "reading_choice",
+              "label": "Policy analysis",
+              "difficulty": "B2",
+              "passage": "Remote work requests are reviewed according to business continuity rather than seniority. Employees should submit a request at least five working days in advance and explain how customer coverage, confidential information, and handovers will be managed. A manager may approve a shorter notice period when an unexpected event makes the normal process impractical. Approval is not permanent: arrangements are reviewed every quarter, and an arrangement may be changed if service levels decline or security controls are not followed.",
+              "prompt": "What does the exception for shorter notice imply?",
+              "options": [
+                "The five-day rule is optional for everyone",
+                "Managers can exercise judgement when circumstances are unexpected",
+                "Only permanent arrangements need approval",
+                "Security controls may be ignored temporarily"
+              ],
+              "answer": "Managers can exercise judgement when circumstances are unexpected"
+            },
+            {
+              "id": "r5",
+              "type": "reading_choice",
+              "label": "Policy consequence",
+              "difficulty": "B2",
+              "passage": "Remote work requests are reviewed according to business continuity rather than seniority. Employees should submit a request at least five working days in advance and explain how customer coverage, confidential information, and handovers will be managed. A manager may approve a shorter notice period when an unexpected event makes the normal process impractical. Approval is not permanent: arrangements are reviewed every quarter, and an arrangement may be changed if service levels decline or security controls are not followed.",
+              "prompt": "Which situation most clearly justifies changing an approved arrangement?",
+              "options": [
+                "The employee has completed another quarter",
+                "Customer coverage has become unreliable",
+                "A more senior employee submits a request",
+                "The employee moves closer to the office"
+              ],
+              "answer": "Customer coverage has become unreliable"
+            },
+            {
+              "id": "r3",
+              "type": "reading_choice",
+              "label": "Evidence and inference",
+              "difficulty": "B2",
+              "passage": "The pilot reduced the average time required to resolve routine support requests by 18 percent. However, customer satisfaction remained unchanged. Interviews suggested that faster closure did not always mean clearer communication: several customers said they received a solution without understanding why the problem occurred. The operations team therefore recommends extending the pilot only if the next phase measures explanation quality as well as speed.",
+              "prompt": "Why does the team attach a condition to extending the pilot?",
+              "options": [
+                "The speed improvement was too small",
+                "The pilot increased operating costs",
+                "Efficiency alone did not improve the customer experience",
+                "Customers preferred slower service"
+              ],
+              "answer": "Efficiency alone did not improve the customer experience"
+            },
+            {
+              "id": "r4",
+              "type": "reading_choice",
+              "label": "Evidence and inference",
+              "difficulty": "B2",
+              "passage": "The pilot reduced the average time required to resolve routine support requests by 18 percent. However, customer satisfaction remained unchanged. Interviews suggested that faster closure did not always mean clearer communication: several customers said they received a solution without understanding why the problem occurred. The operations team therefore recommends extending the pilot only if the next phase measures explanation quality as well as speed.",
+              "prompt": "Which statement best summarises the evidence?",
+              "options": [
+                "Faster resolution guaranteed better service",
+                "Customers rejected the solutions they received",
+                "The pilot improved speed but exposed a communication gap",
+                "The team recommends ending all automation"
+              ],
+              "answer": "The pilot improved speed but exposed a communication gap"
+            },
+            {
+              "id": "r6",
+              "type": "reading_choice",
+              "label": "Recommendation logic",
+              "difficulty": "B2+",
+              "passage": "The pilot reduced the average time required to resolve routine support requests by 18 percent. However, customer satisfaction remained unchanged. Interviews suggested that faster closure did not always mean clearer communication: several customers said they received a solution without understanding why the problem occurred. The operations team therefore recommends extending the pilot only if the next phase measures explanation quality as well as speed.",
+              "prompt": "Which assumption underpins the recommendation?",
+              "options": [
+                "Resolution speed and explanation quality should be assessed together",
+                "Customer interviews are less reliable than closure data",
+                "Only automated requests require explanations",
+                "Satisfaction will improve automatically in a larger pilot"
+              ],
+              "answer": "Resolution speed and explanation quality should be assessed together"
+            },
+            {
+              "id": "r7",
+              "type": "reading_choice",
+              "label": "Procurement judgement",
+              "difficulty": "B2",
+              "passage": "The lowest-priced supplier met the technical specification but proposed an implementation team based entirely outside the customer's operating hours. The second-ranked bid was 7 percent more expensive and included regional support, a named transition manager, and service credits if critical milestones were missed. Procurement may still recommend the lower bid, but the evaluation note must quantify the operational risk and explain why the existing support model is sufficient. Price alone cannot determine the award because continuity during transition is classified as a material requirement.",
+              "prompt": "Why can the lowest price not determine the award by itself?",
+              "options": [
+                "Regional suppliers must always be selected",
+                "Transition continuity is a material requirement",
+                "Service credits are prohibited",
+                "The technical specification has changed"
+              ],
+              "answer": "Transition continuity is a material requirement"
+            },
+            {
+              "id": "r8",
+              "type": "reading_choice",
+              "label": "Procurement judgement",
+              "difficulty": "B2+",
+              "passage": "The lowest-priced supplier met the technical specification but proposed an implementation team based entirely outside the customer's operating hours. The second-ranked bid was 7 percent more expensive and included regional support, a named transition manager, and service credits if critical milestones were missed. Procurement may still recommend the lower bid, but the evaluation note must quantify the operational risk and explain why the existing support model is sufficient. Price alone cannot determine the award because continuity during transition is classified as a material requirement.",
+              "prompt": "What must procurement demonstrate to recommend the lower bid?",
+              "options": [
+                "That the second supplier withdrew",
+                "That the identified operating-hours risk is understood and adequately controlled",
+                "That every technical requirement is optional",
+                "That service credits have no financial value"
+              ],
+              "answer": "That the identified operating-hours risk is understood and adequately controlled"
+            },
+            {
+              "id": "r9",
+              "type": "reading_choice",
+              "label": "Procurement inference",
+              "difficulty": "C1",
+              "passage": "The lowest-priced supplier met the technical specification but proposed an implementation team based entirely outside the customer's operating hours. The second-ranked bid was 7 percent more expensive and included regional support, a named transition manager, and service credits if critical milestones were missed. Procurement may still recommend the lower bid, but the evaluation note must quantify the operational risk and explain why the existing support model is sufficient. Price alone cannot determine the award because continuity during transition is classified as a material requirement.",
+              "prompt": "Which statement best captures the evaluator's required position?",
+              "options": [
+                "Cost should be ignored whenever delivery teams are remote",
+                "A compliant bid may still be inferior when implementation risk is considered",
+                "The higher bid automatically offers better technical quality",
+                "Operational risk can be accepted without written justification"
+              ],
+              "answer": "A compliant bid may still be inferior when implementation risk is considered"
+            },
+            {
+              "id": "r10",
+              "type": "reading_choice",
+              "label": "Incident communication",
+              "difficulty": "B2",
+              "passage": "At 09:20 UTC, monitoring detected intermittent delays affecting invoice exports. Core transaction processing remained available, and no evidence of data loss was found. The team disabled a recently introduced queue optimisation at 10:05 UTC, after which export times returned to normal. Investigation continues because the rollback restored performance but did not explain why the change affected only two regions. The next customer update will be issued by 14:00 UTC even if root-cause analysis is still in progress.",
+              "prompt": "What is confirmed about the incident?",
+              "options": [
+                "All transaction processing stopped",
+                "The rollback restored export performance",
+                "Customer data was permanently lost",
+                "The root cause was identified by 10:05 UTC"
+              ],
+              "answer": "The rollback restored export performance"
+            },
+            {
+              "id": "r11",
+              "type": "reading_choice",
+              "label": "Incident communication",
+              "difficulty": "B2+",
+              "passage": "At 09:20 UTC, monitoring detected intermittent delays affecting invoice exports. Core transaction processing remained available, and no evidence of data loss was found. The team disabled a recently introduced queue optimisation at 10:05 UTC, after which export times returned to normal. Investigation continues because the rollback restored performance but did not explain why the change affected only two regions. The next customer update will be issued by 14:00 UTC even if root-cause analysis is still in progress.",
+              "prompt": "Why does the team continue investigating after performance returns to normal?",
+              "options": [
+                "The mitigation does not explain the regional pattern",
+                "Monitoring is no longer available",
+                "The rollback caused data loss",
+                "Invoice exports remain completely unavailable"
+              ],
+              "answer": "The mitigation does not explain the regional pattern"
+            },
+            {
+              "id": "r12",
+              "type": "reading_choice",
+              "label": "Communication commitment",
+              "difficulty": "C1",
+              "passage": "At 09:20 UTC, monitoring detected intermittent delays affecting invoice exports. Core transaction processing remained available, and no evidence of data loss was found. The team disabled a recently introduced queue optimisation at 10:05 UTC, after which export times returned to normal. Investigation continues because the rollback restored performance but did not explain why the change affected only two regions. The next customer update will be issued by 14:00 UTC even if root-cause analysis is still in progress.",
+              "prompt": "What does the final sentence signal to customers?",
+              "options": [
+                "Updates depend on having a complete technical explanation",
+                "The team is committing to a communication time independently of investigation completion",
+                "No further update will be needed if exports remain stable",
+                "Only affected regions will receive information"
+              ],
+              "answer": "The team is committing to a communication time independently of investigation completion"
+            }
+          ]
+        },
+        {
+          "id": "writing",
+          "label": "Writing",
+          "minutes": 15,
+          "description": "Produce a concise summary and a professional email with clear purpose, structure, and tone.",
+          "intro": "Complete both writing tasks. Quality, relevance, grammar, vocabulary, organisation, and adherence to the word range are reviewed.",
+          "rules": [
+            "Write in your own words.",
+            "Stay within the displayed word range.",
+            "Spend about 5 minutes on Task 1 and 10 minutes on Task 2."
+          ],
+          "items": [
+            {
+              "id": "w1",
+              "type": "writing",
+              "label": "Executive summary",
+              "difficulty": "B2",
+              "suggested_minutes": 5,
+              "passage": "A four-day working week can improve focus when organisations redesign work rather than compressing the same workload into fewer days. Successful trials remove low-value meetings, clarify decision ownership, and protect periods for concentrated work. Where these changes are absent, employees may face longer days and greater pressure, cancelling the intended wellbeing benefit. The strongest evidence therefore supports treating shorter weeks as an operational redesign, not simply a scheduling benefit.",
+              "prompt": "Summarise the central conclusion and its main qualification in one paragraph for a senior manager.",
+              "minimum_words": 45,
+              "maximum_words": 65
+            },
+            {
+              "id": "w2",
+              "type": "writing",
+              "label": "Customer recovery email",
+              "difficulty": "B2+",
+              "suggested_minutes": 10,
+              "prompt": "A London customer paid a £250 set-up fee, but a promised implementation update was late and incomplete. Write a customer service email acknowledging the issue, explaining immediate next steps without unsupported promises, and proposing a follow-up time in UK local time. Use UK workplace vocabulary and spelling.",
+              "minimum_words": 120,
+              "maximum_words": 160
+            }
+          ]
+        },
+        {
+          "id": "speaking",
+          "label": "Speaking",
+          "minutes": 15,
+          "description": "Record four workplace responses that test intelligibility, practical interaction, structured explanation, and extended speaking.",
+          "intro": "Test your microphone first. Each scored prompt provides brief preparation time followed by one recording attempt.",
+          "rules": [
+            "Use a headset microphone if available.",
+            "Speak at a natural pace and volume.",
+            "Scored responses cannot be played back or rerecorded."
+          ],
+          "requires_microphone_check": true,
+          "items": [
+            {
+              "id": "s1",
+              "type": "speaking",
+              "label": "Read aloud",
+              "difficulty": "B1",
+              "suggested_minutes": 2,
+              "preparation_seconds": 15,
+              "max_attempts": 1,
+              "allow_playback": false,
+              "prompt": "Read the text aloud clearly.",
+              "passage": "Effective teams do not avoid disagreement. They make it safe to question assumptions, examine evidence, and decide who is responsible for the next action. When disagreement is handled respectfully, it becomes a tool for better decisions rather than a source of delay.",
+              "minimum_seconds": 30,
+              "maximum_seconds": 60
+            },
+            {
+              "id": "s2",
+              "type": "speaking",
+              "label": "Respond to a situation",
+              "difficulty": "B2",
+              "suggested_minutes": 4,
+              "preparation_seconds": 20,
+              "max_attempts": 1,
+              "allow_playback": false,
+              "prompt": "You are leading a meeting. A colleague repeatedly interrupts another speaker. Address the colleague politely, protect the discussion, and explain how the meeting will continue.",
+              "minimum_seconds": 45,
+              "maximum_seconds": 75
+            },
+            {
+              "id": "s3",
+              "type": "speaking",
+              "label": "Explain operational information",
+              "difficulty": "B2+",
+              "suggested_minutes": 4,
+              "preparation_seconds": 25,
+              "max_attempts": 1,
+              "allow_playback": false,
+              "passage": "Support backlog: Monday 84 cases; Tuesday 61; Wednesday 39. First-response target met: Monday 72%; Tuesday 81%; Wednesday 93%.",
+              "prompt": "Brief a manager on the trend, connect the two measures, and identify one sensible follow-up question.",
+              "minimum_seconds": 55,
+              "maximum_seconds": 90
+            },
+            {
+              "id": "s4",
+              "type": "speaking",
+              "label": "Extended workplace response",
+              "difficulty": "C1",
+              "suggested_minutes": 5,
+              "preparation_seconds": 30,
+              "max_attempts": 1,
+              "allow_playback": false,
+              "prompt": "A project is on schedule, but a key dependency has become uncertain. Explain how you would communicate the risk to a senior stakeholder without causing unnecessary alarm. Include what is known, what remains uncertain, and the decision or support you need.",
+              "minimum_seconds": 75,
+              "maximum_seconds": 120
+            }
+          ]
+        }
+      ],
+      "rubric": {
+        "scale": "0–5 analytic rating",
+        "bands": {
+          "0": "No assessable response",
+          "1": "A1/A2: meaning is frequently unclear and the task is largely unfulfilled",
+          "2": "B1: communicates the main message with noticeable limitations",
+          "3": "B2: communicates clearly and appropriately with generally effective control",
+          "4": "B2+: handles complexity confidently with only minor lapses",
+          "5": "C1: precise, flexible, well-structured and consistently effective"
+        },
+        "writing": [
+          "Task fulfilment and professional tone",
+          "Organisation and cohesion",
+          "Lexical range and precision",
+          "Grammar and accuracy"
+        ],
+        "speaking": [
+          "Task fulfilment and structure",
+          "Fluency and interaction",
+          "Language range and accuracy",
+          "Pronunciation and intelligibility"
+        ]
+      },
+      "english_locale": "en-GB",
+      "english_region": "UK",
+      "listening_content_note": "UK pilot pool: spontaneous Southern London and Scottish conversations, plus UK-led workplace discussions with an international colleague. Independent listening and difficulty review are pending.",
+      "listening_selection": {
+        "bank_version": 4,
+        "conversation_ids": [
+          "ami-es2004-price"
+        ]
+      },
+      "listening_bank": {
+        "version": 4,
+        "source": "AMI Meeting Corpus",
+        "source_url": "https://groups.inf.ed.ac.uk/ami/corpus/",
+        "license": "CC BY 4.0",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "AMI Meeting Corpus, AMI Consortium / University of Edinburgh. Excerpts trimmed and loudness-normalised; original speech timing and voices preserved.",
+        "conversations": [
+          {
+            "id": "ami-es2004-price",
+            "meeting_id": "ES2004a",
+            "start_seconds": 561,
+            "duration_seconds": 108,
+            "title": "Pricing trade-offs and target customers",
+            "status": "ready",
+            "speech_style": "spontaneous human discussion in a design-team role-play",
+            "questions": [
+              {
+                "id": "l-ami-es2004-price-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "How does the leader initially react to the estimated price in pounds?",
+                "options": [
+                  "She thinks it sounds expensive",
+                  "She confirms it is free",
+                  "She says the currency does not matter",
+                  "She cancels the budget"
+                ],
+                "answer": "She thinks it sounds expensive",
+                "difficulty": "B1",
+                "evidence_seconds": 584
+              },
+              {
+                "id": "l-ami-es2004-price-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "What comparison does a colleague make with existing products?",
+                "options": [
+                  "Some current remote controls cost about twenty pounds",
+                  "All current remotes cost five pounds",
+                  "There are no remote controls on the market",
+                  "Current remotes can only be rented"
+                ],
+                "answer": "Some current remote controls cost about twenty pounds",
+                "difficulty": "B1",
+                "evidence_seconds": 596
+              },
+              {
+                "id": "l-ami-es2004-price-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "What concern is raised about lowering the price?",
+                "options": [
+                  "The product might appear to be a cheap option",
+                  "The product would automatically become illegal",
+                  "The team would have to abandon all customers",
+                  "The currency would have to change"
+                ],
+                "answer": "The product might appear to be a cheap option",
+                "difficulty": "B2",
+                "evidence_seconds": 608
+              },
+              {
+                "id": "l-ami-es2004-price-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "What fraction of the selling price is the production cost?",
+                "options": [
+                  "One half",
+                  "One tenth",
+                  "Three quarters",
+                  "The entire selling price"
+                ],
+                "answer": "One half",
+                "difficulty": "B1",
+                "evidence_seconds": 615
+              },
+              {
+                "id": "l-ami-es2004-price-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "How certain is the leader that the profit target refers to the first year?",
+                "options": [
+                  "She treats it as an assumption rather than a confirmed fact",
+                  "She reads an explicit first-year guarantee",
+                  "She states that the target is for a single week",
+                  "She refuses to consider the question"
+                ],
+                "answer": "She treats it as an assumption rather than a confirmed fact",
+                "difficulty": "B2",
+                "evidence_seconds": 630
+              },
+              {
+                "id": "l-ami-es2004-price-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "Who is the intended user group?",
+                "options": [
+                  "A broad range of users rather than one specialist business group",
+                  "Only professional television installers",
+                  "Only the meeting participants",
+                  "Only buyers living in the city"
+                ],
+                "answer": "A broad range of users rather than one specialist business group",
+                "difficulty": "B2",
+                "evidence_seconds": 638
+              }
+            ],
+            "locales": [
+              "en-GB"
+            ],
+            "accent_profile": "UK-led: Scotland, England and one Hindi-first-language colleague resident in the UK. Evidence: AMI participants.xml and meetings.xml.",
+            "accent_label": "UK-led international discussion · mixed accents",
+            "accent_mix": "mixed"
+          },
+          {
+            "id": "ami-es2004-usability",
+            "meeting_id": "ES2004a",
+            "start_seconds": 675,
+            "duration_seconds": 189,
+            "title": "Making a remote easier to use",
+            "status": "ready",
+            "speech_style": "spontaneous human discussion in a design-team role-play",
+            "questions": [
+              {
+                "id": "l-ami-es2004-usability-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "What problem did the leader experience with her universal remote?",
+                "options": [
+                  "It lost its settings and needed reprogramming",
+                  "It could control only the lights",
+                  "Its screen was too large",
+                  "It could not be held in one hand"
+                ],
+                "answer": "It lost its settings and needed reprogramming",
+                "difficulty": "B1",
+                "evidence_seconds": 692
+              },
+              {
+                "id": "l-ami-es2004-usability-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "What advantage did that universal remote provide?",
+                "options": [
+                  "It reduced the need for several separate remotes",
+                  "It made television programmes free",
+                  "It replaced the television itself",
+                  "It never required setup"
+                ],
+                "answer": "It reduced the need for several separate remotes",
+                "difficulty": "B1",
+                "evidence_seconds": 701
+              },
+              {
+                "id": "l-ami-es2004-usability-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why does a participant describe using only basic functions?",
+                "options": [
+                  "To show that the design should also suit less technical users",
+                  "To prove that remote controls are unnecessary",
+                  "To demand removal of the volume controls",
+                  "To argue that all customers are engineers"
+                ],
+                "answer": "To show that the design should also suit less technical users",
+                "difficulty": "B2",
+                "evidence_seconds": 713
+              },
+              {
+                "id": "l-ami-es2004-usability-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "What does the leader dislike about existing controls?",
+                "options": [
+                  "Many tiny buttons and labels make functions difficult to find",
+                  "They have too few television channels",
+                  "Their instruction manuals are always digital",
+                  "They are all the same colour"
+                ],
+                "answer": "Many tiny buttons and labels make functions difficult to find",
+                "difficulty": "B2",
+                "evidence_seconds": 738
+              },
+              {
+                "id": "l-ami-es2004-usability-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What design approach is suggested for advanced functions?",
+                "options": [
+                  "Keep basic controls visible and place other functions in a separate section or menu",
+                  "Remove all the basic controls",
+                  "Put every possible function on a separate remote",
+                  "Require users to memorise every button"
+                ],
+                "answer": "Keep basic controls visible and place other functions in a separate section or menu",
+                "difficulty": "B2",
+                "evidence_seconds": 759
+              },
+              {
+                "id": "l-ami-es2004-usability-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "What concern is raised about a phone-style menu?",
+                "options": [
+                  "Some older users may find that kind of interaction difficult",
+                  "No phone has ever used a menu",
+                  "Menus necessarily prevent volume control",
+                  "Only designers are allowed to use displays"
+                ],
+                "answer": "Some older users may find that kind of interaction difficult",
+                "difficulty": "B2",
+                "evidence_seconds": 812
+              }
+            ],
+            "locales": [
+              "en-GB"
+            ],
+            "accent_profile": "UK-led: Scotland, England and one Hindi-first-language colleague resident in the UK. Evidence: AMI participants.xml and meetings.xml.",
+            "accent_label": "UK-led international discussion · mixed accents",
+            "accent_mix": "mixed"
+          },
+          {
+            "id": "edacc-c08-childhood-tv",
+            "meeting_id": "EDACC-C08",
+            "start_seconds": 330.5,
+            "duration_seconds": 184.3,
+            "title": "Remembering childhood programmes",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "Two Scottish English speakers; self-reported Scottish (Fife) and English with Scottish inflections, both Scottish English first language.",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C08 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c08-childhood-tv.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c08-childhood-tv-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "What does the mystery gang do in the programme described?",
+                "options": [
+                  "Solve mysteries",
+                  "Present the news",
+                  "Train athletes",
+                  "Organise holidays"
+                ],
+                "answer": "Solve mysteries",
+                "difficulty": "B1",
+                "evidence_seconds": 366.35,
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c08-childhood-tv-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "What does the watch let the boy do in the other programme?",
+                "options": [
+                  "Turn into different heroes",
+                  "Travel to another country",
+                  "Speak to his sister",
+                  "Find lost books"
+                ],
+                "answer": "Turn into different heroes",
+                "difficulty": "B1",
+                "evidence_seconds": 445.97,
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c08-childhood-tv-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why does the questioner ask about go-to television shows after the first question?",
+                "options": [
+                  "To help the other speaker recall childhood favourites",
+                  "To arrange a television repair",
+                  "To check which channels are available today",
+                  "To ask about a programme they are making"
+                ],
+                "answer": "To help the other speaker recall childhood favourites",
+                "difficulty": "B2",
+                "evidence_seconds": 343.91,
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c08-childhood-tv-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "What attitude does the speaker express when describing Ben Ten?",
+                "options": [
+                  "Enthusiasm for the programme and its games",
+                  "Concern that the games are too expensive",
+                  "Disappointment that the programme ended early",
+                  "Uncertainty about ever having watched it"
+                ],
+                "answer": "Enthusiasm for the programme and its games",
+                "difficulty": "B2",
+                "evidence_seconds": 436.98,
+                "skill": "attitude"
+              },
+              {
+                "id": "l-edacc-c08-childhood-tv-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What can be inferred from their exchange about Ben Ten?",
+                "options": [
+                  "They do not share the same interest in the programme",
+                  "They both watched every episode together",
+                  "They are planning to write a new episode",
+                  "They agree that its games are difficult"
+                ],
+                "answer": "They do not share the same interest in the programme",
+                "difficulty": "B2",
+                "evidence_seconds": 440.84,
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c08-childhood-tv-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "Why did one speaker stop reading the Harry Potter books?",
+                "options": [
+                  "They did not hold his interest",
+                  "He could not find a copy",
+                  "His sister had taken the books away",
+                  "He preferred the television adaptation"
+                ],
+                "answer": "They did not hold his interest",
+                "difficulty": "B2",
+                "evidence_seconds": 505.25,
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C08",
+            "accent_label": "Scottish English"
+          },
+          {
+            "id": "edacc-c08-holidays",
+            "meeting_id": "EDACC-C08",
+            "start_seconds": 833.0,
+            "duration_seconds": 133.3,
+            "title": "Choosing a holiday destination",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "Two Scottish English speakers; self-reported Scottish (Fife) and English with Scottish inflections, both Scottish English first language.",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C08 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c08-holidays.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c08-holidays-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "What most attracts the first speaker to Japan?",
+                "options": [
+                  "Experiencing a culture different from his own",
+                  "Meeting relatives who live there",
+                  "Finding familiar food at a lower price",
+                  "Returning to a place he visits every year"
+                ],
+                "answer": "Experiencing a culture different from his own",
+                "difficulty": "B1",
+                "evidence_seconds": 842.76,
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c08-holidays-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "Which two alternative destinations does the second speaker suggest?",
+                "options": [
+                  "Iceland or Alaska",
+                  "America or Japan",
+                  "London or Edinburgh",
+                  "France or Spain"
+                ],
+                "answer": "Iceland or Alaska",
+                "difficulty": "B1",
+                "evidence_seconds": 873.87,
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c08-holidays-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why does the second speaker offer an alternative to Japan?",
+                "options": [
+                  "To add a different idea to the conversation",
+                  "To correct the first speaker's travel booking",
+                  "To explain why Japan is inaccessible",
+                  "To avoid repeating a holiday he has already taken"
+                ],
+                "answer": "To add a different idea to the conversation",
+                "difficulty": "B2",
+                "evidence_seconds": 873.87,
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c08-holidays-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "What makes Iceland appealing to the second speaker?",
+                "options": [
+                  "Many different natural features in a relatively small area",
+                  "Its similarity to his home town",
+                  "A particular hotel recommended by a friend",
+                  "Its shopping centres and nightlife"
+                ],
+                "answer": "Many different natural features in a relatively small area",
+                "difficulty": "B2",
+                "evidence_seconds": 897.61,
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c08-holidays-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What does the comment about not needing to leave the house for cold weather suggest?",
+                "options": [
+                  "Cold weather alone is not a strong reason to travel",
+                  "The speaker has decided to move abroad",
+                  "The speaker has checked the weather forecast",
+                  "Their house is close to Iceland"
+                ],
+                "answer": "Cold weather alone is not a strong reason to travel",
+                "difficulty": "B2",
+                "evidence_seconds": 893.93,
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c08-holidays-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "How certain is the speaker that Iceland has stayed expensive?",
+                "options": [
+                  "He presents it as an impression rather than a confirmed price",
+                  "He has just received a quotation for the trip",
+                  "He has compared the cost of every available flight",
+                  "He knows the exact amount from a recent visit"
+                ],
+                "answer": "He presents it as an impression rather than a confirmed price",
+                "difficulty": "B2",
+                "evidence_seconds": 943.6,
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C08",
+            "accent_label": "Scottish English"
+          },
+          {
+            "id": "edacc-c08-food-city",
+            "meeting_id": "EDACC-C08",
+            "start_seconds": 614.6,
+            "duration_seconds": 143.12,
+            "title": "Sunday meals and city life",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "British English conversation. A: Scottish (Fife) (first language: English); B: English with Scottish inflections (first language: English)",
+            "accent_mix": "regional",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C08 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c08-food-city.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c08-food-city-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "Which meat did the family usually have for a roast dinner?",
+                "options": [
+                  "Chicken",
+                  "Lamb",
+                  "Beef",
+                  "Pork"
+                ],
+                "answer": "Chicken",
+                "evidence_seconds": 660.2,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c08-food-city-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "How does one speaker describe the streets of Edinburgh?",
+                "options": [
+                  "Different streets have different atmospheres",
+                  "Every street looks the same",
+                  "They are all closed to walkers",
+                  "They are mainly empty"
+                ],
+                "answer": "Different streets have different atmospheres",
+                "evidence_seconds": 724.14,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c08-food-city-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why did the mother need to buy an extra pack of grapes?",
+                "options": [
+                  "Her child ate a pack while they were still shopping",
+                  "The shop gave away a free pack",
+                  "The family was making grape juice",
+                  "The grapes were being sent abroad"
+                ],
+                "answer": "Her child ate a pack while they were still shopping",
+                "evidence_seconds": 629.15,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c08-food-city-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "Why does the other speaker question the plan to try lamb?",
+                "options": [
+                  "He is concerned about its price",
+                  "He thinks lamb cannot be roasted",
+                  "He has already bought chicken",
+                  "He dislikes all cooked meat"
+                ],
+                "answer": "He is concerned about its price",
+                "evidence_seconds": 704.58,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c08-food-city-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What suggests that roast dinners remain part of the speaker's life?",
+                "options": [
+                  "He prepares one every few weeks",
+                  "He only remembers them from photographs",
+                  "He has never learned to prepare one",
+                  "He eats them only when visiting his parents"
+                ],
+                "answer": "He prepares one every few weeks",
+                "evidence_seconds": 679.84,
+                "difficulty": "B2",
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c08-food-city-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "What do the walking and bus examples suggest about city life?",
+                "options": [
+                  "A range of places is within easy reach",
+                  "Shopping requires a long journey abroad",
+                  "The speaker avoids leaving home",
+                  "Only one neighbourhood is accessible"
+                ],
+                "answer": "A range of places is within easy reach",
+                "evidence_seconds": 749.39,
+                "difficulty": "B2",
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C08",
+            "accent_label": "Scottish English"
+          },
+          {
+            "id": "edacc-c46_p1-coastal-visits",
+            "meeting_id": "EDACC-C46_P1",
+            "start_seconds": 32.2,
+            "duration_seconds": 174.2,
+            "title": "Remembering coastal visits",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "British English conversation. A: Glaswegian (not slang) (first language: English); B: Glaswegian (first language: English)",
+            "accent_mix": "regional",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C46_P1 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c46_p1-coastal-visits.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c46_p1-coastal-visits-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "How often does the speaker try to visit St Andrews?",
+                "options": [
+                  "At least twice a year",
+                  "Every weekend",
+                  "Once every ten years",
+                  "Only on business trips"
+                ],
+                "answer": "At least twice a year",
+                "evidence_seconds": 37.51,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-coastal-visits-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "What is the golf course called?",
+                "options": [
+                  "The Old Course",
+                  "The Mountain Course",
+                  "The New Harbour Course",
+                  "The City Course"
+                ],
+                "answer": "The Old Course",
+                "evidence_seconds": 88.41,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-coastal-visits-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why does the speaker mention visitors from different countries?",
+                "options": [
+                  "To illustrate the golf course's reputation",
+                  "To explain why the beach is closed",
+                  "To organise a group booking",
+                  "To complain that golf has disappeared"
+                ],
+                "answer": "To illustrate the golf course's reputation",
+                "evidence_seconds": 70.91,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-coastal-visits-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "Why is North Berwick practical for a day trip for one speaker?",
+                "options": [
+                  "It is not too far from home",
+                  "She owns a holiday hotel there",
+                  "It can only be visited for one day",
+                  "There is no overnight accommodation"
+                ],
+                "answer": "It is not too far from home",
+                "evidence_seconds": 162.17,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-coastal-visits-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What can be inferred about the speaker's relationship with golf?",
+                "options": [
+                  "He appreciates the course although he no longer plays",
+                  "He currently competes professionally",
+                  "He has never heard of golf",
+                  "He dislikes everyone who plays"
+                ],
+                "answer": "He appreciates the course although he no longer plays",
+                "evidence_seconds": 70.91,
+                "difficulty": "B2",
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c46_p1-coastal-visits-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "How does he present the age and origins of the course?",
+                "options": [
+                  "As beliefs rather than personally verified facts",
+                  "As figures from a document he is reading",
+                  "As events that happened last week",
+                  "As details he refuses to discuss"
+                ],
+                "answer": "As beliefs rather than personally verified facts",
+                "evidence_seconds": 99.24,
+                "difficulty": "B2",
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C46",
+            "accent_label": "Scottish English"
+          },
+          {
+            "id": "edacc-c46_p1-remote-travel",
+            "meeting_id": "EDACC-C46_P1",
+            "start_seconds": 213.3,
+            "duration_seconds": 183.7,
+            "title": "Planning travel with a young child",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "British English conversation. A: Glaswegian (not slang) (first language: English); B: Glaswegian (first language: English)",
+            "accent_mix": "regional",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C46_P1 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c46_p1-remote-travel.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c46_p1-remote-travel-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "What makes very remote places difficult with a young child?",
+                "options": [
+                  "Shops and other things the child may need are far away",
+                  "The child refuses every car journey",
+                  "There are no beaches anywhere",
+                  "Adults are not allowed to visit"
+                ],
+                "answer": "Shops and other things the child may need are far away",
+                "evidence_seconds": 247.83,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-remote-travel-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "How long did the return journey take?",
+                "options": [
+                  "About six or seven hours",
+                  "About twenty minutes",
+                  "Two whole days",
+                  "Less than one hour"
+                ],
+                "answer": "About six or seven hours",
+                "evidence_seconds": 328.25,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-remote-travel-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why did they visit fewer places than on the earlier trip?",
+                "options": [
+                  "Some places were too remote for their current needs",
+                  "Every attraction had permanently closed",
+                  "They had forgotten the name of the route",
+                  "The weather was too hot everywhere"
+                ],
+                "answer": "Some places were too remote for their current needs",
+                "evidence_seconds": 220.3,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-remote-travel-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "Why are the cyclists mentioned?",
+                "options": [
+                  "To express admiration for their endurance on difficult terrain",
+                  "To announce a cycling competition they have entered",
+                  "To complain that cars are prohibited",
+                  "To explain why hotels have no rooms"
+                ],
+                "answer": "To express admiration for their endurance on difficult terrain",
+                "evidence_seconds": 374.21,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-remote-travel-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What can be inferred about the child's travel difficulties?",
+                "options": [
+                  "Access to facilities is a greater concern than being in the car",
+                  "The child cannot travel at all",
+                  "The child wants to cycle the route alone",
+                  "The child dislikes all scenery"
+                ],
+                "answer": "Access to facilities is a greater concern than being in the car",
+                "evidence_seconds": 247.83,
+                "difficulty": "B2",
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c46_p1-remote-travel-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "What do the speakers agree about John O' Groats?",
+                "options": [
+                  "It is worth visiting but unsuitable for a simple day trip from home",
+                  "It is not worth seeing under any circumstances",
+                  "They have both moved there permanently",
+                  "It is only a short walk from home"
+                ],
+                "answer": "It is worth visiting but unsuitable for a simple day trip from home",
+                "evidence_seconds": 356.37,
+                "difficulty": "B2",
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C46",
+            "accent_label": "Scottish English"
+          },
+          {
+            "id": "edacc-c46_p1-tourism-booking",
+            "meeting_id": "EDACC-C46_P1",
+            "start_seconds": 400,
+            "duration_seconds": 205,
+            "title": "Tourism and booking accommodation",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "British English conversation. A: Glaswegian (not slang) (first language: English); B: Glaswegian (first language: English)",
+            "accent_mix": "regional",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C46_P1 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c46_p1-tourism-booking.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c46_p1-tourism-booking-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "What benefit can extra visitors bring to small towns?",
+                "options": [
+                  "More spending at local businesses",
+                  "The removal of all traffic",
+                  "Free accommodation for every resident",
+                  "The closure of nearby shops"
+                ],
+                "answer": "More spending at local businesses",
+                "evidence_seconds": 458.63,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-tourism-booking-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "Which accommodation options are mentioned?",
+                "options": [
+                  "Camping, camper vans, hotels and B&Bs",
+                  "Only cruise ships",
+                  "Only university halls",
+                  "Only large apartment towers"
+                ],
+                "answer": "Camping, camper vans, hotels and B&Bs",
+                "evidence_seconds": 523.39,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-tourism-booking-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why do they recommend booking well in advance?",
+                "options": [
+                  "Accommodation is limited and can be very busy",
+                  "Bookings are never accepted during summer",
+                  "Every visitor must buy a house",
+                  "All hotels offer unlimited empty rooms"
+                ],
+                "answer": "Accommodation is limited and can be very busy",
+                "evidence_seconds": 552.21,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-tourism-booking-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "Why does the speaker praise the scenery?",
+                "options": [
+                  "To explain why people are attracted to the route",
+                  "To ask for a road repair",
+                  "To prove that traffic has disappeared",
+                  "To persuade the other speaker to sell a business"
+                ],
+                "answer": "To explain why people are attracted to the route",
+                "evidence_seconds": 416.58,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-tourism-booking-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What does the discussion suggest about local opinions?",
+                "options": [
+                  "Some may value the income while others prefer a quieter life",
+                  "All residents have exactly the same view",
+                  "Nobody earns money from visitors",
+                  "Only visitors are allowed to express an opinion"
+                ],
+                "answer": "Some may value the income while others prefer a quieter life",
+                "evidence_seconds": 473.45,
+                "difficulty": "B2",
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c46_p1-tourism-booking-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "How has the route changed since their earlier visit?",
+                "options": [
+                  "It has become more popular and busier",
+                  "It has stopped attracting visitors",
+                  "It has become completely inaccessible",
+                  "It no longer passes through small towns"
+                ],
+                "answer": "It has become more popular and busier",
+                "evidence_seconds": 416.58,
+                "difficulty": "B2",
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C46",
+            "accent_label": "Scottish English"
+          },
+          {
+            "id": "edacc-c46_p1-shared-stays",
+            "meeting_id": "EDACC-C46_P1",
+            "start_seconds": 607.5,
+            "duration_seconds": 192.4,
+            "title": "Shared holiday stays and city impressions",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "British English conversation. A: Glaswegian (not slang) (first language: English); B: Glaswegian (first language: English)",
+            "accent_mix": "regional",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C46_P1 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c46_p1-shared-stays.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c46_p1-shared-stays-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "How many people shared the Edinburgh rental?",
+                "options": [
+                  "Six",
+                  "Two",
+                  "Twelve",
+                  "Twenty"
+                ],
+                "answer": "Six",
+                "evidence_seconds": 655.65,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-shared-stays-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "What extra feature did the rental offer?",
+                "options": [
+                  "Access to outdoor space",
+                  "A private swimming pool",
+                  "An airport shuttle",
+                  "A restaurant on every floor"
+                ],
+                "answer": "Access to outdoor space",
+                "evidence_seconds": 644.51,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-shared-stays-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why does the speaker mention splitting the cost?",
+                "options": [
+                  "It made the weekend affordable compared with a hotel",
+                  "It meant everyone had to stay alone",
+                  "It was required to buy the building",
+                  "It removed the need to book accommodation"
+                ],
+                "answer": "It made the weekend affordable compared with a hotel",
+                "evidence_seconds": 655.65,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-shared-stays-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "Why does the other speaker mention renting spare rooms?",
+                "options": [
+                  "To suggest how residents could benefit from visitor demand",
+                  "To announce that hotels are illegal",
+                  "To explain why every house must be empty",
+                  "To complain about an airline cancellation"
+                ],
+                "answer": "To suggest how residents could benefit from visitor demand",
+                "evidence_seconds": 607.7,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-shared-stays-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What is the overall attitude to the Edinburgh stay?",
+                "options": [
+                  "Positive about both the property and its value",
+                  "Disappointed with every part of the stay",
+                  "Uncertain whether the stay ever happened",
+                  "Angry that no friends came along"
+                ],
+                "answer": "Positive about both the property and its value",
+                "evidence_seconds": 655.65,
+                "difficulty": "B2",
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c46_p1-shared-stays-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "What concerns the speaker about Glasgow's centre on a recent visit?",
+                "options": [
+                  "Empty premises made it feel less lively than she remembered",
+                  "There were too many beaches",
+                  "All the buildings looked exactly like Edinburgh",
+                  "She could not find any streets"
+                ],
+                "answer": "Empty premises made it feel less lively than she remembered",
+                "evidence_seconds": 735.03,
+                "difficulty": "B2",
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C46",
+            "accent_label": "Scottish English"
+          },
+          {
+            "id": "edacc-c46_p1-cycling-spaces",
+            "meeting_id": "EDACC-C46_P1",
+            "start_seconds": 801,
+            "duration_seconds": 198.9,
+            "title": "Making space for cyclists and pedestrians",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "British English conversation. A: Glaswegian (not slang) (first language: English); B: Glaswegian (first language: English)",
+            "accent_mix": "regional",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C46_P1 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c46_p1-cycling-spaces.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c46_p1-cycling-spaces-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "What kinds of businesses feature in the regeneration discussion?",
+                "options": [
+                  "Food outlets, bars and restaurants",
+                  "Farms and fishing boats",
+                  "Airports and factories",
+                  "Only bookshops"
+                ],
+                "answer": "Food outlets, bars and restaurants",
+                "evidence_seconds": 801.25,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-cycling-spaces-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "Who is mentioned as particularly vulnerable around fast cyclists?",
+                "options": [
+                  "Young children and elderly people",
+                  "Only professional cyclists",
+                  "Only shop owners",
+                  "Only people travelling abroad"
+                ],
+                "answer": "Young children and elderly people",
+                "evidence_seconds": 899.96,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-cycling-spaces-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why does the speaker want clearer boundaries?",
+                "options": [
+                  "To distinguish cycling areas from pedestrian areas",
+                  "To stop every form of public transport",
+                  "To make shopping more expensive",
+                  "To remove all outdoor activity"
+                ],
+                "answer": "To distinguish cycling areas from pedestrian areas",
+                "evidence_seconds": 921.08,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-cycling-spaces-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "Why does she describe shopping with a small child?",
+                "options": [
+                  "To explain the stress caused by bikes moving among pedestrians",
+                  "To recommend a new bicycle brand",
+                  "To show that children should never walk",
+                  "To advertise a childcare business"
+                ],
+                "answer": "To explain the stress caused by bikes moving among pedestrians",
+                "evidence_seconds": 848.69,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-cycling-spaces-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What is the speakers' position on cycle lanes overall?",
+                "options": [
+                  "They see benefits but want safe separation from pedestrians",
+                  "They oppose cycling in every setting",
+                  "They think cyclists need no rules anywhere",
+                  "They want all shopping streets closed permanently"
+                ],
+                "answer": "They see benefits but want safe separation from pedestrians",
+                "evidence_seconds": 921.08,
+                "difficulty": "B2",
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c46_p1-cycling-spaces-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "What does the expression about needing eyes in the back of your head imply?",
+                "options": [
+                  "People feel they must be especially alert",
+                  "The speaker is describing a medical condition",
+                  "Cyclists can see behind themselves without looking",
+                  "The speaker is discussing a television character"
+                ],
+                "answer": "People feel they must be especially alert",
+                "evidence_seconds": 893.98,
+                "difficulty": "B2",
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C46",
+            "accent_label": "Scottish English"
+          },
+          {
+            "id": "edacc-c46_p1-recycling",
+            "meeting_id": "EDACC-C46_P1",
+            "start_seconds": 1124.5,
+            "duration_seconds": 162.4,
+            "title": "Recycling and habits for the future",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "British English conversation. A: Glaswegian (not slang) (first language: English); B: Glaswegian (first language: English)",
+            "accent_mix": "regional",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C46_P1 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c46_p1-recycling.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c46_p1-recycling-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "What newer packaging does the speaker welcome?",
+                "options": [
+                  "Biodegradable packaging and materials that are easier to recycle",
+                  "Packaging designed never to break down",
+                  "Only glass that cannot be reused",
+                  "Plastic made solely for display"
+                ],
+                "answer": "Biodegradable packaging and materials that are easier to recycle",
+                "evidence_seconds": 1180.13,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-recycling-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "How do they remember recycling during their childhood?",
+                "options": [
+                  "It was absent or on a much smaller scale",
+                  "It was exactly the same as today",
+                  "Every household had a large recycling factory",
+                  "They worked as recycling managers"
+                ],
+                "answer": "It was absent or on a much smaller scale",
+                "evidence_seconds": 1172.29,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-recycling-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why do they focus on educating younger people?",
+                "options": [
+                  "Habits learned now can influence future generations",
+                  "Children alone manufacture all packaging",
+                  "Adults are prohibited from recycling",
+                  "They want to cancel all school subjects"
+                ],
+                "answer": "Habits learned now can influence future generations",
+                "evidence_seconds": 1239.16,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-recycling-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "Why does one speaker mention that not everyone is willing?",
+                "options": [
+                  "To explain a barrier to putting good habits into practice",
+                  "To deny that anyone can learn",
+                  "To advertise a recycling machine",
+                  "To argue that every material has already disappeared"
+                ],
+                "answer": "To explain a barrier to putting good habits into practice",
+                "evidence_seconds": 1265.88,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-recycling-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What does the phrase about getting there little by little suggest?",
+                "options": [
+                  "They expect gradual improvement through individual action",
+                  "They expect everything to change overnight",
+                  "They believe no improvement is possible",
+                  "They are discussing the length of a walking trip"
+                ],
+                "answer": "They expect gradual improvement through individual action",
+                "evidence_seconds": 1239.16,
+                "difficulty": "B2",
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c46_p1-recycling-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "How would you describe their overall outlook?",
+                "options": [
+                  "Hopeful while recognising practical difficulties",
+                  "Certain that all problems are already solved",
+                  "Completely indifferent to the issue",
+                  "Unable to agree that anyone has a role"
+                ],
+                "answer": "Hopeful while recognising practical difficulties",
+                "evidence_seconds": 1264.5,
+                "difficulty": "B2",
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C46",
+            "accent_label": "Scottish English"
+          },
+          {
+            "id": "edacc-c46_p1-electric-cars",
+            "meeting_id": "EDACC-C46_P1",
+            "start_seconds": 1287.7,
+            "duration_seconds": 159.2,
+            "title": "Thinking through an electric car purchase",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "British English conversation. A: Glaswegian (not slang) (first language: English); B: Glaswegian (first language: English)",
+            "accent_mix": "regional",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C46_P1 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c46_p1-electric-cars.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c46_p1-electric-cars-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "What can the hybrid mentioned run on?",
+                "options": [
+                  "Electricity and petrol",
+                  "Only diesel",
+                  "Only solar power",
+                  "Electricity and steam"
+                ],
+                "answer": "Electricity and petrol",
+                "evidence_seconds": 1298.74,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-electric-cars-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "What home equipment do they say may be needed?",
+                "options": [
+                  "A charger",
+                  "A petrol pump in the kitchen",
+                  "A separate garage for each journey",
+                  "A new television"
+                ],
+                "answer": "A charger",
+                "evidence_seconds": 1347.88,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p1-electric-cars-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why do they compare charging costs with fuel costs?",
+                "options": [
+                  "To consider whether the car would suit their finances",
+                  "To explain why all charging is free",
+                  "To calculate the price of a train ticket",
+                  "To choose a holiday destination"
+                ],
+                "answer": "To consider whether the car would suit their finances",
+                "evidence_seconds": 1380.71,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-electric-cars-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "Why are solar panels used as a comparison?",
+                "options": [
+                  "An initial expense may be offset by savings over time",
+                  "They require the same road licence",
+                  "They make the same engine noise",
+                  "They can replace every car journey"
+                ],
+                "answer": "An initial expense may be offset by savings over time",
+                "evidence_seconds": 1424.78,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p1-electric-cars-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What does the discussion imply about charging?",
+                "options": [
+                  "It still costs money and should be considered before buying",
+                  "It never affects household expenses",
+                  "It is only possible at an airport",
+                  "It removes every other ownership cost"
+                ],
+                "answer": "It still costs money and should be considered before buying",
+                "evidence_seconds": 1359,
+                "difficulty": "B2",
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c46_p1-electric-cars-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "What is the likely approach to choosing an electric car?",
+                "options": [
+                  "Interest combined with checking infrastructure and costs",
+                  "Buying immediately without any preparation",
+                  "Rejecting every alternative without discussion",
+                  "Waiting until no other cars exist"
+                ],
+                "answer": "Interest combined with checking infrastructure and costs",
+                "evidence_seconds": 1327.26,
+                "difficulty": "B2",
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C46",
+            "accent_label": "Scottish English"
+          },
+          {
+            "id": "edacc-c46_p2-family-books",
+            "meeting_id": "EDACC-C46_P2",
+            "start_seconds": 659.8,
+            "duration_seconds": 180.7,
+            "title": "Passing a childhood book through the family",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "British English conversation. A: Glaswegian (not slang) (first language: English); B: Glaswegian (first language: English)",
+            "accent_mix": "regional",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C46_P2 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c46_p2-family-books.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c46_p2-family-books-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "Where did the speaker first try to find the childhood book?",
+                "options": [
+                  "At the library",
+                  "At an airport",
+                  "In a supermarket freezer",
+                  "At a cinema"
+                ],
+                "answer": "At the library",
+                "evidence_seconds": 681.73,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p2-family-books-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "Where did she eventually order it?",
+                "options": [
+                  "Online from Amazon",
+                  "From the library's reception desk",
+                  "From a school examination office",
+                  "From an airline"
+                ],
+                "answer": "Online from Amazon",
+                "evidence_seconds": 681.73,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c46_p2-family-books-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why is she looking forward to receiving it?",
+                "options": [
+                  "It recalls happy memories of her grandparents",
+                  "It is required for a new job",
+                  "She plans to sell it immediately",
+                  "She wants to replace a broken computer"
+                ],
+                "answer": "It recalls happy memories of her grandparents",
+                "evidence_seconds": 739.66,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p2-family-books-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "Why does the other speaker suggest reading it to the child?",
+                "options": [
+                  "To pass the story and family tradition to another generation",
+                  "To prepare the child for a driving test",
+                  "To stop the child reading any other books",
+                  "To advertise a television programme"
+                ],
+                "answer": "To pass the story and family tradition to another generation",
+                "evidence_seconds": 748.46,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c46_p2-family-books-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What does the five-year age difference help explain?",
+                "options": [
+                  "They remember some childhood events differently",
+                  "They did not know each other as children",
+                  "They cannot remember any common story",
+                  "They went on the same holiday five years apart"
+                ],
+                "answer": "They remember some childhood events differently",
+                "evidence_seconds": 718.06,
+                "difficulty": "B2",
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c46_p2-family-books-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "What does the discussion of their grandmother's voices suggest?",
+                "options": [
+                  "Her way of telling the story helped make it memorable",
+                  "She read without expression",
+                  "She refused to tell them stories",
+                  "She only read silently to herself"
+                ],
+                "answer": "Her way of telling the story helped make it memorable",
+                "evidence_seconds": 762.8,
+                "difficulty": "B2",
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C46",
+            "accent_label": "Scottish English"
+          },
+          {
+            "id": "edacc-c32_p2-learning-work",
+            "meeting_id": "EDACC-C32_P2",
+            "start_seconds": 11.5,
+            "duration_seconds": 179.8,
+            "title": "Learning languages and talking about work",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "British English conversation. A: Southern London (first language: English, Fante (Ghanaian)); B: Southern London (first language: English, Fante)",
+            "accent_mix": "regional",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C32_P2 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c32_p2-learning-work.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c32_p2-learning-work-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "Which language is one speaker considering learning?",
+                "options": [
+                  "Spanish",
+                  "Italian",
+                  "Japanese",
+                  "Arabic"
+                ],
+                "answer": "Spanish",
+                "evidence_seconds": 52.3,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c32_p2-learning-work-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "What does the speaker suggest doing with virtual reality?",
+                "options": [
+                  "Playing games",
+                  "Preparing meals",
+                  "Repairing a car engine",
+                  "Writing a bank cheque"
+                ],
+                "answer": "Playing games",
+                "evidence_seconds": 142.57,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c32_p2-learning-work-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why does Spanish interest the speaker?",
+                "options": [
+                  "It would build on what he learned at secondary school",
+                  "He has never encountered the language",
+                  "He is required to replace German immediately",
+                  "His employer has banned other languages"
+                ],
+                "answer": "It would build on what he learned at secondary school",
+                "evidence_seconds": 64.33,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c32_p2-learning-work-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "Why does the other speaker ask about virtual reality headsets?",
+                "options": [
+                  "To clarify what the question means",
+                  "To place an online order",
+                  "To challenge a game's score",
+                  "To arrange a medical appointment"
+                ],
+                "answer": "To clarify what the question means",
+                "evidence_seconds": 135.46,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c32_p2-learning-work-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What does the German discussion suggest about learning?",
+                "options": [
+                  "A disappointing grade has not stopped the speaker continuing",
+                  "The speaker has abandoned all language learning",
+                  "A grade automatically determines fluency forever",
+                  "The speaker never studied German"
+                ],
+                "answer": "A disappointing grade has not stopped the speaker continuing",
+                "evidence_seconds": 99.56,
+                "difficulty": "B2",
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c32_p2-learning-work-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "What can be inferred about the speaker's work experience?",
+                "options": [
+                  "It spans retail and IT, including cashier work",
+                  "It consists only of professional sport",
+                  "It is limited to one unpaid afternoon",
+                  "It is entirely in farming"
+                ],
+                "answer": "It spans retail and IT, including cashier work",
+                "evidence_seconds": 167.83,
+                "difficulty": "B2",
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C32",
+            "accent_label": "Southern London English"
+          },
+          {
+            "id": "edacc-c32_p2-photos-plans",
+            "meeting_id": "EDACC-C32_P2",
+            "start_seconds": 364.2,
+            "duration_seconds": 146.7,
+            "title": "Food preferences, photographs and future plans",
+            "status": "ready",
+            "locales": [
+              "en-GB"
+            ],
+            "speech_style": "spontaneous conversation between friends",
+            "accent_profile": "British English conversation. A: Southern London (first language: English, Fante (Ghanaian)); B: Southern London (first language: English, Fante)",
+            "accent_mix": "regional",
+            "source": "EdAcc Corpus",
+            "source_url": "https://datashare.ed.ac.uk/handle/10283/8983",
+            "license": "CC BY-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+            "attribution": "EdAcc Corpus, University of Edinburgh / Edinburgh CSTR. EDACC-C32_P2 excerpt, trimmed and loudness-normalised; original voices, pauses and speed preserved. Audio adaptation distributed under CC BY-SA 4.0.",
+            "audio_url": "/assessment-audio/conversations/edacc-c32_p2-photos-plans.mp3",
+            "review_status": "Transcript and question evidence reviewed; independent listening and difficulty review pending.",
+            "questions": [
+              {
+                "id": "l-edacc-c32_p2-photos-plans-1",
+                "type": "choice",
+                "label": "Listening comprehension 1",
+                "prompt": "Which side dish does the speaker choose?",
+                "options": [
+                  "Chips",
+                  "Mash",
+                  "Rice",
+                  "Salad"
+                ],
+                "answer": "Chips",
+                "evidence_seconds": 398.51,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c32_p2-photos-plans-2",
+                "type": "choice",
+                "label": "Listening comprehension 2",
+                "prompt": "Which skills does the other speaker mention?",
+                "options": [
+                  "Dancing and crocheting",
+                  "Swimming and driving",
+                  "Cooking and programming",
+                  "Painting and fishing"
+                ],
+                "answer": "Dancing and crocheting",
+                "evidence_seconds": 423.07,
+                "difficulty": "B1",
+                "skill": "detail"
+              },
+              {
+                "id": "l-edacc-c32_p2-photos-plans-3",
+                "type": "choice",
+                "label": "Listening comprehension 3",
+                "prompt": "Why does the speaker take photographs?",
+                "options": [
+                  "To look back on enjoyable experiences",
+                  "To keep a record of restaurant prices only",
+                  "To apply for a driving licence",
+                  "To avoid remembering any holidays"
+                ],
+                "answer": "To look back on enjoyable experiences",
+                "evidence_seconds": 409.88,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c32_p2-photos-plans-4",
+                "type": "choice",
+                "label": "Listening comprehension 4",
+                "prompt": "Why is the word autobiography clarified?",
+                "options": [
+                  "One speaker thought the other had said biology",
+                  "They were choosing a school science lesson",
+                  "They needed directions to a library",
+                  "They were correcting a restaurant order"
+                ],
+                "answer": "One speaker thought the other had said biology",
+                "evidence_seconds": 480.37,
+                "difficulty": "B2",
+                "skill": "purpose"
+              },
+              {
+                "id": "l-edacc-c32_p2-photos-plans-5",
+                "type": "choice",
+                "label": "Listening comprehension 5",
+                "prompt": "What can be inferred about their tolerance for spicy food?",
+                "options": [
+                  "One prefers much more heat than the other",
+                  "They both avoid all spice",
+                  "They always order exactly the same heat level",
+                  "Neither has ever eaten at a restaurant"
+                ],
+                "answer": "One prefers much more heat than the other",
+                "evidence_seconds": 385.89,
+                "difficulty": "B2",
+                "skill": "inference"
+              },
+              {
+                "id": "l-edacc-c32_p2-photos-plans-6",
+                "type": "choice",
+                "label": "Listening comprehension 6",
+                "prompt": "What does the discussion of a business and a life story suggest?",
+                "options": [
+                  "They are ambitions the speaker hopes to achieve",
+                  "They are already completed projects described in detail",
+                  "They are plans made by a restaurant manager",
+                  "They are activities the speaker refuses to consider"
+                ],
+                "answer": "They are ambitions the speaker hopes to achieve",
+                "evidence_seconds": 457.38,
+                "difficulty": "B2",
+                "skill": "inference"
+              }
+            ],
+            "source_conversation_id": "EDACC-C32",
+            "accent_label": "Southern London English"
+          }
+        ]
+      },
+      "listening_quality": {
+        "recording_count": 15,
+        "source_conversation_count": 4,
+        "natural_count": 15,
+        "scripted_count": 0,
+        "duration_min_seconds": 108,
+        "duration_max_seconds": 205,
+        "difficulty_labels": [
+          "B1",
+          "B2"
+        ],
+        "questions_per_attempt": 6,
+        "recordings_per_attempt": 1,
+        "calibration_status": "Not calibrated",
+        "readiness": "Pilot content",
+        "target_recording_count": 20,
+        "warnings": [
+          "Small pool: recordings will repeat across a large candidate cohort.",
+          "Some clips share a source conversation and speakers; clip count is not independent conversation count.",
+          "This regional pool includes international conversations with mixed accents.",
+          "Some recordings fall outside the proposed 2–3.5 minute range; difficulty review is pending.",
+          "New excerpts have transcript-backed questions; independent listening review is pending.",
+          "Difficulty labels are editorial estimates. US/UK equivalence and pass thresholds need an all-role pilot."
+        ]
+      }
+    },
+    "expected_output": {
+      "objective_answers": {
+        "r1": "Operational continuity",
+        "r2": "Managers can exercise judgement when circumstances are unexpected",
+        "r3": "Efficiency alone did not improve the customer experience",
+        "r4": "The pilot improved speed but exposed a communication gap",
+        "r5": "Customer coverage has become unreliable",
+        "r6": "Resolution speed and explanation quality should be assessed together",
+        "r7": "Transition continuity is a material requirement",
+        "r8": "That the identified operating-hours risk is understood and adequately controlled",
+        "r9": "A compliant bid may still be inferior when implementation risk is considered",
+        "r10": "The rollback restored export performance",
+        "r11": "The mitigation does not explain the regional pattern",
+        "r12": "The team is committing to a communication time independently of investigation completion",
+        "l-ami-es2004-price-1": "She thinks it sounds expensive",
+        "l-ami-es2004-price-2": "Some current remote controls cost about twenty pounds",
+        "l-ami-es2004-price-3": "The product might appear to be a cheap option",
+        "l-ami-es2004-price-4": "One half",
+        "l-ami-es2004-price-5": "She treats it as an assumption rather than a confirmed fact",
+        "l-ami-es2004-price-6": "A broad range of users rather than one specialist business group"
+      },
+      "rubric": {
+        "writing": [
+          "Task fulfilment and tone",
+          "Coherence and cohesion",
+          "Lexical resource",
+          "Grammar and accuracy"
+        ],
+        "speaking": [
+          "Task fulfilment and structure",
+          "Fluency",
+          "Vocabulary and grammar",
+          "Pronunciation and intelligibility"
+        ]
+      }
+    },
+    "grading_config": {
+      "objective_weight": 40,
+      "manual_review_required": true,
+      "minimum_skill_score": 50,
+      "rubric": {
+        "writing": {
+          "weight": 30,
+          "criteria": [
+            "task_fulfilment",
+            "organisation",
+            "lexical_resource",
+            "grammar_accuracy"
+          ]
+        },
+        "speaking": {
+          "weight": 30,
+          "criteria": [
+            "task_fulfilment",
+            "fluency",
+            "language_range",
+            "pronunciation"
+          ]
+        }
+      }
+    }
+  }
+}

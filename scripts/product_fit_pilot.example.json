@@ -1,0 +1,34 @@
+{
+  "base_url": "http://127.0.0.1:8000",
+  "run_id": "product-fit-sept-2026",
+  "candidate_count": 100,
+  "requests_per_second": 2.0,
+  "timeout_seconds": 30,
+  "candidate_email_domain": "pilot.valases.com",
+  "employers": [
+    {
+      "key": "employer-1",
+      "name": "Pilot Employer One",
+      "email_env": "VALASES_PILOT_EMPLOYER_1_EMAIL",
+      "password_env": "VALASES_PILOT_EMPLOYER_1_PASSWORD",
+      "token_env": "VALASES_PILOT_EMPLOYER_1_TOKEN",
+      "assessment_ids": []
+    },
+    {
+      "key": "employer-2",
+      "name": "Pilot Employer Two",
+      "email_env": "VALASES_PILOT_EMPLOYER_2_EMAIL",
+      "password_env": "VALASES_PILOT_EMPLOYER_2_PASSWORD",
+      "token_env": "VALASES_PILOT_EMPLOYER_2_TOKEN",
+      "assessment_ids": []
+    },
+    {
+      "key": "employer-3",
+      "name": "Pilot Employer Three",
+      "email_env": "VALASES_PILOT_EMPLOYER_3_EMAIL",
+      "password_env": "VALASES_PILOT_EMPLOYER_3_PASSWORD",
+      "token_env": "VALASES_PILOT_EMPLOYER_3_TOKEN",
+      "assessment_ids": []
+    }
+  ]
+}

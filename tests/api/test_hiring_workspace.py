@@ -41,6 +41,7 @@ from app.api.routes.hiring import (
     update_organization_profile,
     update_sso_configuration,
 )
+from app.api.routes.admin import AdminCompanyProfileUpdate, admin_workspace_update_company_profile
 from app.api.routes.exams import (
     AssessmentReviewFinalizeRequest,
     IssueAssessmentRequest,
@@ -93,6 +94,15 @@ class HiringWorkspaceTest(unittest.TestCase):
     def test_owner_can_update_company_profile_and_logo(self) -> None:
         workspace = hiring_workspace(organization_id=None, db=self.db, current_user=self.recruiter)
         organization_id = workspace["organization"]["id"]
+        provider = ProviderProfile(
+            user_id=self.recruiter.id,
+            provider_type=ProviderType.BUSINESS,
+            display_name="Old Company Name",
+            description="",
+            approval_status=ApprovalStatus.APPROVED,
+        )
+        self.db.add(provider)
+        self.db.commit()
         self.assertEqual(workspace["organization"]["logo_url"], "/assets/brand/valases-logo.png")
         self.assertNotIn("sso.manage", workspace["permissions"])
         self.assertNotIn("sso.manage", workspace["permission_catalog"])
@@ -110,6 +120,30 @@ class HiringWorkspaceTest(unittest.TestCase):
         refreshed = hiring_workspace(organization_id=organization_id, db=self.db, current_user=self.recruiter)
         self.assertEqual(refreshed["organization"]["name"], "Example Hiring Company")
         self.assertEqual(refreshed["organization"]["logo_url"], logo)
+        self.db.refresh(provider)
+        self.assertEqual(provider.display_name, "Example Hiring Company")
+
+        platform_admin = User(
+            email="admin@example.com",
+            full_name="Platform Admin",
+            password_hash="supabase",
+            role=UserRole.ADMIN,
+            is_active=True,
+            account_state="active",
+        )
+        self.db.add(platform_admin)
+        self.db.commit()
+        admin_updated = admin_workspace_update_company_profile(
+            provider.id,
+            AdminCompanyProfileUpdate(company_name="Admin Corrected Company", logo_data_url=""),
+            db=self.db,
+            current_user=platform_admin,
+        )
+        self.assertEqual(admin_updated["company_name"], "Admin Corrected Company")
+        self.db.refresh(provider)
+        self.assertEqual(provider.display_name, "Admin Corrected Company")
+        organization = self.db.get(Organization, organization_id)
+        self.assertEqual(organization.name, "Admin Corrected Company")
 
         with self.assertRaises(HTTPException) as invalid_logo:
             update_organization_profile(

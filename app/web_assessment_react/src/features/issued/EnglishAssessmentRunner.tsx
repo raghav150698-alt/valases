@@ -10,11 +10,19 @@ export type EnglishItem = {
   audio_url?: string;
   duration_seconds?: number;
   source?: string;
+  attribution?: string;
+  accent_label?: string;
+  license?: string;
+  license_url?: string;
   minimum_words?: number;
   maximum_words?: number;
   minimum_seconds?: number;
   maximum_seconds?: number;
   suggested_minutes?: number;
+  difficulty?: string;
+  preparation_seconds?: number;
+  max_attempts?: number;
+  allow_playback?: boolean;
 };
 
 export type EnglishSection = {
@@ -26,6 +34,7 @@ export type EnglishSection = {
   rules?: string[];
   items: EnglishItem[];
   attribution?: string;
+  requires_microphone_check?: boolean;
 };
 
 export type EnglishProgress = {
@@ -48,6 +57,7 @@ type Props = {
   initialProgress?: Partial<EnglishProgress>;
   submitting: boolean;
   paused: boolean;
+  saveState?: "idle" | "saving" | "saved" | "offline" | "practice";
   onObjectiveAnswer: (id: string, value: string) => void;
   onWritingResponse: (id: string, value: string) => void;
   onSpeakingRecording: (id: string, blob: Blob, durationSeconds: number) => Promise<EnglishRecording>;
@@ -74,6 +84,7 @@ export function EnglishAssessmentRunner({
   initialProgress,
   submitting,
   paused,
+  saveState = "idle",
   onObjectiveAnswer,
   onWritingResponse,
   onSpeakingRecording,
@@ -94,6 +105,9 @@ export function EnglishAssessmentRunner({
   const [recordingError, setRecordingError] = useState("");
   const [audioActiveId, setAudioActiveId] = useState("");
   const [audioProgress, setAudioProgress] = useState(0);
+  const [microphoneCheck, setMicrophoneCheck] = useState<"idle" | "checking" | "ready" | "error">("idle");
+  const [preparationItemId, setPreparationItemId] = useState("");
+  const [preparationSeconds, setPreparationSeconds] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recorderStreamRef = useRef<MediaStream | null>(null);
@@ -161,6 +175,12 @@ export function EnglishAssessmentRunner({
   }, [recordingItemId]);
 
   useEffect(() => {
+    if (!preparationItemId || preparationSeconds <= 0) return;
+    const timer = window.setInterval(() => setPreparationSeconds((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [preparationItemId, preparationSeconds]);
+
+  useEffect(() => {
     if (recordingItemId && item?.id === recordingItemId && recordingSeconds >= Number(item.maximum_seconds || 180)) stopRecording();
   }, [item?.id, item?.maximum_seconds, recordingItemId, recordingSeconds]);
 
@@ -172,6 +192,20 @@ export function EnglishAssessmentRunner({
     setPhase("task");
   };
 
+  const checkMicrophone = async () => {
+    setMicrophoneCheck("checking");
+    setRecordingError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      await new Promise((resolve) => window.setTimeout(resolve, 700));
+      stream.getTracks().forEach((track) => track.stop());
+      setMicrophoneCheck("ready");
+    } catch {
+      setMicrophoneCheck("error");
+      setRecordingError("The microphone check failed. Allow microphone access and try again.");
+    }
+  };
+
   const stopAudio = () => {
     audioRef.current?.pause();
     audioRef.current = null;
@@ -180,7 +214,9 @@ export function EnglishAssessmentRunner({
 
   const playAudio = (currentItem: EnglishItem) => {
     if (!currentItem.audio_url || audioPlayed[currentItem.id] || audioActiveId) return;
-    const audio = new Audio(currentItem.audio_url);
+    setRecordingError("");
+    const audioUrl = currentItem.audio_url.startsWith("/assessment-audio/") ? `${import.meta.env.BASE_URL}${currentItem.audio_url.slice(1)}` : currentItem.audio_url;
+    const audio = new Audio(audioUrl);
     audioRef.current = audio;
     setAudioActiveId(currentItem.id);
     setAudioProgress(0);
@@ -196,7 +232,10 @@ export function EnglishAssessmentRunner({
       audioRef.current = null;
       setRecordingError("The audio could not be loaded. Check the connection and try once more.");
     };
-    void audio.play();
+    void audio.play().catch(() => {
+      setAudioActiveId(""); audioRef.current = null;
+      setRecordingError("Playback could not start. Select Play recording to try again.");
+    });
   };
 
   const startRecording = async (currentItem: EnglishItem) => {
@@ -237,11 +276,25 @@ export function EnglishAssessmentRunner({
     }
   };
 
+  const prepareOrRecord = (currentItem: EnglishItem) => {
+    if (speakingRecordings[currentItem.id] && Number(currentItem.max_attempts || 1) <= 1) return;
+    if (preparationItemId !== currentItem.id) {
+      setPreparationItemId(currentItem.id);
+      setPreparationSeconds(Number(currentItem.preparation_seconds || 15));
+      return;
+    }
+    if (preparationSeconds > 0) return;
+    void startRecording(currentItem);
+  };
+
   const responseReady = (() => {
     if (!item) return false;
     if (item.type === "audio") return Boolean(audioPlayed[item.id]);
     if (item.type === "choice" || item.type === "reading_choice") return Boolean(objectiveAnswers[item.id]);
-    if (item.type === "writing") return wordCount(writingResponses[item.id] || "") >= Number(item.minimum_words || 1);
+    if (item.type === "writing") {
+      const words = wordCount(writingResponses[item.id] || "");
+      return words >= Number(item.minimum_words || 1) && words <= Number(item.maximum_words || Infinity);
+    }
     if (item.type === "speaking") return Number(speakingRecordings[item.id]?.duration_seconds || 0) >= Number(item.minimum_seconds || 1);
     return false;
   })();
@@ -249,6 +302,8 @@ export function EnglishAssessmentRunner({
   const nextTask = () => {
     stopAudio();
     setRecordingError("");
+    setPreparationItemId("");
+    setPreparationSeconds(0);
     if (itemIndex < items.length - 1) {
       setItemIndex((current) => current + 1);
       return;
@@ -273,10 +328,11 @@ export function EnglishAssessmentRunner({
           <span>English assessment</span>
           <strong>{title}</strong>
         </div>
-        <div className="english-exam-clock" aria-live="polite">
+        <div className={`english-exam-clock${phase === "task" && remainingSeconds <= 120 ? " urgent" : ""}`} aria-live="polite">
           <small>{phase === "task" ? `${section.label} time remaining` : phase === "complete" ? "Ready to submit" : "Timer starts with section"}</small>
           <b>{phase === "task" ? formatClock(remainingSeconds) : phase === "complete" ? "Complete" : `${section.minutes}:00`}</b>
         </div>
+        <span className={`english-save-state ${saveState}`}>{saveState === "practice" ? "Practice · session only" : saveState === "saving" ? "Saving…" : saveState === "offline" ? "Saved in this browser" : "Progress saved"}</span>
         <button className="english-exit-button" type="button" onClick={onExit}>Exit</button>
       </header>
 
@@ -294,7 +350,8 @@ export function EnglishAssessmentRunner({
           <p>{section.intro || section.description}</p>
           <div className="english-section-facts"><div><small>Time</small><strong>{section.minutes} minutes</strong></div><div><small>Tasks</small><strong>{section.items.length}</strong></div><div><small>Navigation</small><strong>One-way</strong></div></div>
           <div className="english-section-rules"><strong>Before you begin</strong><ul>{(section.rules || []).map((rule) => <li key={rule}>{rule}</li>)}</ul></div>
-          <button className="assessment-primary-btn" type="button" onClick={startSection}>Begin {section.label}</button>
+          {section.requires_microphone_check && <div className={`english-microphone-check ${microphoneCheck}`}><div><strong>{microphoneCheck === "ready" ? "Microphone ready" : "Microphone check required"}</strong><small>{microphoneCheck === "ready" ? "Input permission is confirmed for the scored responses." : "Confirm your input before the section timer starts."}</small></div><button type="button" onClick={() => void checkMicrophone()} disabled={microphoneCheck === "checking"}>{microphoneCheck === "checking" ? "Checking…" : microphoneCheck === "ready" ? "Check again" : "Test microphone"}</button></div>}
+          <button className="assessment-primary-btn" type="button" disabled={Boolean(section.requires_microphone_check && microphoneCheck !== "ready")} onClick={startSection}>Begin {section.label}</button>
         </section>
       )}
 
@@ -305,7 +362,7 @@ export function EnglishAssessmentRunner({
             <div className="english-task-progress"><i style={{ width: `${((itemIndex + 1) / items.length) * 100}%` }} /></div>
           </div>
           <article className="english-task-card">
-            <span className="english-task-label">{item.label}</span>
+            <span className="english-task-label">{item.label}{item.difficulty ? ` · ${item.difficulty}` : ""}</span>
             <h1>{item.prompt}</h1>
 
             {item.type === "audio" && (
@@ -314,7 +371,7 @@ export function EnglishAssessmentRunner({
                 <div><strong>{audioPlayed[item.id] ? "Recording completed" : audioActiveId === item.id ? "Recording in progress" : "Ready to listen"}</strong><small>{audioPlayed[item.id] ? "Continue to the questions." : "The recording can be played once."}</small></div>
                 <button className="assessment-primary-btn" type="button" disabled={Boolean(audioActiveId) || Boolean(audioPlayed[item.id])} onClick={() => playAudio(item)}>{audioPlayed[item.id] ? "Played" : audioActiveId === item.id ? "Playing…" : "Play recording"}</button>
                 <div className="english-audio-progress"><i style={{ width: `${audioProgress * 100}%` }} /></div>
-                <small className="english-audio-credit">Human-performed learning audio · {item.source}</small>
+                <small className="english-audio-credit">Recorded conversation · {item.source}{item.accent_label && <span> · {item.accent_label}</span>}{item.attribution && <span> · {item.attribution}</span>}{item.license_url && <a href={item.license_url} target="_blank" rel="noreferrer"> {item.license}</a>}</small>
               </div>
             )}
 
@@ -325,14 +382,14 @@ export function EnglishAssessmentRunner({
             )}
 
             {item.type === "writing" && (
-              <div className="english-writing-response"><textarea autoFocus rows={11} value={writingResponses[item.id] || ""} onChange={(event) => onWritingResponse(item.id, event.target.value)} placeholder="Write your response here…" /><div className={wordCount(writingResponses[item.id] || "") > Number(item.maximum_words || Infinity) ? "over" : ""}><span>{wordCount(writingResponses[item.id] || "")} words</span><small>Target {item.minimum_words}–{item.maximum_words} words · Suggested {item.suggested_minutes} min</small></div></div>
+              <div className="english-writing-response"><textarea autoFocus rows={11} value={writingResponses[item.id] || ""} onChange={(event) => onWritingResponse(item.id, event.target.value)} placeholder="Write your response here…" /><div className={wordCount(writingResponses[item.id] || "") > Number(item.maximum_words || Infinity) ? "over" : ""}><span>{wordCount(writingResponses[item.id] || "")} words</span><small>Required {item.minimum_words}–{item.maximum_words} words · Suggested {item.suggested_minutes} min</small></div></div>
             )}
 
             {item.type === "speaking" && (
               <div className="english-speaking-response">
                 <div className="english-recording-status"><span className={recordingItemId === item.id ? "live" : speakingRecordings[item.id] ? "saved" : ""} /><div><strong>{recordingItemId === item.id ? `Recording · ${formatClock(recordingSeconds)}` : uploadingItemId === item.id ? "Saving recording…" : speakingRecordings[item.id] ? "Response saved" : "Microphone ready"}</strong><small>Target {item.minimum_seconds}–{item.maximum_seconds} seconds</small></div></div>
-                {recordingItemId === item.id ? <button className="english-stop-recording" type="button" onClick={stopRecording}>Stop recording</button> : <button className="assessment-primary-btn" type="button" disabled={Boolean(uploadingItemId) || Boolean(recordingItemId)} onClick={() => void startRecording(item)}>{speakingRecordings[item.id] ? "Record again" : "Start recording"}</button>}
-                {speakingRecordings[item.id] && recordingItemId !== item.id && <audio controls preload="metadata" src={speakingRecordings[item.id].playback_url} />}
+                {recordingItemId === item.id ? <button className="english-stop-recording" type="button" onClick={stopRecording}>Stop recording</button> : <button className="assessment-primary-btn" type="button" disabled={Boolean(uploadingItemId) || Boolean(recordingItemId) || Boolean(speakingRecordings[item.id]) || (preparationItemId === item.id && preparationSeconds > 0)} onClick={() => prepareOrRecord(item)}>{speakingRecordings[item.id] ? "Response locked" : preparationItemId === item.id ? preparationSeconds > 0 ? `Prepare · ${preparationSeconds}s` : "Begin response" : `Start preparation · ${item.preparation_seconds || 15}s`}</button>}
+                {preparationItemId === item.id && !speakingRecordings[item.id] && <div className="english-preparation-note"><strong>{preparationSeconds > 0 ? "Preparation time" : "Preparation complete"}</strong><small>{preparationSeconds > 0 ? "Organise your response. Recording has not started." : "Select Begin response when ready. You have one scored attempt."}</small></div>}
               </div>
             )}
 
@@ -344,7 +401,7 @@ export function EnglishAssessmentRunner({
 
       {phase === "complete" && (
         <section className="english-complete-card">
-          <span>All sections complete</span><h1>Review checkpoint</h1><p>Your responses have been saved. Submitting will close the assessment and send your work for recruiter review.</p>
+          <span>All sections complete</span><h1>Ready to submit</h1><p>All required responses are present. Submitting will close the assessment and send your work for scoring.</p>
           <div>{sections.map((entry) => <article key={entry.id}><span>✓</span><div><strong>{entry.label}</strong><small>Section completed</small></div></article>)}</div>
           <button className="assessment-primary-btn" type="button" disabled={submitting} onClick={onSubmit}>{submitting ? "Submitting…" : "Submit assessment"}</button>
         </section>

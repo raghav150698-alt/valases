@@ -79,7 +79,9 @@
 .admin-table-row strong { color: #1e2a34; font-size: 12px; }
 .admin-table-row small { margin-top: 3px; color: #77838c; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 .company-summary-table .admin-table-head, .company-summary-table .admin-table-row { grid-template-columns: minmax(220px, 1.6fr) 100px 80px 90px 100px; }
-.companies-table .admin-table-head, .companies-table .admin-table-row { grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1fr) 90px 130px 120px 110px; }
+.companies-table .admin-table-head, .companies-table .admin-table-row { grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1fr) 90px 130px 120px 170px; }
+.admin-company-actions { display: flex !important; align-items: center; gap: 6px; }
+.admin-company-actions button { min-height: 30px; padding: 0 9px; white-space: nowrap; }
 .users-table .admin-table-head, .users-table .admin-table-row { grid-template-columns: minmax(200px, 1.3fr) minmax(160px, 1fr) 80px 70px 90px 110px; }
 .usage-table .admin-table-head, .usage-table .admin-table-row { grid-template-columns: minmax(220px, 1.5fr) repeat(5, minmax(82px, .6fr)); }
 .admin-state { display: inline-block; width: fit-content; padding: 3px 7px; border: 1px solid #ccd5dc; border-radius: 3px; background: #f5f7f8; color: #52616d; font-size: 11px; font-weight: 700; text-transform: capitalize; }

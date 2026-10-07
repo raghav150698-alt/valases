@@ -9,12 +9,19 @@ import { useSessionStore } from "../../lib/sessionStore";
 import { supabase } from "../../lib/supabase";
 import type { ExcelAssessmentSubmission } from "../tools/ExcelSimulator";
 import { ProctorEventReviewControls } from "./ProctorEventReviewControls";
+import "./AssessmentDesk.css";
+import type { EnglishTrialAssessment } from "./EnglishAssessmentTrial";
+import { EnglishContentSummary } from "./EnglishContentSummary";
+const EnglishAssessmentTrial = lazy(() => import("./EnglishAssessmentTrial").then(module => ({ default: module.EnglishAssessmentTrial })));
+const PracticalAssessmentTrial = lazy(() => import("./PracticalAssessmentTrial").then(module => ({ default: module.PracticalAssessmentTrial })));
+const PRACTICAL_TOOL_TYPES = new Set(["spreadsheet", "coding", "accounting", "tax_simulator", "tax_1120"]);
 
 const ExcelSimulator = lazy(() => import("../tools/ExcelSimulator").then((module) => ({ default: module.ExcelSimulator })));
 
 function apiErrorMessage(error: unknown, fallback: string): string {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
   if (typeof detail === "string" && detail.trim()) return detail;
+  if (detail && typeof detail === "object" && "message" in detail) return String(detail.message);
   if (detail && typeof detail === "object") return JSON.stringify(detail);
   return fallback;
 }
@@ -37,6 +44,27 @@ function englishResponseLabel(task: any, itemId: string): string {
   return itemId.replaceAll("_", " ");
 }
 
+const LANGUAGE_RUBRIC_FIELDS = [
+  { key: "writing.task_fulfilment", skill: "writing", label: "Task fulfilment and professional tone" },
+  { key: "writing.organisation", skill: "writing", label: "Organisation and cohesion" },
+  { key: "writing.lexical_resource", skill: "writing", label: "Lexical range and precision" },
+  { key: "writing.grammar_accuracy", skill: "writing", label: "Grammar and accuracy" },
+  { key: "speaking.task_fulfilment", skill: "speaking", label: "Task fulfilment and structure" },
+  { key: "speaking.fluency", skill: "speaking", label: "Fluency and interaction" },
+  { key: "speaking.language_range", skill: "speaking", label: "Language range and accuracy" },
+  { key: "speaking.pronunciation", skill: "speaking", label: "Pronunciation and intelligibility" },
+] as const;
+
+const LANGUAGE_RATING_LABELS = ["No assessable response", "A1/A2 · very limited", "B1 · functional", "B2 · effective", "B2+ · confident", "C1 · precise and flexible"];
+
+function estimatedCefr(score: number) {
+  if (score >= 85) return "C1";
+  if (score >= 70) return "B2+";
+  if (score >= 55) return "B2";
+  if (score >= 40) return "B1";
+  return "Below B1";
+}
+
 type Assessment = {
   exam_id: number;
   title: string;
@@ -50,6 +78,7 @@ type Assessment = {
   question_count: number;
   checkpoint_count?: number;
   is_platform_default?: boolean;
+  template_key?: string | null;
   template_version?: number | null;
   task?: {
     title: string;
@@ -105,7 +134,7 @@ type ScreeningApplication = {
 };
 
 type WorkspaceTab = "dashboard" | "assessments" | "publish" | "results";
-type AssessmentToolFilter = "all" | "spreadsheet" | "coding" | "accounting" | "tax_simulator" | "tax_1120";
+type AssessmentToolFilter = "all" | "spreadsheet" | "coding" | "accounting" | "tax_simulator" | "tax_1120" | "english_language" | "mcq";
 
 const WORKSPACE_TABS: WorkspaceTab[] = ["dashboard", "assessments", "publish", "results"];
 const WORKSPACE_TAB_LABELS: Record<WorkspaceTab, string> = {
@@ -279,6 +308,10 @@ function formatResultDate(value?: string | null) {
 
 export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embedded?: boolean; onOpenPipeline?: () => void }) {
   const qc = useQueryClient();
+  const allowance = useQuery<{ paid_assess_enabled: boolean; month: string; remaining: { candidates: number; english_language: number; mcq: number } }>({
+    queryKey: ["assessment-allowance"], queryFn: async () => (await api.get("/billing/organization/allowance")).data,
+    refetchInterval: 30000,
+  });
   const clearSession = useSessionStore((state) => state.clear);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("dashboard");
   const [searchQuery, setSearchQuery] = useState("");
@@ -337,6 +370,9 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
   ]);
   const [reviewScore, setReviewScore] = useState(0);
   const [reviewNotes, setReviewNotes] = useState("");
+  const [languageRatings, setLanguageRatings] = useState<Record<string, number>>(() => Object.fromEntries(LANGUAGE_RUBRIC_FIELDS.map((field) => [field.key, -1])));
+  const [trialAssessment, setTrialAssessment] = useState<EnglishTrialAssessment | null>(null);
+  const [toolTrialAssessment, setToolTrialAssessment] = useState<Assessment | null>(null);
   const [previewDefaultId, setPreviewDefaultId] = useState<string | null>(null);
   const [previewAssessmentId, setPreviewAssessmentId] = useState<number | null>(null);
   const [selectedDefaultId, setSelectedDefaultId] = useState("");
@@ -392,7 +428,26 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
     const provisional = Number(review.data.result?.provisional_score_pct ?? review.data.score_pct ?? 0);
     setReviewScore(Number.isFinite(provisional) ? provisional : 0);
     setReviewNotes(String(review.data.result?.review?.notes || ""));
+    const savedRatings = review.data.result?.review?.language_profile?.rubric_ratings || {};
+    setLanguageRatings(Object.fromEntries(LANGUAGE_RUBRIC_FIELDS.map((field) => [field.key, Number(savedRatings[field.key] ?? -1)])));
   }, [review.data]);
+
+  const languageScoreProfile = useMemo(() => {
+    const objective = review.data?.result?.detail?.skill_scores || {};
+    const criterionScore = (skill: "writing" | "speaking") => {
+      const rows = LANGUAGE_RUBRIC_FIELDS.filter((field) => field.skill === skill);
+      const values = rows.map((field) => Number(languageRatings[field.key] ?? -1));
+      return values.every((value) => value >= 0) ? (values.reduce((sum, value) => sum + value, 0) / (rows.length * 5)) * 100 : 0;
+    };
+    const scores = {
+      listening: Number(objective.listening?.score_pct || 0),
+      reading: Number(objective.reading?.score_pct || 0),
+      writing: criterionScore("writing"),
+      speaking: criterionScore("speaking"),
+    };
+    const overall = scores.listening * .2 + scores.reading * .2 + scores.writing * .3 + scores.speaking * .3;
+    return { scores, overall: Number(overall.toFixed(2)), cefr: estimatedCefr(overall), ratingsComplete: LANGUAGE_RUBRIC_FIELDS.every((field) => Number(languageRatings[field.key] ?? -1) >= 0) };
+  }, [languageRatings, review.data]);
 
   useEffect(() => {
     if (!reviewIssueId && !previewAssessmentId) return;
@@ -416,24 +471,20 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
     return () => window.clearTimeout(saveTimer);
   }, [builderStep, checkpoints, form, showBuilder]);
 
-  const installDefault = useMutation({
-    mutationFn: async (templateId: string) => (await api.post(`/exams/default-library/${templateId}/install`)).data,
-    onSuccess: async (data) => {
-      setSelectedExamId(Number(data.id));
-      setIssueExamId(Number(data.id));
-      setActiveTab("publish");
-      await qc.invalidateQueries({ queryKey: ["provider-assessments"] });
-    },
-  });
-
   const finalizeReview = useMutation({
     mutationFn: async () => {
       if (!reviewIssueId) throw new Error("Select a submission first.");
-      return (await api.post(`/exams/issued/${reviewIssueId}/review/finalize`, { score_pct: reviewScore, reviewer_notes: reviewNotes })).data;
+      const isLanguage = review.data?.assessment_type === "english_language";
+      return (await api.post(`/exams/issued/${reviewIssueId}/review/finalize`, {
+        score_pct: isLanguage ? languageScoreProfile.overall : reviewScore,
+        reviewer_notes: reviewNotes,
+        ...(isLanguage ? { skill_scores: languageScoreProfile.scores, rubric_ratings: languageRatings } : {}),
+      })).data;
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["issued-review", reviewIssueId] });
       await qc.invalidateQueries({ queryKey: ["issued-by-me"] });
+      await qc.invalidateQueries({ queryKey: ["assessment-allowance"] });
       await qc.invalidateQueries({ queryKey: ["hiring"] });
     },
   });
@@ -622,6 +673,7 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
         ? "Invitation sent. The candidate received the secure assessment link."
         : `Assessment issued, but email delivery failed: ${data?.email_delivery?.reason || "SMTP settings are incomplete."} Use the secure link and temporary password shown by the API response.`);
       await qc.invalidateQueries({ queryKey: ["issued-by-me"] });
+      await qc.invalidateQueries({ queryKey: ["assessment-allowance"] });
       await qc.invalidateQueries({ queryKey: ["provider-assessments"] });
       await qc.invalidateQueries({ queryKey: ["hiring"] });
     },
@@ -634,6 +686,7 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
         ? "A new secure link and password were sent to the candidate."
         : `New credentials were created, but email delivery failed: ${data?.email_delivery?.reason || "Check the SMTP configuration."}`);
       await qc.invalidateQueries({ queryKey: ["issued-by-me"] });
+      await qc.invalidateQueries({ queryKey: ["assessment-allowance"] });
     },
   });
 
@@ -644,6 +697,7 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
     onSuccess: async () => {
       setIssueNotice("The assessment invitation was revoked and its active session was closed.");
       await qc.invalidateQueries({ queryKey: ["issued-by-me"] });
+      await qc.invalidateQueries({ queryKey: ["assessment-allowance"] });
     },
   });
 
@@ -666,6 +720,10 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
   const selectedDefaultTemplate = useMemo(
     () => filteredDefaultAssessments.find((template) => template.id === selectedDefaultId) || null,
     [filteredDefaultAssessments, selectedDefaultId],
+  );
+  const selectedInstalledDefault = useMemo(
+    () => assessmentRows.find((assessment) => assessment.is_platform_default && assessment.template_key === selectedDefaultId) || null,
+    [assessmentRows, selectedDefaultId],
   );
   const previewAssessment = useMemo(
     () => assessmentRows.find((assessment) => assessment.exam_id === previewAssessmentId) || null,
@@ -819,6 +877,7 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
       </aside>}
 
       <main className={`workspace-product-main${embedded ? " assessment-section-page" : ""}`}>
+      {allowance.data && !allowance.data.paid_assess_enabled && <div className="assessment-free-allowance" role="status"><strong>Free monthly allowance</strong><span>{allowance.data.remaining.candidates}/5 candidates · {allowance.data.remaining.english_language}/5 English · {allowance.data.remaining.mcq}/10 MCQ remaining</span><small>Shared across your team. Resets each calendar month (UTC). Tax, Accounting, Coding and Excel require paid Assess activation.</small></div>}
       {embedded && <nav className="assessment-section-nav" aria-label="Assessment workspace navigation">
         {WORKSPACE_TABS.map((tab) => (
           <button key={tab} type="button" aria-current={activeTab === tab ? "page" : undefined} className={activeTab === tab ? "active" : ""} onClick={() => switchAssessmentTab(tab)}>
@@ -851,6 +910,8 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
                 ["accounting", "LedgeBook"],
                 ["tax_simulator", "1040 Individual Tax"],
                 ["tax_1120", "1120 Corporate Tax"],
+                ["english_language", "English language"],
+                ["mcq", "Multiple choice"],
               ] as Array<[Exclude<AssessmentToolFilter, "all">, string]>).map(([assessmentType, label]) => (
                 <button type="button" role="menuitem" key={assessmentType} className={toolFilter === assessmentType ? "active" : ""} onClick={() => { setToolFilter(assessmentType); setSelectedDefaultId(""); switchAssessmentTab("assessments"); }}>
                   <AssessmentToolIcon assessmentType={assessmentType} />
@@ -905,6 +966,20 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
               <small>Open scored and reviewed outcomes</small>
             </button>
           </div>
+
+          <section className="assessment-decision-desk" aria-labelledby="decision-desk-title">
+            <div className="assessment-desk-heading">
+              <div><span className="assessment-eyebrow">Recruiter desk</span><h3 id="decision-desk-title">Awaiting your decision</h3><p>{issued.isLoading ? "Loading submissions…" : issued.isError ? "Submissions could not be loaded. Open the review queue to try again." : pendingReviewCount ? `${pendingReviewCount} submissions are waiting for your review.` : "No submissions are awaiting a review decision."}</p></div>
+              <button type="button" className="candidate-review-action" onClick={() => { setResultStatusFilter("review"); switchAssessmentTab("results"); }}>Open review queue <ArrowRight size={16} aria-hidden="true" /></button>
+            </div>
+            {issuedRows.filter((row) => row.status === "review_pending").slice(0, 3).map((row) => (
+              <div className="assessment-desk-row" key={row.issued_id}>
+                <div><strong>{row.candidate_name || row.candidate_email}</strong><span>{row.assessment_title}</span></div>
+                <span className="assessment-desk-state">Needs review</span>
+                <button type="button" className="candidate-review-action" aria-label={`Review ${row.candidate_name || row.candidate_email}`} onClick={() => { switchAssessmentTab("results"); setReviewIssueId(row.issued_id); }}>Review <ArrowRight size={14} aria-hidden="true" /></button>
+              </div>
+            ))}
+          </section>
 
           <div className="workspace-dashboard-grid">
             <section className="workspace-surface">
@@ -1003,12 +1078,14 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
                 {!exams.isError && filteredAssessments.map((assessment) => (
                   <article className="assessment-library-row" key={assessment.exam_id}>
                     <AssessmentToolIcon assessmentType={assessment.assessment_type} title={assessment.title} />
-                    <div><button type="button" className="assessment-title-button" onClick={() => setPreviewAssessmentId(assessment.exam_id)}>{assessment.title}</button><small>{assessment.assessment_type.replaceAll("_", " ")} | {assessment.duration_minutes} min</small></div>
+                    <div><button type="button" className="assessment-title-button" onClick={() => setPreviewAssessmentId(assessment.exam_id)}>{assessment.title}</button><small>{assessment.is_platform_default ? "Valases default" : "Custom assessment"} | {assessment.assessment_type.replaceAll("_", " ")} | {assessment.duration_minutes} min</small></div>
                     <span>{assessment.assessment_type === "mcq" ? `${assessment.question_count} questions` : `${assessment.checkpoint_count || 0} checkpoints`}</span>
                     <StatusBadge value={assessment.status} />
+                    <div>{assessment.assessment_type === "english_language" && <button type="button" className="secondary-btn" onClick={() => setTrialAssessment(assessment)}>Test as candidate</button>}
+                      {PRACTICAL_TOOL_TYPES.has(assessment.assessment_type) && <button type="button" className="secondary-btn" onClick={() => setToolTrialAssessment(assessment)}>Open tool</button>}
                     <button type="button" onClick={() => openInvitationFlow(assessment)}>
                       {assessment.status === "published" ? "Send invitation" : "Continue setup"}
-                    </button>
+                    </button></div>
                   </article>
                 ))}
                 {!exams.isLoading && !exams.isError && filteredAssessments.length === 0 && <EmptyState title="No matching assessments" detail="Clear the search or create a new assessment." action={<button type="button" onClick={startAssessmentBuilder}>Create assessment</button>} />}
@@ -1016,18 +1093,18 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
             </section>
 
             <section className="workspace-surface default-library">
-              <div className="workspace-surface-head"><div><h3>Create from a template</h3><p>Start with a validated assessment and tailor it to the role.</p></div></div>
+              <div className="workspace-surface-head"><div><h3>Valases assessment library</h3><p>Validated assessments included in every company workspace and ready to send.</p></div></div>
               <div className="default-template-bar">
-                <div><strong>Validated templates</strong><span>{filteredDefaultAssessments.length} available{toolFilter !== "all" ? ` for ${toolFilter.replaceAll("_", " ")}` : ""}</span></div>
+                <div><strong>Included assessments</strong><span>{filteredDefaultAssessments.length} available{toolFilter !== "all" ? ` for ${toolFilter.replaceAll("_", " ")}` : ""}</span></div>
                 <label>
-                  <span>Default assessment</span>
+                  <span>Valases default</span>
                   <select value={selectedDefaultId} onChange={(event) => { setSelectedDefaultId(event.target.value); setPreviewDefaultId(""); }}>
-                    <option value="">Select a template</option>
+                    <option value="">Select an assessment</option>
                     {filteredDefaultAssessments.map((template) => <option key={template.id} value={template.id}>{template.title}</option>)}
                   </select>
                 </label>
                 <button type="button" className="secondary-btn" disabled={!selectedDefaultTemplate} onClick={() => selectedDefaultTemplate && setPreviewDefaultId((current) => current === selectedDefaultTemplate.id ? null : selectedDefaultTemplate.id)}>Preview</button>
-                <button type="button" disabled={!selectedDefaultTemplate || installDefault.isPending} onClick={() => selectedDefaultTemplate && installDefault.mutate(selectedDefaultTemplate.id)}>{installDefault.isPending && installDefault.variables === selectedDefaultTemplate?.id ? <ButtonBusyLabel label="Adding..." /> : "Add"}</button>
+                <button type="button" disabled={!selectedInstalledDefault} onClick={() => selectedInstalledDefault && openInvitationFlow(selectedInstalledDefault)}>Send invitation</button>
               </div>
               {defaultAssessments.isLoading && <WorkspaceSkeleton rows={2} />}
               {selectedDefaultTemplate && <div className="default-template-summary">
@@ -1041,7 +1118,6 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
                 {defaultAssessmentDetail.data.questions ? <ol>{defaultAssessmentDetail.data.questions.map((question, questionIndex) => <li key={`${question.question_text}-${questionIndex}`}><strong>{question.question_text}</strong><span>{question.options.find((option) => option.is_correct)?.option_text || "No answer configured"}</span>{question.competency && <small>{question.competency}{question.difficulty ? ` | ${question.difficulty}` : ""}</small>}</li>)}</ol> : <div className="key-checkpoint-list">{(defaultAssessmentDetail.data.task?.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>Expected answer: {readableReviewValue(checkpoint.expected)}</small></div>)}</div>}
                 {defaultAssessmentDetail.data.task?.metadata?.sections && <div className="english-preview-sections"><strong>Candidate experience</strong>{defaultAssessmentDetail.data.task.metadata.sections.map((section) => <article key={section.id}><div><strong>{section.label}</strong><span>{section.minutes ? `${section.minutes} minutes` : "Response section"}</span></div><p>{section.description}</p>{section.passage && <blockquote>{section.passage}</blockquote>}{section.prompt && <div className="preview-prompt">{section.prompt}</div>}{section.audio?.map((clip) => <small key={clip.id}>Audio clip: {clip.label}</small>)}{section.questions && <small>{section.questions.length} comprehension questions</small>}</article>)}</div>}
               </div>}
-              {installDefault.isError && <div className="workspace-error">{apiErrorMessage(installDefault.error, "The default assessment could not be added.")}</div>}
             </section>
 
             {showBuilder && <section className="workspace-surface assessment-builder-v2">
@@ -1106,6 +1182,8 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
               {createAssessment.isError && <div className="workspace-error">{apiErrorMessage(createAssessment.error, "The assessment could not be created. Review the fields and try again.")}</div>}
             </section>}
           </div>
+          {trialAssessment && <Suspense fallback={<p>Opening assessment trial…</p>}><EnglishAssessmentTrial assessment={trialAssessment} onClose={() => setTrialAssessment(null)} /></Suspense>}
+          {toolTrialAssessment && <Suspense fallback={<p>Opening tool trial…</p>}><PracticalAssessmentTrial assessment={toolTrialAssessment} onClose={() => setToolTrialAssessment(null)} /></Suspense>}
           {previewAssessment && <div className="workspace-modal-backdrop" role="presentation" onMouseDown={() => setPreviewAssessmentId(null)}>
             <section className="assessment-preview-modal" role="dialog" aria-modal="true" aria-labelledby="assessment-preview-title" onMouseDown={(event) => event.stopPropagation()}>
               <div className="workspace-surface-head"><div><h3 id="assessment-preview-title">{previewAssessment.title}</h3><p>Recruiter-ready assessment summary</p></div><button type="button" className="workspace-icon-btn" aria-label="Close assessment preview" onClick={() => setPreviewAssessmentId(null)}><X size={17} /></button></div>
@@ -1116,8 +1194,9 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
                 <div><span>Pass score</span><strong>{previewAssessment.pass_score}%</strong></div>
               </div>
               {previewAssessment.task && <div className="assessment-preview-copy"><span>Candidate task</span><strong>{previewAssessment.task.title}</strong><p>{previewAssessment.task.description || previewAssessment.task.instructions}</p></div>}
+              {previewAssessment.assessment_type === "english_language" && <EnglishContentSummary metadata={previewAssessment.task?.metadata} />}
               <div className="assessment-preview-key"><div><strong>Scoring key</strong><span>Shown in plain language for recruiter review.</span></div>{previewAssessment.assessment_type === "mcq" ? <p>{previewAssessment.question_count} questions. Correct answers and marks are stored with each question.</p> : <div className="key-checkpoint-list">{(previewAssessment.task?.grading_config?.checkpoints || []).map((checkpoint) => <div key={checkpoint.id}><strong>{checkpoint.label}</strong><span>{checkpoint.weight}%</span><small>Expected answer: {readableReviewValue(checkpoint.expected)}</small></div>)}</div>}</div>
-              <div className="workspace-form-footer"><button type="button" className="secondary-btn" onClick={() => setPreviewAssessmentId(null)}>Close</button><button type="button" onClick={() => { setPreviewAssessmentId(null); openInvitationFlow(previewAssessment); }}>{previewAssessment.status === "published" ? "Send invitation" : "Continue setup"}</button></div>
+              <div className="workspace-form-footer">{previewAssessment.assessment_type === "english_language" && <button type="button" className="secondary-btn" onClick={() => { setPreviewAssessmentId(null); setTrialAssessment(previewAssessment); }}>Test as candidate</button>}{PRACTICAL_TOOL_TYPES.has(previewAssessment.assessment_type) && <button type="button" className="secondary-btn" onClick={() => { setPreviewAssessmentId(null); setToolTrialAssessment(previewAssessment); }}>Open tool</button>}<button type="button" className="secondary-btn" onClick={() => setPreviewAssessmentId(null)}>Close</button><button type="button" onClick={() => { setPreviewAssessmentId(null); openInvitationFlow(previewAssessment); }}>{previewAssessment.status === "published" ? "Send invitation" : "Continue setup"}</button></div>
             </section>
           </div>}
         </section>
@@ -1341,7 +1420,8 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
             <button type="button" className={`results-kpi-card${pendingReviewCount ? " attention" : ""}`} onClick={() => setResultStatusFilter("review")}><span>Pending review</span><strong>{pendingReviewCount}</strong><small>Show manual decisions first</small></button>
           </div>
 
-          <section className="workspace-surface results-performance-surface">
+          <details className="workspace-surface results-performance-surface">
+            <summary className="assessment-performance-toggle">Assessment performance <span>Compare completion and scores</span></summary>
             <div className="workspace-surface-head">
               <div><h3>Assessment performance</h3><p>Compare participation, completion, average score, and pass rate by assessment.</p></div>
             </div>
@@ -1357,7 +1437,7 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
                 </button>
               ))}
             </div> : <EmptyState title="No assessment results yet" detail="Performance metrics will appear after candidates begin completing issued assessments." />}
-          </section>
+          </details>
 
           <section className="workspace-surface review-queue-surface">
             <div className="workspace-surface-head results-list-head">
@@ -1398,25 +1478,33 @@ export function ProviderAssessments({ embedded = false, onOpenPipeline }: { embe
                 <div><span>Raw checkpoint score</span><strong>{review.data.result?.raw_provisional_score_pct == null ? "--" : `${Number(review.data.result.raw_provisional_score_pct).toFixed(1)}%`}</strong></div>
                 <div><span>Integrity adjustment</span><strong>{Number(review.data.result?.integrity_penalty_pct || 0) > 0 ? `-${Number(review.data.result.integrity_penalty_pct).toFixed(1)} pts` : "None"}</strong></div>
                 <div><span>Phone detections</span><strong>{Number(review.data.result?.proctoring?.mobile_phone_detection_count || 0)}</strong></div>
-                <div><span>Review status</span><strong>{review.data.status === "reviewed" ? "Finalized" : "Awaiting decision"}</strong></div>
+                <div><span>Review status</span><strong>{review.data.status === "reviewed" ? "Finalized" : review.data.status === "completed" ? "Auto-scored" : "Awaiting decision"}</strong></div>
                 <div><span>Time taken</span><strong>{formatDuration(review.data.submission?.time_taken_seconds)}</strong></div>
                 <div><span>Submitted</span><strong>{formatResultDate(review.data.submission?.submitted_at)}</strong></div>
               </div>
               <div className="review-panels">
-                <div className="review-panel checkpoint-review"><strong>Scoring checkpoints</strong><p className="review-panel-intro">Each row compares the candidate’s submitted result with the assessment key.</p>{Array.isArray(review.data.result?.detail?.checkpoints) ? review.data.result.detail.checkpoints.map((checkpoint: { id: string; label: string; matched: boolean; earned_weight: number; weight: number; actual: unknown; expected: unknown }) => <div className={`checkpoint-review-row ${checkpoint.matched ? "matched" : "missed"}`} key={checkpoint.id}><div><strong>{checkpoint.label}</strong><small>{checkpoint.matched ? "Matches the key" : "Needs recruiter review"}</small></div><span>{readableReviewValue(checkpoint.earned_weight)} / {readableReviewValue(checkpoint.weight)} pts</span><small><b>Submitted:</b> {readableReviewValue(checkpoint.actual)} <b>Expected:</b> {readableReviewValue(checkpoint.expected)}</small></div>) : <div className="review-readable-summary">{Object.entries((review.data.result?.detail || {}) as Record<string, unknown>).map(([key, value]) => <div key={key}><span>{key.replaceAll("_", " ")}</span><strong>{readableReviewValue(value)}</strong></div>)}</div>}</div>
-                <div className="review-panel"><strong>Answer key</strong><p className="review-panel-intro">Recruiter reference for the expected scoring points.</p>{Array.isArray(review.data.task?.grading_config?.checkpoints) ? <div className="review-readable-summary">{review.data.task.grading_config.checkpoints.map((checkpoint: { id: string; label: string; expected: unknown; weight: number }) => <div key={checkpoint.id}><span>{checkpoint.label}</span><strong>{readableReviewValue(checkpoint.expected)} · {readableReviewValue(checkpoint.weight)} pts</strong></div>)}</div> : <p className="review-panel-intro">This assessment uses its configured scoring guide; no separate checkpoint key is available.</p>}</div>
-                {review.data.assessment_type === "english_language" ? <div className="review-panel language-review-panel"><strong>Language responses</strong><p className="review-panel-intro">Review the candidate’s written work and objective selections against the scoring guide.</p><div className="language-review-group"><span>Writing</span>{Object.entries((review.data.submission?.submitted_data?.writing_responses || {}) as Record<string, string>).map(([itemId, response]) => <article key={itemId}><strong>{englishResponseLabel(review.data.task, itemId)}</strong><p>{response || "No response"}</p></article>)}</div><div className="language-review-group"><span>Objective answers</span>{Object.entries((review.data.submission?.submitted_data?.objective_answers || {}) as Record<string, string>).map(([itemId, response]) => <article key={itemId}><strong>{englishResponseLabel(review.data.task, itemId)}</strong><p>{response || "No answer"}</p></article>)}</div></div> : <div className="review-panel"><strong>Candidate submission</strong><p className="review-panel-intro">Submitted values are formatted for quick recruiter review.</p><div className="review-readable-summary">{Object.entries((review.data.submission?.submitted_data || {}) as Record<string, unknown>).map(([key, value]) => <div key={key}><span>{key.replaceAll("_", " ")}</span><strong>{readableReviewValue(value)}</strong></div>)}</div></div>}
+                {review.data.assessment_type === "mcq" ? <div className="review-panel checkpoint-review"><strong>Questions and answer key</strong><p className="review-panel-intro">Candidate selections are shown beside the correct answer. Clean attempts are scored automatically; flagged attempts remain in the review queue.</p>{Array.isArray(review.data.mcq_responses) && review.data.mcq_responses.length ? review.data.mcq_responses.map((response: { position: number; question_id: number; question_text: string; selected_options: string[]; correct_options: string[]; is_correct: boolean; marks: number }) => <div className={`checkpoint-review-row ${response.is_correct ? "matched" : "missed"}`} key={response.question_id}><div><strong>{response.position}. {response.question_text}</strong><small>{response.is_correct ? "Correct" : "Incorrect"} · {readableReviewValue(response.marks)} pts</small></div><span>{response.is_correct ? "Matched" : "Review answer"}</span><small><b>Candidate:</b> {response.selected_options.length ? response.selected_options.join(", ") : "No answer"} <b>Key:</b> {response.correct_options.join(", ")}</small></div>) : <p className="review-panel-intro">No MCQ response data is available.</p>}</div> : review.data.assessment_type === "english_language" ? null : <><div className="review-panel checkpoint-review"><strong>Scoring checkpoints</strong><p className="review-panel-intro">Each row compares the candidate’s submitted result with the assessment key.</p>{Array.isArray(review.data.result?.detail?.checkpoints) ? review.data.result.detail.checkpoints.map((checkpoint: { id: string; label: string; matched: boolean; earned_weight: number; weight: number; actual: unknown; expected: unknown }) => <div className={`checkpoint-review-row ${checkpoint.matched ? "matched" : "missed"}`} key={checkpoint.id}><div><strong>{checkpoint.label}</strong><small>{checkpoint.matched ? "Matches the key" : "Needs recruiter review"}</small></div><span>{readableReviewValue(checkpoint.earned_weight)} / {readableReviewValue(checkpoint.weight)} pts</span><small><b>Submitted:</b> {readableReviewValue(checkpoint.actual)} <b>Expected:</b> {readableReviewValue(checkpoint.expected)}</small></div>) : <div className="review-readable-summary">{Object.entries((review.data.result?.detail || {}) as Record<string, unknown>).map(([key, value]) => <div key={key}><span>{key.replaceAll("_", " ")}</span><strong>{readableReviewValue(value)}</strong></div>)}</div>}</div><div className="review-panel"><strong>Answer key</strong><p className="review-panel-intro">Recruiter reference for the expected scoring points.</p>{Array.isArray(review.data.task?.grading_config?.checkpoints) ? <div className="review-readable-summary">{review.data.task.grading_config.checkpoints.map((checkpoint: { id: string; label: string; expected: unknown; weight: number }) => <div key={checkpoint.id}><span>{checkpoint.label}</span><strong>{readableReviewValue(checkpoint.expected)} · {readableReviewValue(checkpoint.weight)} pts</strong></div>)}</div> : <p className="review-panel-intro">This assessment uses its configured scoring guide; no separate checkpoint key is available.</p>}</div></>}
+                {review.data.assessment_type === "english_language" ? <><div className="review-panel language-review-panel"><strong>Written responses</strong><p className="review-panel-intro">Evaluate task fulfilment, organisation, vocabulary and grammatical control.</p><div className="language-review-group">{Object.entries((review.data.submission?.submitted_data?.writing_responses || {}) as Record<string, string>).map(([itemId, response]) => <article key={itemId}><strong>{englishResponseLabel(review.data.task, itemId)}</strong><p>{response || "No response"}</p></article>)}</div></div><div className="review-panel language-objective-review"><strong>Listening and reading key</strong><p className="review-panel-intro">Objective responses are scored automatically and remain visible for audit.</p>{(review.data.language_objective_responses || []).map((response: any) => <div className={`language-objective-row ${response.is_correct ? "matched" : "missed"}`} key={response.item_id}><div><strong>{response.prompt}</strong><small>{response.skill} · {response.difficulty || "Core"}</small></div><span>{response.is_correct ? "Correct" : "Incorrect"}</span><small><b>Candidate:</b> {response.selected_answer || "No answer"} <b>Key:</b> {response.correct_answer}</small></div>)}</div></> : review.data.assessment_type !== "mcq" ? <div className="review-panel"><strong>Candidate submission</strong><p className="review-panel-intro">Submitted values are formatted for quick recruiter review.</p><div className="review-readable-summary">{Object.entries((review.data.submission?.submitted_data || {}) as Record<string, unknown>).map(([key, value]) => <div key={key}><span>{key.replaceAll("_", " ")}</span><strong>{readableReviewValue(value)}</strong></div>)}</div></div> : null}
                 {review.data.assessment_type === "english_language" && <div className="review-panel language-audio-review"><strong>Speaking responses</strong><p className="review-panel-intro">Listen to each recorded response while applying the speaking rubric.</p>{Array.isArray(review.data.language_responses) && review.data.language_responses.length ? review.data.language_responses.map((recording: { item_id: string; url: string; duration_seconds: number }) => <article key={recording.item_id}><div><strong>{englishResponseLabel(review.data.task, recording.item_id)}</strong><small>{Math.round(Number(recording.duration_seconds || 0))} seconds</small></div><audio controls preload="metadata" src={recording.url} /></article>) : <p className="review-panel-intro">No speaking recordings were submitted.</p>}</div>}
+                {review.data.assessment_type === "english_language" && <div className="review-panel language-rubric-panel"><strong>Analytic language rubric</strong><p className="review-panel-intro">Rate every criterion from 0 to 5. Writing and speaking skill scores are calculated from these ratings.</p>{(["writing", "speaking"] as const).map((skill) => <section key={skill}><h4>{skill}</h4>{LANGUAGE_RUBRIC_FIELDS.filter((field) => field.skill === skill).map((field) => <label key={field.key}><span>{field.label}</span><select value={languageRatings[field.key] ?? -1} onChange={(event) => setLanguageRatings((current) => ({ ...current, [field.key]: Number(event.target.value) }))}><option value={-1}>Select rating</option>{LANGUAGE_RATING_LABELS.map((label, rating) => <option value={rating} key={rating}>{rating} · {label}</option>)}</select></label>)}</section>)}</div>}
                 <ProctorEventReviewControls issueId={reviewIssueId} events={review.data.submission?.proctoring_events} labels={review.data.proctor_review_labels} onSaved={() => qc.invalidateQueries({ queryKey: ["issued-review", reviewIssueId] })} />
                 <div className="review-panel review-clips-panel"><strong>Clips for review</strong><p className="review-panel-intro">Only cropped clips around flagged events are retained. Full camera and screen recordings are discarded.</p>{Array.isArray(review.data.review_clips) && review.data.review_clips.length ? <div className="review-clips-grid">{review.data.review_clips.map((clip: { id: number; evidence_type: string; event_type: string; url: string; duration_seconds: number }) => <figure key={clip.id}><video controls preload="metadata" src={clip.url} /><figcaption><strong>{clip.evidence_type === "screen" ? "Screen" : "Camera"}</strong><span>{clip.event_type.replaceAll("_", " ")} · {Number(clip.duration_seconds).toFixed(1)}s</span></figcaption></figure>)}</div> : <p className="review-panel-intro">No flagged clips were retained.</p>}</div>
               </div>
-              <div className="review-decision">
+              {review.data.status === "completed" ? <div className="review-decision"><div><strong>Automatically completed</strong><span>This clean MCQ attempt was scored against the answer key and did not generate an integrity flag. No recruiter action is required.</span></div></div> : review.data.assessment_type === "english_language" ? <div className="review-decision language-score-decision">
+                <div><strong>Corporate language profile</strong><span>Objective skills are scored from the key. Productive skills use the completed analytic rubric.</span></div>
+                <div className="language-skill-score-grid">{Object.entries(languageScoreProfile.scores).map(([skill, score]) => <article key={skill}><span>{skill}</span><strong>{Number(score).toFixed(0)}</strong><small>/ 100</small></article>)}</div>
+                <div className="language-overall-score"><div><span>Weighted overall</span><strong>{languageScoreProfile.overall.toFixed(1)}%</strong></div><div><span>Estimated level</span><strong>{languageScoreProfile.cefr}</strong></div><small>CEFR-informed screening estimate · Minimum 50 required in every skill</small></div>
+                <label className="field-stack review-notes"><span>Decision rationale</span><textarea rows={3} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} placeholder="Record the language evidence and hiring relevance" /><small>Required for the audit history. Minimum 10 characters.</small></label>
+                <button type="button" onClick={() => finalizeReview.mutate()} disabled={finalizeReview.isPending || reviewNotes.trim().length < 10 || !languageScoreProfile.ratingsComplete}>{finalizeReview.isPending ? "Finalizing..." : review.data.status === "reviewed" ? "Update language profile" : "Finalize language profile"}</button>
+                {!languageScoreProfile.ratingsComplete && <small className="language-rating-reminder">Complete all eight rubric ratings to finalize.</small>}
+                {finalizeReview.isError && <div className="workspace-error">{apiErrorMessage(finalizeReview.error, "The language profile could not be finalized.")}</div>}
+              </div> : <div className="review-decision">
                 <div><strong>Recruiter decision</strong><span>Confirm or adjust the provisional score. Candidates do not receive this result from the assessment session.</span></div>
                 <label className="field-stack"><span>Final score</span><div className="input-with-suffix"><input type="number" min="0" max="100" value={reviewScore} onChange={(event) => setReviewScore(Number(event.target.value))} /><span>%</span></div></label>
                 <label className="field-stack review-notes"><span>Decision rationale</span><textarea rows={3} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} placeholder="Record the evidence and reason for this decision" /><small>Required for the audit history. Minimum 10 characters.</small></label>
                 <button type="button" onClick={() => finalizeReview.mutate()} disabled={finalizeReview.isPending || reviewNotes.trim().length < 10}>{finalizeReview.isPending ? "Finalizing..." : review.data.status === "reviewed" ? "Update final review" : "Finalize review"}</button>
                 {finalizeReview.isError && <div className="workspace-error">{apiErrorMessage(finalizeReview.error, "The review could not be finalized.")}</div>}
-              </div>
+              </div>}
             </section>
             ) : <section className="result-review-drawer workspace-error" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>The candidate result could not be loaded.<button type="button" onClick={() => setReviewIssueId(null)}>Close</button></section>}
             </div>

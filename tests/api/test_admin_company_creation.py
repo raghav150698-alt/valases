@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 from pydantic import ValidationError
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -31,6 +31,7 @@ from app.models.entities import (
     OrganizationAuditEvent,
     OrganizationMembership,
     ProviderBillingAccount,
+    ProviderAssessmentTemplateInstall,
     ProviderProfile,
     User,
     UserApproval,
@@ -152,6 +153,15 @@ class AdminCompanyCreationTest(unittest.TestCase):
         )
         self.assertIsNotNone(organization)
         self.assertEqual(membership.role, "owner")
+        default_install_count = int(
+            self.db.scalar(
+                select(func.count(ProviderAssessmentTemplateInstall.id)).where(
+                    ProviderAssessmentTemplateInstall.provider_id == provider.id,
+                ),
+            )
+            or 0
+        )
+        self.assertGreater(default_install_count, 0)
 
         with self.assertRaises(HTTPException) as invalid_hold:
             admin_workspace_update_governance(
