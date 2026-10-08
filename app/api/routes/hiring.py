@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import secrets
+import smtplib
 from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Literal
@@ -3502,6 +3503,7 @@ def configure_email_channel(
     channel.sender = payload.sender.strip().lower()
     channel.sender_name = payload.sender_name.strip() or organization.name
     channel.reply_to = payload.reply_to.strip().lower()
+    channel.last_tested_at = None  # New settings need a new successful delivery test.
     if payload.smtp_password is not None and payload.smtp_password.strip():
         channel.smtp_password_encrypted = _integration_fernet().encrypt(payload.smtp_password.strip().encode("utf-8")).decode("ascii")
     if not channel.smtp_host or not channel.smtp_username or not channel.smtp_password_encrypted:
@@ -3523,15 +3525,20 @@ def send_email_test(
     organization, membership = _organization_context(db, current_user, organization_id)
     _require_permission(current_user, membership, "integrations.manage")
     channel_config = _email_channel_smtp_config(db, organization.id, payload.purpose)
-    result = send_email(
-        current_user.email,
-        f"Valases email delivery test | {_EMAIL_PURPOSES[payload.purpose]}",
-        f"This is a delivery test from the {organization.name} hiring workspace for {_EMAIL_PURPOSES[payload.purpose].lower()}.",
-        reply_to=current_user.email,
-        smtp_config=channel_config,
-    )
+    if not channel_config:
+        raise HTTPException(status_code=422, detail="Save valid organization SMTP settings for this email purpose before testing")
+    try:
+        result = send_email(
+            current_user.email,
+            f"Valases email delivery test | {_EMAIL_PURPOSES[payload.purpose]}",
+            f"This is a delivery test from the {organization.name} hiring workspace for {_EMAIL_PURPOSES[payload.purpose].lower()}.",
+            reply_to=current_user.email,
+            smtp_config=channel_config,
+        )
+    except (OSError, smtplib.SMTPException):
+        raise HTTPException(status_code=502, detail="The SMTP test failed. Check the server, port, credentials and authorized sender, then retry") from None
     if not result.get("sent"):
-        raise HTTPException(status_code=502, detail=str(result.get("reason") or "The email provider did not accept the test message")[:300])
+        raise HTTPException(status_code=502, detail="The email provider did not accept the test message. Check the organization SMTP settings")
     channel = db.scalar(select(HiringEmailChannel).where(HiringEmailChannel.organization_id == organization.id, HiringEmailChannel.purpose == payload.purpose))
     if channel:
         channel.last_tested_at = datetime.now(timezone.utc)
