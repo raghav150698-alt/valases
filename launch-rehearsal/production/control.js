@@ -1,0 +1,15 @@
+const $=id=>document.getElementById(id);
+const config=await(await fetch('/__launch/config.json')).json();
+const storageKey='valases-launch-control-session';
+let session=null,launched=false,busy=false;
+try{session=JSON.parse(sessionStorage.getItem(storageKey)||sessionStorage.getItem(`sb-${new URL(config.supabaseUrl).hostname.split('.')[0]}-auth-token`)||'null');}catch{}
+function save(){try{if(session)sessionStorage.setItem(storageKey,JSON.stringify(session));else sessionStorage.removeItem(storageKey);}catch{}}
+async function authRequest(route,body){const response=await fetch(config.supabaseUrl+'/auth/v1/'+route,{method:body?'POST':'GET',headers:{apikey:config.publishableKey,'Content-Type':'application/json',...(session?.access_token?{Authorization:'Bearer '+session.access_token}:{})},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();if(!response.ok)throw Error(data.msg||data.error_description||'Sign-in failed');return data;}
+async function verify(){
+ if(!session)return false;
+ try{if(session.expires_at&&session.expires_at<Date.now()/1000+60){session=await authRequest('token?grant_type=refresh_token',{refresh_token:session.refresh_token});save();}const user=await authRequest('user');if(user.id!==config.ownerId)throw Error('Sign in with the internal launch owner account.');$('login').hidden=true;$('identity').textContent=user.email;$('launch').disabled=launched||busy;return true;}catch(error){session=null;save();$('login').hidden=false;$('identity').textContent='Sign-in required';$('launch').disabled=true;$('message').textContent=error.message;return false;}
+}
+async function refresh(){try{const response=await fetch('/__launch/state',{cache:'no-store'});if(!response.ok)throw Error('Could not check launch state');const state=await response.json();launched=!!state.launchedAt;$('status').textContent=launched?'Launched':'Waiting';$('launch').disabled=launched||busy||!session;if(launched){$('launch').textContent='Launched';$('message').textContent='The website and Tests are open. The ceremony will not run again.';}}catch(error){$('launch').disabled=true;$('message').textContent=error.message;}}
+$('login').onsubmit=async event=>{event.preventDefault();$('message').textContent='Signing in…';try{session=await authRequest('token?grant_type=password',{email:$('email').value.trim(),password:$('password').value});$('password').value='';save();await verify();await refresh();}catch(error){$('password').value='';$('message').textContent=error.message;}};
+$('launch').onclick=async()=>{if(busy||launched||!await verify())return;busy=true;$('launch').disabled=true;$('message').textContent='Launching…';try{const response=await fetch(config.supabaseUrl+'/rest/v1/rpc/launch_valases_once',{method:'POST',headers:{apikey:config.publishableKey,Authorization:'Bearer '+session.access_token,'Content-Type':'application/json'},body:'{}'});if(!response.ok)throw Error('Launch was not authorized or could not complete.');await refresh();}catch(error){$('message').textContent=error.message;}finally{busy=false;await refresh();}};
+await verify();await refresh();setInterval(refresh,2500);
